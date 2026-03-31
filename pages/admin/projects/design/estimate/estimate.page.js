@@ -10,10 +10,10 @@ class EstimatePage extends BasePage {
     ).first();
     this.startFromScratchButton = page.getByText(/Start from scratch/i).first();
     this.proceedButton = page.locator('button:has-text("Proceed"), [role="button"]:has-text("Proceed")').first();
-    this.estimateTitleInput = page.getByLabel(/Estimate title/i);
-    this.createdOnInput = page.getByLabel(/Created on/i);
-    this.validTillInput = page.getByLabel(/Valid till/i);
-    this.addSectionButton = page.getByRole('button', { name: 'Add Section' });
+    this.estimateTitleInput = page.locator('label:has-text("Estimate title")').locator('xpath=following::input[1]').first();
+    this.createdOnInput = page.locator('label:has-text("Created on")').locator('xpath=following::input[1]').first();
+    this.validTillInput = page.locator('label:has-text("Valid till")').locator('xpath=following::input[1]').first();
+    this.addSectionButton = page.getByRole('button', { name: 'Add Section', exact: true });
     this.sectionNameInput = page.locator('input[placeholder*="Section Name"], input[name*="section"]').first();
     this.addManuallyButton = page.getByRole('button', { name: 'Add manually' });
     this.itemNameInput = page.locator('input[placeholder*="Item Name"], input[name*="itemName"]').first();
@@ -93,7 +93,7 @@ class EstimatePage extends BasePage {
     await this.addSectionButton.click();
     await expect(this.sectionNameInput).toBeVisible({ timeout: this.defaultTimeout });
     await this.sectionNameInput.fill(name);
-    await this.page.getByRole('button', { name: 'Add' }).click();
+    await this.page.getByRole('button', { name: 'Add', exact: true }).click();
     await this.waitForNetworkIdle();
   }
 
