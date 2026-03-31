@@ -1,7 +1,7 @@
 // utils/testData.js
 const testData = {
   admin: {
-    validUser:   { email: 'testintoaec@gmail.com', password: 'Simple@10' },
+    validUser:   { email: 'testintoaec@gmail.com', password: 'Courage@10' },
     invalidUser: { email: 'wrong@gmail.com',       password: 'wrongpass' }
   },
   vendor: {

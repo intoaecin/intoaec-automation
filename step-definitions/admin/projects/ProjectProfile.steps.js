@@ -1,24 +1,24 @@
 // step-definitions/admin/projects/ProjectProfile.steps.js
-const { When, And } = require('@cucumber/cucumber');
-const ProjectNavigationPage = require('../../../../pages/admin/projects/ProjectNavigationPage');
-const ProjectProfilePage = require('../../../../pages/admin/projects/ProjectProfilePage');
+const { When } = require('@cucumber/cucumber');
+const ProjectNavigationPage = require('../../../pages/admin/projects/ProjectNavigationPage');
+const ProjectProfilePage = require('../../../pages/admin/projects/ProjectProfilePage');
 
-When('I navigate to the Projects page', async function () {
+When('I navigate to the Projects page', { timeout: 120000 }, async function () {
   const projectNavigationPage = new ProjectNavigationPage(this.page);
-  await projectNavigationPage.clickProjects();
+  await projectNavigationPage.navigateToProjects();
 });
 
-And('I click on the first project in the list', async function () {
+When('I click on the first project in the list', { timeout: 120000 }, async function () {
   const projectNavigationPage = new ProjectNavigationPage(this.page);
-  await projectNavigationPage.clickFirst.click();
+  await projectNavigationPage.clickFirstProject();
 });
 
-And('I select the {string} heading', async function (headingName) {
+When('I select the {string} heading', { timeout: 120000 }, async function (headingName) {
   const projectProfilePage = new ProjectProfilePage(this.page);
   await projectProfilePage.selectHeading(headingName);
 });
 
-And('I click the {string} module card', async function (moduleName) {
+When('I click the {string} module card', { timeout: 120000 }, async function (moduleName) {
   const projectProfilePage = new ProjectProfilePage(this.page);
   await projectProfilePage.clickModuleCard(moduleName);
 });
