@@ -10,9 +10,9 @@ class EstimatePage extends BasePage {
     ).first();
     this.startFromScratchButton = page.getByText(/Start from scratch/i).first();
     this.proceedButton = page.locator('button:has-text("Proceed"), [role="button"]:has-text("Proceed")').first();
-    this.estimateTitleInput = page.locator('input[placeholder*="Estimate Title"]').first();
-    this.createdOnInput = page.locator('input[placeholder*="Created On"], input[name*="created"]').first();
-    this.validTillInput = page.locator('input[placeholder*="Valid Till"], input[name*="valid"]').first();
+    this.estimateTitleInput = page.getByLabel(/Estimate title/i);
+    this.createdOnInput = page.getByLabel(/Created on/i);
+    this.validTillInput = page.getByLabel(/Valid till/i);
     this.addSectionButton = page.getByRole('button', { name: 'Add Section' });
     this.sectionNameInput = page.locator('input[placeholder*="Section Name"], input[name*="section"]').first();
     this.addManuallyButton = page.getByRole('button', { name: 'Add manually' });
