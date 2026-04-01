@@ -16,7 +16,7 @@ Feature: Estimate create and email workflow
   Scenario: Create estimate and send email successfully
     When I click Create Estimate
     And I start estimate from scratch and proceed
-    And I fill estimate mandatory details with title "AAA"
+    And I fill estimate title with "AAA"
     And I add estimate section "Default Section"
     And I add manual estimate item with name "name"
     And I add another manual estimate item with name "name 2"

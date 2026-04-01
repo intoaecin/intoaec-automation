@@ -13,9 +13,8 @@ class EstimatePage extends BasePage {
     this.estimateTitleInput = page.locator('label:has-text("Estimate title")').locator('xpath=following::input[1]').first();
     this.createdOnInput = page.locator('label:has-text("Created on")').locator('xpath=following::input[1]').first();
     this.validTillInput = page.locator('label:has-text("Valid till")').locator('xpath=following::input[1]').first();
-    this.addSectionButton = page.getByRole('button', { name: 'Add Section', exact: true });
-    this.sectionNameInput = page.locator('input[placeholder*="Section Name"], input[name*="section"]').first();
-    this.addManuallyButton = page.getByRole('button', { name: 'Add manually' });
+    this.addAnotherManualRowLink = page.locator('.pr-1.pointer.fw-600');
+    this.addManuallyButton = page.getByText(/add\s+manually/i, { exact: false }).first();
     this.itemNameInput = page.locator('input[placeholder*="Item Name"], input[name*="itemName"]').first();
     this.descriptionInput = page.locator('textarea[placeholder*="Description"], textarea[name*="description"], input[placeholder*="Description"]').first();
     this.qtyInput = page.locator('input[placeholder="Qty"], input[name*="qty"]').first();
@@ -64,6 +63,7 @@ class EstimatePage extends BasePage {
     await expect(this.proceedButton).toBeEnabled({ timeout: this.defaultTimeout });
     await this.proceedButton.click();
     await this.waitForNetworkIdle();
+    await this.page.waitForTimeout(3000);
   }
 
   formatDate(offsetDays = 0) {
@@ -73,6 +73,11 @@ class EstimatePage extends BasePage {
     const mm = String(date.getMonth() + 1).padStart(2, '0');
     const dd = String(date.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
+  }
+
+  async fillEstimateTitleOnly(title) {
+    await expect(this.estimateTitleInput).toBeVisible({ timeout: this.defaultTimeout });
+    await this.estimateTitleInput.fill(title);
   }
 
   async fillMandatoryDetails({ title, createdOffset = 0, validOffset = 7 }) {
@@ -88,36 +93,87 @@ class EstimatePage extends BasePage {
     await this.validTillInput.fill(this.formatDate(validOffset));
   }
 
-  async addSection(name) {
-    await expect(this.addSectionButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.addSectionButton.click();
-    await expect(this.sectionNameInput).toBeVisible({ timeout: this.defaultTimeout });
-    await this.sectionNameInput.fill(name);
-    await this.page.getByRole('button', { name: 'Add', exact: true }).click();
-    await this.waitForNetworkIdle();
+  sectionNameFieldLocator() {
+    return this.page
+      .getByPlaceholder(/add section name/i)
+      .or(this.page.locator('input[placeholder*="Add section name"]'))
+      .or(this.page.locator('input[placeholder*="add section name"]'))
+      .or(this.page.locator('input[placeholder*="Section Name"]'))
+      .or(this.page.locator('textarea[placeholder*="section"], textarea[placeholder*="Section"]'))
+      .or(this.page.getByRole('textbox', { name: /add section name|section name/i }))
+      .or(this.page.locator('#estimate-sectionName-0, #estimate-sectionName-0-0, input[id*="sectionName"]'))
+      .first();
   }
 
-  async addManualItem(item) {
-    await expect(this.addManuallyButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.addManuallyButton.click();
+  async addSection(name) {
+    await this.page.locator('main, [role="main"], .main-content, .page-content').first().scrollIntoViewIfNeeded().catch(() => {});
+    await this.page.evaluate(() => {
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
+    });
+    await this.page.waitForTimeout(500);
 
-    if (item.name !== undefined) {
-      await expect(this.itemNameInput).toBeVisible({ timeout: this.defaultTimeout });
-      await this.itemNameInput.fill(item.name);
+    let sectionInput = this.sectionNameFieldLocator();
+    if (!(await sectionInput.isVisible({ timeout: 10000 }).catch(() => false))) {
+      const addSectionCtl = this.page
+        .locator('button, a, [role="button"], span.pointer')
+        .filter({ hasText: /Add\s+Section/i })
+        .first();
+      if (await addSectionCtl.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await addSectionCtl.scrollIntoViewIfNeeded();
+        await addSectionCtl.click();
+        await this.page.waitForTimeout(500);
+      }
+      sectionInput = this.sectionNameFieldLocator();
     }
 
-    await expect(this.descriptionInput).toBeVisible({ timeout: this.defaultTimeout });
-    await this.descriptionInput.fill(item.description || 'test description');
-    await expect(this.qtyInput).toBeVisible({ timeout: this.defaultTimeout });
-    await this.qtyInput.fill(String(item.qty || 1));
-    await expect(this.unitInput).toBeVisible({ timeout: this.defaultTimeout });
-    await this.unitInput.fill(item.unit || 'Nos');
-    await expect(this.rateInput).toBeVisible({ timeout: this.defaultTimeout });
-    await this.rateInput.fill(String(item.rate || 100));
-    await expect(this.profitInput).toBeVisible({ timeout: this.defaultTimeout });
-    await this.profitInput.fill(String(item.profit || 10));
-    await expect(this.addItemButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.addItemButton.click();
+    await sectionInput.scrollIntoViewIfNeeded();
+    await expect(sectionInput).toBeVisible({ timeout: this.defaultTimeout });
+    await sectionInput.click();
+    await sectionInput.fill(name);
+    await this.page.keyboard.press('Tab').catch(() => {});
+    await this.page.waitForTimeout(600);
+  }
+
+  itemNameFieldForRow(manualIndex) {
+    return this.page.locator(`#estimate-itemName-0-${manualIndex}`);
+  }
+
+  rowForManualIndex(manualIndex) {
+    return this.itemNameFieldForRow(manualIndex).locator('xpath=ancestor::tr[1]');
+  }
+
+  async addManualItem(item, { manualIndex = 0 } = {}) {
+    if (manualIndex > 0) {
+      await expect(this.addAnotherManualRowLink.first()).toBeVisible({ timeout: this.defaultTimeout });
+      await this.addAnotherManualRowLink.first().click();
+      await this.page.waitForTimeout(500);
+    }
+
+    const itemNameField = this.itemNameFieldForRow(manualIndex);
+    await expect(itemNameField).toBeVisible({ timeout: this.defaultTimeout });
+    await itemNameField.click();
+
+    if (item.name !== undefined) {
+      await itemNameField.fill(item.name);
+    }
+
+    const row = this.rowForManualIndex(manualIndex);
+    const descriptionInput = row.locator('textarea[placeholder*="Description"], input[placeholder*="Description"]').first();
+    const qtyInput = row.locator('input[placeholder="Qty"], input[placeholder*="Qty"], input[name*="qty"]').first();
+    const unitInput = row.locator('input[placeholder*="Unit"], input[name*="unit"]').first();
+    const rateInput = row.locator('input[placeholder*="Rate"], input[name*="rate"]').first();
+    const profitInput = row.locator('input[placeholder*="Profit"], input[name*="profit"]').first();
+
+    await expect(descriptionInput).toBeVisible({ timeout: this.defaultTimeout });
+    await descriptionInput.fill(item.description || 'test description');
+    await expect(qtyInput).toBeVisible({ timeout: this.defaultTimeout });
+    await qtyInput.fill(String(item.qty || 1));
+    await expect(unitInput).toBeVisible({ timeout: this.defaultTimeout });
+    await unitInput.fill(item.unit || 'Nos');
+    await expect(rateInput).toBeVisible({ timeout: this.defaultTimeout });
+    await rateInput.fill(String(item.rate || 100));
+    await expect(profitInput).toBeVisible({ timeout: this.defaultTimeout });
+    await profitInput.fill(String(item.profit || 10));
     await this.waitForNetworkIdle();
   }
 
@@ -252,14 +308,17 @@ class EstimatePage extends BasePage {
 
   async addManualItems(count) {
     for (let i = 0; i < count; i += 1) {
-      await this.addManualItem({
-        name: `bulk-item-${i + 1}`,
-        description: 'test description',
-        qty: 1,
-        unit: 'Nos',
-        rate: 100,
-        profit: 10
-      });
+      await this.addManualItem(
+        {
+          name: `bulk-item-${i + 1}`,
+          description: 'test description',
+          qty: 1,
+          unit: 'Nos',
+          rate: 100,
+          profit: 10
+        },
+        { manualIndex: i }
+      );
     }
   }
 
