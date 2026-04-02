@@ -153,6 +153,11 @@ When('I click estimate action compose email and send', { timeout: 120000 }, asyn
   await estimatePage.composeAndSendEmail();
 });
 
+When('I click estimate action compose email', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.openComposeEmail();
+});
+
 When('I attempt to send estimate email', { timeout: 120000 }, async function () {
   const estimatePage = getEstimatePage(this);
   await estimatePage.attemptSendEstimateEmail();
