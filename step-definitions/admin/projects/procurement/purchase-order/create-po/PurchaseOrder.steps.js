@@ -1,5 +1,4 @@
 const { When, Then } = require('@cucumber/cucumber');
-const { expect } = require('@playwright/test');
 const PurchaseOrderCreatePage = require('../../../../../../pages/admin/projects/procurement/purchase-order/create-po/purchaseorder.page');
 
 function getPoCreatePage(world) {
@@ -86,5 +85,59 @@ Then(
   async function () {
     const po = getPoCreatePage(this);
     await po.expectPoCreatedAndSentToast();
+  }
+);
+
+When(
+  'I wait for the purchase order list after create and send redirect',
+  { timeout: 180000 },
+  async function () {
+    const po = getPoCreatePage(this);
+    await po.waitForPurchaseOrderListAfterCreateRedirect();
+  }
+);
+
+When(
+  'I open the three dot menu on the first purchase order card',
+  { timeout: 120000 },
+  async function () {
+    const po = getPoCreatePage(this);
+    await po.openThreeDotMenuOnFirstPurchaseOrderCard();
+  }
+);
+
+When(
+  'I click preview in the purchase order card menu',
+  { timeout: 120000 },
+  async function () {
+    const po = getPoCreatePage(this);
+    await po.clickPreviewInPurchaseOrderCardMenu();
+  }
+);
+
+Then(
+  'I should see the purchase order full screen preview',
+  { timeout: 120000 },
+  async function () {
+    const po = getPoCreatePage(this);
+    await po.expectPurchaseOrderFullScreenPreviewVisible();
+  }
+);
+
+When(
+  'I close the purchase order full screen preview',
+  { timeout: 120000 },
+  async function () {
+    const po = getPoCreatePage(this);
+    await po.closePurchaseOrderFullScreenPreview();
+  }
+);
+
+Then(
+  'I should be on the purchase order list with create action visible',
+  { timeout: 120000 },
+  async function () {
+    const po = getPoCreatePage(this);
+    await po.expectPurchaseOrderListWithCreateActionVisible();
   }
 );

@@ -1,5 +1,3 @@
-const fs = require('fs');
-const path = require('path');
 const BasePage = require('../../../../../BasePage');
 const { expect } = require('@playwright/test');
 const ProjectNavigationPage = require('../../../ProjectNavigationPage');
@@ -253,6 +251,20 @@ class PurchaseOrderCreatePage extends BasePage {
     await this.waitForNetworkSettled();
   }
 
+  /**
+   * After create+send, app redirects to client profile PO tab. Wait for list and at least one card.
+   */
+  async waitForPurchaseOrderListAfterCreateRedirect() {
+    await this.page.waitForURL(/client\/profile/, {
+      timeout: this.defaultTimeout,
+    });
+    await this.waitForNetworkSettled();
+    await this.ensurePurchaseOrderListReady();
+    await expect(this.page.getByText(/po no/i).first()).toBeVisible({
+      timeout: 90000,
+    });
+  }
+
   async expectPoCreatedAndSentToast() {
     const messageRe =
       /PO created[\s&.,-]*sent[\s\w&.,-]*successfully/i;
@@ -263,35 +275,55 @@ class PurchaseOrderCreatePage extends BasePage {
       .first();
 
     await expect(toastBody).toBeVisible({ timeout: this.defaultTimeout });
+  }
 
-    const screenshotDir = path.join(
-      process.cwd(),
-      'screenshots',
-      'purchase-order',
-      'create-po'
-    );
-    fs.mkdirSync(screenshotDir, { recursive: true });
-    const screenshotPath = path.join(
-      screenshotDir,
-      'po-created-sent-success.png'
-    );
-
-    const toastByXpath = this.page
-      .locator('xpath=/html/body/div[1]/div/div[3]/div/div')
+  /** First PO card on the list (kebab / Preview). */
+  firstPoCard() {
+    return this.page
+      .locator('div.mt-3.mb-3')
+      .filter({ has: this.page.getByText(/issued date|po no/i) })
       .first();
-    if (await toastByXpath.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await toastByXpath.screenshot({ path: screenshotPath });
-    } else {
-      const toastCard = this.page
-        .locator('div.Toastify__toast--success')
-        .filter({ has: toastBody })
-        .first();
-      if (await toastCard.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await toastCard.screenshot({ path: screenshotPath });
-      } else {
-        await toastBody.screenshot({ path: screenshotPath });
-      }
-    }
+  }
+
+  async openThreeDotMenuOnFirstPurchaseOrderCard() {
+    await expect(this.page.getByText(/po no/i).first()).toBeVisible({
+      timeout: this.defaultTimeout,
+    });
+    const card = this.firstPoCard();
+    const kebab = card
+      .locator('button')
+      .filter({ has: this.page.locator('svg[data-testid="MoreVertIcon"]') })
+      .first();
+    await kebab.scrollIntoViewIfNeeded();
+    await kebab.click();
+    await expect(
+      this.page.getByRole('menuitem', { name: /^preview$/i })
+    ).toBeVisible({ timeout: 30000 });
+  }
+
+  async clickPreviewInPurchaseOrderCardMenu() {
+    await this.page.getByRole('menuitem', { name: /^preview$/i }).click();
+  }
+
+  async expectPurchaseOrderFullScreenPreviewVisible() {
+    const dialog = this.page.locator('[role="dialog"]').first();
+    await expect(dialog).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(
+      dialog.getByText(/purchase order|po no|preview|billed to/i).first()
+    ).toBeVisible({ timeout: 60000 });
+  }
+
+  async closePurchaseOrderFullScreenPreview() {
+    const dialog = this.page.locator('[role="dialog"]').first();
+    await expect(dialog).toBeVisible({ timeout: 15000 });
+    await dialog.locator('button').first().click();
+    await expect(dialog).toBeHidden({ timeout: 45000 });
+  }
+
+  async expectPurchaseOrderListWithCreateActionVisible() {
+    await expect(
+      this.page.getByRole('button', { name: /create purchase order/i })
+    ).toBeVisible({ timeout: this.defaultTimeout });
   }
 }
 
