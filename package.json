@@ -46,6 +46,7 @@
     "test:admin:projects:procurement:indent": "npx cucumber-js features/admin/projects/procurement/Indent.feature",
     "test:admin:projects:procurement:inventory": "npx cucumber-js features/admin/projects/procurement/Inventory.feature",
     "test:admin:projects:procurement:purchaseorder": "npx cucumber-js features/admin/projects/procurement/PurchaseOrder.feature",
+    "test:admin:projects:procurement:purchaseorder:create": "npx cucumber-js features/admin/projects/procurement/purchase-order/create-po/purchase-order.feature",
     "test:admin:projects:procurement:rfq": "npx cucumber-js features/admin/projects/procurement/RFQ.feature",
     "test:admin:projects:procurement:workorder": "npx cucumber-js features/admin/projects/procurement/WorkOrder.feature",
     "test:admin:reports:assetsreport": "npx cucumber-js features/admin/reports/AssetsReport.feature",
