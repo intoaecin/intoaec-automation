@@ -12,7 +12,7 @@ Feature: Estimate create and email workflow
     And I click the "Estimate" module card
     And I wait for estimate module to load
 
-  @estimate
+  @smoke @estimate
   Scenario: Create estimate and send email from compose email popup
     When I click Create Estimate
     And I start estimate from scratch and proceed
