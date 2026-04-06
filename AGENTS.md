@@ -63,3 +63,66 @@ When adding new `When/Then` steps for the estimate module, prefer these method n
 - Don’t hardcode long `waitForTimeout()` sequences unless a UI animation requires it (and keep them minimal).
 - Don’t create new step-definition files for existing modules; extend the existing module steps/page objects unless the repo already has that pattern.
 
+---
+
+## General automation standards (all modules)
+
+Apply these conventions when adding or refactoring tests. **If a rule is already satisfied in the repo, do not duplicate work;** only add or align what is missing.
+
+### Timeouts
+
+- Set the **default step/scenario timeout to 1 minute (60 seconds)** as the baseline. Align Cucumber `setDefaultTimeout`, Playwright action timeouts, and page-object `defaultTimeout` with this where practical.
+- **Slow or heavy pages** (large forms, slow APIs, cold loads): **increase timeouts** for that flow only—e.g. raise `defaultTimeout` on the relevant page object, use a longer `timeout` on specific `expect` / `waitFor` calls, or add a dedicated “wait for module/form ready” step. **Do not** rely on the default 60s everywhere if a screen is known to need more time; document the reason in code or in the scenario notes.
+- Prefer **condition-based waits** (element visible, network settled, navigation finished) before bumping arbitrary sleep values; use **longer timeouts** when the condition legitimately takes more time to become true.
+
+### Feature organization and tags
+
+- Keep **one concern per scenario** and group scenarios **by module** (folder and feature naming should match the area under test, e.g. `features/admin/projects/design/estimate/`).
+- Use tags consistently:
+  - **`@smoke`** — critical **main happy path** (minimal steps, runs often).
+  - **`@regression`** — **deeper positive** coverage (full flows, more data/setup).
+  - **`@positive`** — expected success / valid inputs.
+  - **`@negative`** — validation errors, invalid data, or failure paths.
+- Do not merge unrelated flows into a single scenario; split them so failures are easy to diagnose.
+
+### Code quality and reuse
+
+- **Optimize and deduplicate**: shared navigation, login, and repeated UI actions belong in **page objects** or small **helpers**, not copy-pasted across step definitions.
+- Prefer one page method per meaningful user action; step definitions should stay thin (call the page object).
+
+### Between-step delay (headed / observability)
+
+- For **headed** runs, a **~2 second delay after each step** is intentional so you can **see each action on screen** during debugging or demos. This is implemented centrally in **`support/hooks.js`** via an **`AfterStep`** hook (not scattered `waitForTimeout` calls in steps or page objects).
+- **Environment variables:**
+  - **`HEADED=true`** — run with a visible browser; enables the between-step delay.
+  - **`STEP_DELAY_MS`** — milliseconds to wait after each step when headed (default **2000**). Set to **`0`** to disable the delay while still headed.
+- Headless runs (`HEADED` not `true`) apply **no** between-step delay.
+- This **slows total run time**; use **`STEP_DELAY_MS=0`** in CI or when speed matters.
+- This delay is **not** a substitute for proper waits: slow pages still need **longer timeouts** or explicit wait helpers as described under **Timeouts** above.
+
+### Error handling
+
+- Use **`try` / `catch`** around operations that can fail intermittently (network, animations, optional modals). Log the error, rethrow when the step must fail, or recover when the spec allows a fallback.
+
+### Logging and reporting
+
+- **Log each step** (or each page-object action): on success, print a short line to the **terminal** (step name + key detail). On failure, log context before the assertion throws.
+- Where supported by the Cucumber/HTML reporter, attach the same message or a screenshot so **reports** show what passed, not only failures.
+
+### Test data (random / dynamic inputs)
+
+- For **text and number fields**, prefer **generated data** (random alphanumeric strings, random numbers in a valid range) so runs do not collide with existing records.
+- When implementing helpers, **ask the stakeholder or author how many characters, format, or range** is required if it is not obvious from the UI validation rules.
+
+### Browser window (headed runs)
+
+- When running **headed** (visible browser), **maximize the window** (or set a large viewport) so layouts match real users and locators stay stable. Configure this in Playwright launch/context options or in `Before` hooks.
+
+### Locators (preferred order)
+
+- **Prefer accessible, user-facing selectors:**
+  - **`getByRole`** with name/label (buttons, links, textboxes, checkboxes, etc.).
+  - **`getByLabel`**, **`getByPlaceholder`**, or **`getByText`** when roles are ambiguous.
+- Fall back to stable **`data-testid`** or scoped CSS only when the UI does not expose good roles/labels.
+- Avoid brittle selectors that depend on generated CSS class names unless no alternative exists.
+

@@ -108,6 +108,21 @@ When('I add estimate charge {string} with value {string}', { timeout: 120000 }, 
   await estimatePage.addCharge(chargeName, value);
 });
 
+When('I fill first other charge with random data', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.fillFirstOtherChargeRandom();
+});
+
+When('I add second other charge with random data', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.addSecondOtherChargeRandom();
+});
+
+When('I click percent toggle for second other charge', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.clickSecondChargePercentToggle();
+});
+
 When('I switch estimate charge type to fixed and set value {string}', { timeout: 120000 }, async function (value) {
   const estimatePage = getEstimatePage(this);
   await estimatePage.switchChargeType('Fixed', value);
@@ -146,6 +161,11 @@ When('I enable estimate digital signature', { timeout: 120000 }, async function 
 When('I add custom estimate column {string} with type {string}', { timeout: 120000 }, async function (name, type) {
   const estimatePage = getEstimatePage(this);
   await estimatePage.addCustomColumn(name, type);
+});
+
+When('I add custom estimate column with random name and Link type', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.addCustomColumnRandomLink();
 });
 
 When('I click estimate action compose email and send', { timeout: 120000 }, async function () {
