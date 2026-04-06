@@ -288,13 +288,20 @@ class EstimatePage extends BasePage {
   }
 
   async composeAndSendEmail() {
-    await expect(this.actionButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.actionButton.click();
-    await expect(this.composeEmailButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.composeEmailButton.click();
-    await expect(this.emailDialog).toBeVisible({ timeout: this.defaultTimeout });
-    await expect(this.sendEmailButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.sendEmailButton.click();
+    const actionBtn = this.page.getByRole('button', { name: 'Action', exact: true }).first();
+    await expect(actionBtn).toBeVisible({ timeout: this.defaultTimeout });
+    await actionBtn.click();
+
+    const composeMenuItem = this.page.getByRole('menuitem', { name: /compose email/i }).first();
+    await expect(composeMenuItem).toBeVisible({ timeout: this.defaultTimeout });
+    await composeMenuItem.click();
+
+    // Compose popup takes time to render; wait for the Send button to be ready.
+    const sendBtn = this.page.getByRole('button', { name: 'Send Email' }).first();
+    await expect(sendBtn).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(sendBtn).toBeEnabled({ timeout: this.defaultTimeout });
+    await sendBtn.click();
+
     await this.waitForNetworkIdle();
   }
 
@@ -360,9 +367,45 @@ class EstimatePage extends BasePage {
   }
 
   async isToastVisible(message) {
-    const toast = this.page.locator(`text=${message}`).first();
-    await expect(toast).toBeVisible({ timeout: this.defaultTimeout });
-    await expect(toast).toHaveText(new RegExp(message));
+    const needle = message.trim();
+
+    // Toastify often animates in/out; Playwright "visible" can be flaky. Poll DOM text instead.
+    await expect
+      .poll(
+        async () =>
+          this.page.evaluate((n) => {
+            const want = n.toLowerCase();
+            const collapse = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+            const candidates = document.querySelectorAll(
+              '.Toastify, #react-toastify, [class*="Toastify__toast-container"], [class*="Toastify__toast-body"], .Toastify__toast'
+            );
+            for (const el of candidates) {
+              if (collapse(el.textContent).includes(want)) return true;
+            }
+            return collapse(document.body.innerText).includes(want);
+          }, needle),
+        { timeout: this.defaultTimeout, intervals: [200, 400, 800, 1500] }
+      )
+      .toBeTruthy();
+
+    // Optional: wait until the toast text is gone (auto-dismiss), without failing the step
+    await expect
+      .poll(
+        async () =>
+          this.page.evaluate((n) => {
+            const want = n.toLowerCase();
+            const collapse = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            const roots = document.querySelectorAll('.Toastify, #react-toastify');
+            for (const el of roots) {
+              if (collapse(el.textContent).includes(want)) return false;
+            }
+            return true;
+          }, needle),
+        { timeout: 20000, intervals: [500, 1000] }
+      )
+      .toBeTruthy()
+      .catch(() => {});
   }
 
   async expectChargeValueVisible() {

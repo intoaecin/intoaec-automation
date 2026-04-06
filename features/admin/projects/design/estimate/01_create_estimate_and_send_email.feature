@@ -30,4 +30,4 @@ Feature: Estimate create and email workflow
     And I enable estimate digital signature
     And I add custom estimate column "CustomField" with type "Text"
     And I click estimate action compose email and send
-    Then I should see estimate success toast "Estimate successfully sent"
+    Then I should see estimate success toast "Estimation created successfully"

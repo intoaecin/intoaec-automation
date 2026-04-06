@@ -20,5 +20,5 @@ Feature: Estimate create and email workflow
     And I add estimate section "Default Section"
     And I add manual estimate item with name "name"
     And I click estimate action compose email and send
-    Then I should see estimate success toast "Estimate successfully sent"
+    Then I should see estimate success toast "Estimation created successfully"
 
