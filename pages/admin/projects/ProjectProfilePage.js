@@ -18,11 +18,14 @@ class ProjectProfilePage extends BasePage {
   }
 
   async clickModuleCard(name) {
-    const moduleCardText = this.page.locator('p').filter({
-      hasText: new RegExp(`^\\s*${name}\\s*$`, 'i')
-    }).first();
-    await expect(moduleCardText).toBeVisible({ timeout: 60000 });
-    await moduleCardText.click();
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const label = this.page
+      .getByText(new RegExp(`^\\s*${escaped}\\s*$`, 'i'))
+      .first();
+    await label.scrollIntoViewIfNeeded();
+    await expect(label).toBeVisible({ timeout: 60000 });
+    await label.click();
+    await this.page.waitForLoadState('domcontentloaded');
   }
 }
 
