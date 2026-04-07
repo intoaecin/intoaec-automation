@@ -1,8 +1,8 @@
-@po @procurement @create-po
-Feature: Create Purchase Order and send email
+@smoke @po @procurement @create-po @po-create
+Feature: Purchase Order — create PO and send email
 
-  Positive flow: create PO from scratch, add vendor and line item, send via compose email.
-  Requires a user with PO approver permissions (Action → Compose Email is shown for approvers).
+  Create from scratch, add vendor and line item, send via Action → Compose email.
+  Requires a user with PO approver permissions (Action → Compose email).
 
   Background:
     Given I am logged in
