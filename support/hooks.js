@@ -1,6 +1,7 @@
-const { Before, After, setDefaultTimeout } = require('@cucumber/cucumber');
+const { Before, After, AfterAll, setDefaultTimeout } = require('@cucumber/cucumber');
 const fs = require('fs');
 const path = require('path');
+const { closeSharedSession } = require('./world');
 
 setDefaultTimeout(30000);
 
@@ -18,4 +19,8 @@ After(async function (scenario) {
     });
   }
   await this.cleanup();
+});
+
+AfterAll(async function () {
+  await closeSharedSession();
 });
