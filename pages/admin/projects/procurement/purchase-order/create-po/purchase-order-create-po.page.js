@@ -282,6 +282,33 @@ class PurchaseOrderCreatePoPage extends BasePage {
     ).toBeVisible({ timeout: this.defaultTimeout });
   }
 
+  async expectPurchaseOrderComposeEmailDialogFromActionMenu() {
+    const emailDialog = this.page
+      .getByRole('dialog')
+      .filter({ has: this.page.getByText(/send email|subject|to/i) })
+      .first();
+    await expect(emailDialog).toBeVisible({ timeout: 120000 });
+    await expect(
+      emailDialog.getByRole('button', { name: /send email/i })
+    ).toBeVisible({ timeout: this.defaultTimeout });
+  }
+
+  async getPoLineItemsTableRowCount() {
+    const table = this.page.locator('[aria-label="PO line items table"]');
+    await expect(table).toBeVisible({ timeout: 60000 });
+    return await table.locator('tbody tr').count();
+  }
+
+  async expectPoLineItemsRowCountGreaterThan(baseline) {
+    const table = this.page.locator('[aria-label="PO line items table"]');
+    await expect(table).toBeVisible({ timeout: 60000 });
+    await expect
+      .poll(async () => table.locator('tbody tr').count(), {
+        timeout: 120000,
+      })
+      .toBeGreaterThan(baseline);
+  }
+
   async openActionMenuAndChooseUpdate() {
     const actionBtn = this.page.getByRole('button', { name: /^action$/i }).first();
     await expect(actionBtn).toBeVisible({ timeout: this.defaultTimeout });

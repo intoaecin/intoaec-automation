@@ -49,6 +49,7 @@
     "test:admin:projects:procurement:purchaseorder:create": "npx cucumber-js --retry 0 features/admin/projects/procurement/purchase-order/create-po/purchase-order-create-po.feature",
     "test:admin:projects:procurement:purchaseorder:preview": "npx cucumber-js --retry 0 features/admin/projects/procurement/purchase-order/create-po/purchase-order-preview-po.feature",
     "test:admin:projects:procurement:purchaseorder:edit": "npx cucumber-js --retry 0 features/admin/projects/procurement/purchase-order/create-po/purchase-order-edit-po.feature",
+    "test:admin:projects:procurement:purchaseorder:add-from-library": "npx cucumber-js --retry 0 features/admin/projects/procurement/purchase-order/create-po/purchase-order-add-from-library-po.feature",
     "test:admin:projects:procurement:purchaseorder:send-reminder": "npx cucumber-js --retry 0 features/admin/projects/procurement/purchase-order/create-po/purchase-order-send-reminder-po.feature",
     "test:admin:projects:procurement:purchaseorder:cancel": "npx cucumber-js --retry 0 features/admin/projects/procurement/purchase-order/create-po/purchase-order-cancel-po.feature",
     "test:admin:projects:procurement:purchaseorder:smoke": "npx cucumber-js --retry 0 --tags \"@smoke and @po\" features/admin/projects/procurement/purchase-order/create-po",
