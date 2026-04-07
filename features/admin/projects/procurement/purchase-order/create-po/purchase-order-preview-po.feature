@@ -1,8 +1,7 @@
-@po @procurement @create-po @preview
-Feature: Purchase Order preview from list
+@smoke @po @procurement @create-po @po-preview
+Feature: Purchase Order — preview from list
 
-  Single run: navigate to the PO list, create and send a PO, then open the three-dot menu → Preview
-  and validate the full-screen dialog.
+  After create and send, open the card kebab → Preview and validate the full-screen dialog.
 
   Background:
     Given I am logged in
