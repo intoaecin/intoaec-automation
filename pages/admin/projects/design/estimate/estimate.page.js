@@ -217,6 +217,77 @@ class EstimatePage extends BasePage {
     await this.page.waitForTimeout(1200);
   }
 
+  async clickAddProductService() {
+    const link = this.page.getByText('Add Product/Service', { exact: false }).first();
+    await expect(link).toBeVisible({ timeout: this.defaultTimeout });
+    await link.scrollIntoViewIfNeeded();
+    await link.click();
+    await this.page.waitForTimeout(600);
+  }
+
+  async checkEstimateCatalogRow(name) {
+    // `.first()` avoids strict-mode failures when `name` is a broad regex/string that matches multiple rows
+    // (e.g. several "Example : Shoe Rack …" rows under Vendor Products).
+    const row = this.page.getByRole('row', { name }).first();
+    await expect(row).toBeVisible({ timeout: 20000 });
+    await row.getByRole('checkbox').first().check();
+    await this.page.waitForTimeout(350);
+  }
+
+  async confirmAddProductServicePanel() {
+    const addBtn = this.page.getByRole('button', { name: 'Add', exact: true }).last();
+    await expect(addBtn).toBeVisible({ timeout: 15000 });
+    await expect(addBtn).toBeEnabled({ timeout: 10000 });
+    await addBtn.click();
+    await this.page.waitForTimeout(800);
+  }
+
+  /**
+   * Multi-step catalog smoke: Add Product/Service (default + Service + Service/Vendor + Product/Vendor) then Add from library.
+   * Row labels must match accessible names in the app.
+   */
+  async addSmokeCatalogViaProductServiceAndLibrary() {
+    await this.clickAddProductService();
+    await this.checkEstimateCatalogRow(/Shoe rack Fire Protection/i);
+    await this.confirmAddProductServicePanel();
+
+    await this.clickAddProductService();
+    await this.page.getByRole('tab', { name: 'Service' }).click();
+    await this.page.waitForTimeout(450);
+    await this.checkEstimateCatalogRow(/wheeler Architectural/i);
+    await this.confirmAddProductServicePanel();
+
+    await this.clickAddProductService();
+    await this.page.getByRole('tab', { name: 'Service' }).click();
+    await this.page.waitForTimeout(450);
+    const serviceSource = this.page.getByRole('combobox', { name: 'Service Source' });
+    await expect(serviceSource).toBeVisible({ timeout: 15000 });
+    await serviceSource.click();
+    await this.page.getByRole('option', { name: 'Vendor Services' }).click();
+    await this.page.waitForTimeout(450);
+    await this.checkEstimateCatalogRow(/Check Surveying and Mapping/i);
+    await this.confirmAddProductServicePanel();
+
+    await this.clickAddProductService();
+    await this.page.getByRole('tab', { name: 'Product' }).click();
+    await this.page.waitForTimeout(450);
+    const productSource = this.page.getByRole('combobox', { name: 'Product Source' });
+    await expect(productSource).toBeVisible({ timeout: 15000 });
+    await productSource.click();
+    await this.page.getByRole('option', { name: 'Vendor Products' }).click();
+    await this.page.waitForTimeout(450);
+    await this.checkEstimateCatalogRow('Example : Shoe Rack Fire');
+    await this.confirmAddProductServicePanel();
+
+    await expect(this.addFromLibraryButton).toBeVisible({ timeout: this.defaultTimeout });
+    await this.addFromLibraryButton.click();
+    await this.page.waitForTimeout(1200);
+    await this.page.getByRole('tab', { name: 'Library Items' }).click();
+    await this.page.waitForTimeout(500);
+    await this.checkEstimateCatalogRow(/Institutional Partition wall/i);
+    await this.confirmAddProductServicePanel();
+  }
+
   async addFromLibraryWithoutSelection() {
     await expect(this.addFromLibraryButton).toBeVisible({ timeout: this.defaultTimeout });
     await this.addFromLibraryButton.click();

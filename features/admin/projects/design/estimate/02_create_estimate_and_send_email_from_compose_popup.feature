@@ -16,9 +16,9 @@ Feature: Estimate create and email workflow
   Scenario: Create estimate and send email from compose email popup
     When I click Create Estimate
     And I start estimate from scratch and proceed
-    And I fill estimate title with "AAA"
-    And I add estimate section "Default Section"
-    And I add manual estimate item with name "name"
+    And I fill estimate title with random 4 letters
+    And I add estimate section with random 6 letter name
+    And I add manual estimate item with random 4 letter name
     And I click estimate action compose email and send
     Then I should see estimate success toast "Estimation created successfully"
 

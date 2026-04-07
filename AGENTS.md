@@ -92,12 +92,13 @@ Apply these conventions when adding or refactoring tests. **If a rule is already
 
 ### Between-step delay (headed / observability)
 
-- For **headed** runs, a **~2 second delay after each step** is intentional so you can **see each action on screen** during debugging or demos. This is implemented centrally in **`support/hooks.js`** via an **`AfterStep`** hook (not scattered `waitForTimeout` calls in steps or page objects).
+- For **headed** runs (the default), a **~2 second delay after each step** is intentional so you can **see each action on screen** during debugging or demos. This is implemented centrally in **`support/hooks.js`** via an **`AfterStep`** hook (not scattered `waitForTimeout` calls in steps or page objects).
 - **Environment variables:**
-  - **`HEADED=true`** — run with a visible browser; enables the between-step delay.
+  - **`HEADLESS=true`** — run **without** a visible browser (overrides default headed). **`CI=true`** also selects headless (typical for pipelines).
+  - **`HEADED=false`** — same as headless (explicit opt-out of headed).
   - **`STEP_DELAY_MS`** — milliseconds to wait after each step when headed (default **2000**). Set to **`0`** to disable the delay while still headed.
-- Headless runs (`HEADED` not `true`) apply **no** between-step delay.
-- This **slows total run time**; use **`STEP_DELAY_MS=0`** in CI or when speed matters.
+- Headless runs apply **no** between-step delay.
+- This **slows total run time**; use **`HEADLESS=true`** or **`STEP_DELAY_MS=0`** when speed matters.
 - This delay is **not** a substitute for proper waits: slow pages still need **longer timeouts** or explicit wait helpers as described under **Timeouts** above.
 
 ### Error handling

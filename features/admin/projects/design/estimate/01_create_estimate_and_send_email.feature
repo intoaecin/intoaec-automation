@@ -17,11 +17,11 @@ Feature: Estimate create and email workflow
   Scenario: Create estimate and send email successfully
     When I click Create Estimate
     And I start estimate from scratch and proceed
-    And I fill estimate title with "AAA"
-    And I add estimate section "Default Section"
-    And I add manual estimate item with name "name"
-    And I add another manual estimate item with name "name 2"
-    And I add first item from estimate library
+    And I fill estimate title with random 4 letters
+    And I add estimate section with random 6 letter name
+    And I add manual estimate item with random 4 letter name
+    And I add another manual estimate item with random 4 letter name
+    And I add smoke catalog via Add Product Service and library
     And I fill first other charge with random data
     And I add second other charge with random data
     And I click percent toggle for second other charge
