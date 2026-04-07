@@ -8,6 +8,8 @@ Feature: Login to AEC Portal
     And I click the Login button
     Then I should be logged in successfully
 
+
+@invalid_credentials
   Scenario: Login with invalid credentials
     Given I am on the login page
     When I enter email "wrong@gmail.com"

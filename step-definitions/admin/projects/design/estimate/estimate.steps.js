@@ -1,6 +1,8 @@
-const { When, Then } = require('@cucumber/cucumber');
+const { When, Then , setDefaultTimeout } = require('@cucumber/cucumber');
 const { expect } = require('@playwright/test');
 const EstimatePage = require('../../../../../pages/admin/projects/design/estimate/estimate.page');
+
+setDefaultTimeout(60000);
 
 function getEstimatePage(world) {
   if (!world.estimatePage) {
@@ -29,6 +31,11 @@ When('I fill estimate title with {string}', { timeout: 120000 }, async function 
   await estimatePage.fillEstimateTitleOnly(title);
 });
 
+When('I fill estimate title with random 4 letters', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.fillEstimateTitleOnly(estimatePage.randomLetters(4));
+});
+
 When('I fill estimate mandatory details with title {string}', { timeout: 120000 }, async function (title) {
   const estimatePage = getEstimatePage(this);
   await estimatePage.fillMandatoryDetails({ title, createdOffset: 0, validOffset: 7 });
@@ -49,6 +56,11 @@ When('I add estimate section {string}', { timeout: 120000 }, async function (sec
   await estimatePage.addSection(sectionName);
 });
 
+When('I add estimate section with random 6 letter name', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.addSection(estimatePage.randomLetters(6));
+});
+
 When('I add manual estimate item with name {string}', { timeout: 120000 }, async function (itemName) {
   const estimatePage = getEstimatePage(this);
   await estimatePage.addManualItem(
@@ -64,11 +76,41 @@ When('I add manual estimate item with name {string}', { timeout: 120000 }, async
   );
 });
 
+When('I add manual estimate item with random 4 letter name', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.addManualItem(
+    {
+      name: estimatePage.randomLetters(4),
+      description: 'test description',
+      qty: 1,
+      unit: 'Nos',
+      rate: 100,
+      profit: 10
+    },
+    { manualIndex: 0 }
+  );
+});
+
 When('I add another manual estimate item with name {string}', { timeout: 120000 }, async function (itemName) {
   const estimatePage = getEstimatePage(this);
   await estimatePage.addManualItem(
     {
       name: itemName,
+      description: 'test description',
+      qty: 1,
+      unit: 'Nos',
+      rate: 100,
+      profit: 10
+    },
+    { manualIndex: 1 }
+  );
+});
+
+When('I add another manual estimate item with random 4 letter name', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.addManualItem(
+    {
+      name: estimatePage.randomLetters(4),
       description: 'test description',
       qty: 1,
       unit: 'Nos',
@@ -98,6 +140,11 @@ When('I add first item from estimate library', { timeout: 120000 }, async functi
   await estimatePage.addFromLibraryFirstItem();
 });
 
+When('I add smoke catalog via Add Product Service and library', { timeout: 300000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.addSmokeCatalogViaProductServiceAndLibrary();
+});
+
 When('I open estimate library and click add without selection', { timeout: 120000 }, async function () {
   const estimatePage = getEstimatePage(this);
   await estimatePage.addFromLibraryWithoutSelection();
@@ -106,6 +153,21 @@ When('I open estimate library and click add without selection', { timeout: 12000
 When('I add estimate charge {string} with value {string}', { timeout: 120000 }, async function (chargeName, value) {
   const estimatePage = getEstimatePage(this);
   await estimatePage.addCharge(chargeName, value);
+});
+
+When('I fill first other charge with random data', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.fillFirstOtherChargeRandom();
+});
+
+When('I add second other charge with random data', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.addSecondOtherChargeRandom();
+});
+
+When('I click percent toggle for second other charge', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.clickSecondChargePercentToggle();
 });
 
 When('I switch estimate charge type to fixed and set value {string}', { timeout: 120000 }, async function (value) {
@@ -146,6 +208,11 @@ When('I enable estimate digital signature', { timeout: 120000 }, async function 
 When('I add custom estimate column {string} with type {string}', { timeout: 120000 }, async function (name, type) {
   const estimatePage = getEstimatePage(this);
   await estimatePage.addCustomColumn(name, type);
+});
+
+When('I add custom estimate column with random name and Link type', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.addCustomColumnRandomLink();
 });
 
 When('I click estimate action compose email and send', { timeout: 120000 }, async function () {

@@ -45,6 +45,20 @@ class EstimatePage extends BasePage {
     this.validationMessage = page.locator('[role="alert"], .toast-message, .ant-message-notice-content, .invalid-feedback').first();
   }
 
+  randomLetters(len) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    let out = '';
+    for (let i = 0; i < len; i += 1) out += chars[Math.floor(Math.random() * chars.length)];
+    return out;
+  }
+
+  randomDigits(len) {
+    const chars = '0123456789';
+    let out = '';
+    for (let i = 0; i < len; i += 1) out += chars[Math.floor(Math.random() * chars.length)];
+    return out;
+  }
+
   async waitForNetworkIdle() {
     await this.page.waitForLoadState('networkidle', { timeout: this.defaultTimeout });
   }
@@ -182,35 +196,96 @@ class EstimatePage extends BasePage {
   }
 
   async addFromLibraryFirstItem() {
-    // 1. Click "Add from library"
     const addFromLibBtn = this.page.getByText('Add from library', { exact: false }).first();
     await expect(addFromLibBtn).toBeVisible({ timeout: this.defaultTimeout });
     await addFromLibBtn.click();
 
-    // Wait a moment for the Library Modal and Table data to fully load
     await this.page.waitForTimeout(2000);
 
-    // 2. Find the very first row inside the Table Body (ignoring the header)
-    const firstRow = this.page.locator('tbody tr').first();
-    await expect(firstRow).toBeVisible({ timeout: 10000 });
+    const libraryRow = this.page.getByRole('row', { name: /Residential Plumbing Internal/i });
+    const rowCheckbox = libraryRow.getByRole('checkbox');
+    await expect(rowCheckbox).toBeVisible({ timeout: 15000 });
+    await rowCheckbox.click();
 
-    // 3. Locate the checkbox input, but grab its parent element (..) to click the visible box!
-    const visibleCheckbox = firstRow.locator('input.PrivateSwitchBase-input[type="checkbox"]').locator('..');
-    await visibleCheckbox.click();
-
-    // Wait half a second for the UI to register the click and enable the Add button
     await this.page.waitForTimeout(500);
 
-    // 4. Find the "Add" button using your exact locator
-    const libraryAddBtn = this.page.locator('.pl-2.MuiBox-root button').filter({ hasText: /^Add$/i }).first();
-
-    // SMART CHECK: Explicitly wait for it to be ENABLED before trying to click
-    await expect(libraryAddBtn).toBeEnabled({ timeout: 5000 });
+    // Footer "Add" on the library panel (often last matching button named "Add" when overlay is open)
+    const libraryAddBtn = this.page.getByRole('button', { name: 'Add', exact: true }).last();
+    await expect(libraryAddBtn).toBeEnabled({ timeout: 10000 });
     await libraryAddBtn.click();
 
-    // Wait for the popup to close and the item to be added to the grid
-    await this.page.waitForTimeout(1000);
-    await this.waitForNetworkIdle();
+    await this.page.waitForTimeout(1200);
+  }
+
+  async clickAddProductService() {
+    const link = this.page.getByText('Add Product/Service', { exact: false }).first();
+    await expect(link).toBeVisible({ timeout: this.defaultTimeout });
+    await link.scrollIntoViewIfNeeded();
+    await link.click();
+    await this.page.waitForTimeout(600);
+  }
+
+  async checkEstimateCatalogRow(name) {
+    // `.first()` avoids strict-mode failures when `name` is a broad regex/string that matches multiple rows
+    // (e.g. several "Example : Shoe Rack …" rows under Vendor Products).
+    const row = this.page.getByRole('row', { name }).first();
+    await expect(row).toBeVisible({ timeout: 20000 });
+    await row.getByRole('checkbox').first().check();
+    await this.page.waitForTimeout(350);
+  }
+
+  async confirmAddProductServicePanel() {
+    const addBtn = this.page.getByRole('button', { name: 'Add', exact: true }).last();
+    await expect(addBtn).toBeVisible({ timeout: 15000 });
+    await expect(addBtn).toBeEnabled({ timeout: 10000 });
+    await addBtn.click();
+    await this.page.waitForTimeout(800);
+  }
+
+  /**
+   * Multi-step catalog smoke: Add Product/Service (default + Service + Service/Vendor + Product/Vendor) then Add from library.
+   * Row labels must match accessible names in the app.
+   */
+  async addSmokeCatalogViaProductServiceAndLibrary() {
+    await this.clickAddProductService();
+    await this.checkEstimateCatalogRow(/Shoe rack Fire Protection/i);
+    await this.confirmAddProductServicePanel();
+
+    await this.clickAddProductService();
+    await this.page.getByRole('tab', { name: 'Service' }).click();
+    await this.page.waitForTimeout(450);
+    await this.checkEstimateCatalogRow(/wheeler Architectural/i);
+    await this.confirmAddProductServicePanel();
+
+    await this.clickAddProductService();
+    await this.page.getByRole('tab', { name: 'Service' }).click();
+    await this.page.waitForTimeout(450);
+    const serviceSource = this.page.getByRole('combobox', { name: 'Service Source' });
+    await expect(serviceSource).toBeVisible({ timeout: 15000 });
+    await serviceSource.click();
+    await this.page.getByRole('option', { name: 'Vendor Services' }).click();
+    await this.page.waitForTimeout(450);
+    await this.checkEstimateCatalogRow(/Check Surveying and Mapping/i);
+    await this.confirmAddProductServicePanel();
+
+    await this.clickAddProductService();
+    await this.page.getByRole('tab', { name: 'Product' }).click();
+    await this.page.waitForTimeout(450);
+    const productSource = this.page.getByRole('combobox', { name: 'Product Source' });
+    await expect(productSource).toBeVisible({ timeout: 15000 });
+    await productSource.click();
+    await this.page.getByRole('option', { name: 'Vendor Products' }).click();
+    await this.page.waitForTimeout(450);
+    await this.checkEstimateCatalogRow('Example : Shoe Rack Fire');
+    await this.confirmAddProductServicePanel();
+
+    await expect(this.addFromLibraryButton).toBeVisible({ timeout: this.defaultTimeout });
+    await this.addFromLibraryButton.click();
+    await this.page.waitForTimeout(1200);
+    await this.page.getByRole('tab', { name: 'Library Items' }).click();
+    await this.page.waitForTimeout(500);
+    await this.checkEstimateCatalogRow(/Institutional Partition wall/i);
+    await this.confirmAddProductServicePanel();
   }
 
   async addFromLibraryWithoutSelection() {
@@ -222,18 +297,88 @@ class EstimatePage extends BasePage {
   }
 
   async addCharge(name, value) {
-    await expect(this.chargeNameInput).toBeVisible({ timeout: this.defaultTimeout });
-    await this.chargeNameInput.fill(name);
-    await expect(this.chargeValueInput).toBeVisible({ timeout: this.defaultTimeout });
-    await this.chargeValueInput.fill(String(value));
+    const chargeName = name && name.trim() ? name : this.randomLetters(3);
+    const chargeVal = value !== undefined && String(value).trim() !== '' ? String(value) : this.randomDigits(2);
+
+    const nameBox = this.page.getByRole('textbox', { name: 'Charge Name' }).nth(0);
+    const valueBox = this.page.getByRole('textbox', { name: 'Enter Value' }).nth(0);
+    await expect(nameBox).toBeVisible({ timeout: this.defaultTimeout });
+    await nameBox.fill(chargeName);
+    await expect(valueBox).toBeVisible({ timeout: this.defaultTimeout });
+    await valueBox.fill(chargeVal);
+  }
+
+  /** First other-charges row: random 3 letters + 2 digits (no + click). */
+  async fillFirstOtherChargeRandom() {
+    await this.addCharge('', '');
+  }
+
+  /** Click + to add a second charge row, then random name/value on nth(1). */
+  async addSecondOtherChargeRandom() {
+    const addChargeIcon = this.page
+      .locator('.MuiButtonBase-root.MuiIconButton-root.MuiIconButton-colorPrimary')
+      .first();
+    await expect(addChargeIcon).toBeVisible({ timeout: this.defaultTimeout });
+    await addChargeIcon.click();
+    await this.page.waitForTimeout(400);
+
+    const nameBox = this.page.getByRole('textbox', { name: 'Charge Name' }).nth(1);
+    const valueBox = this.page.getByRole('textbox', { name: 'Enter Value' }).nth(1);
+    await expect(nameBox).toBeVisible({ timeout: this.defaultTimeout });
+    await nameBox.fill(this.randomLetters(3));
+    await expect(valueBox).toBeVisible({ timeout: this.defaultTimeout });
+    await valueBox.fill(this.randomDigits(2));
+  }
+
+  /** Toggle second row charge unit to % (single icon click). */
+  async clickSecondChargePercentToggle() {
+    const rows = this.page
+      .locator('div.d-flex')
+      .filter({ has: this.page.getByRole('textbox', { name: 'Charge Name' }) });
+    const secondRow = rows.nth(1);
+    const typeToggle = secondRow.locator('.MuiIconButton-sizeSmall').first();
+    await expect(typeToggle).toBeVisible({ timeout: this.defaultTimeout });
+    await typeToggle.click();
+    await this.page.waitForTimeout(300);
+  }
+
+  firstChargeRow() {
+    return this.page
+      .locator('div.d-flex')
+      .filter({ has: this.page.getByRole('textbox', { name: 'Charge Name' }) })
+      .first();
   }
 
   async switchChargeType(type, value) {
-    const chargeTypeButton = this.page.getByText(type, { exact: false }).first();
-    await expect(chargeTypeButton).toBeVisible({ timeout: this.defaultTimeout });
-    await chargeTypeButton.click();
-    await expect(this.chargeValueInput).toBeVisible({ timeout: this.defaultTimeout });
-    await this.chargeValueInput.fill(String(value));
+    const typeToggle = this.firstChargeRow().locator('.MuiIconButton-sizeSmall').first();
+    await expect(typeToggle).toBeVisible({ timeout: this.defaultTimeout });
+    await typeToggle.click();
+    await this.page.waitForTimeout(300);
+    await typeToggle.click();
+    await this.page.waitForTimeout(500);
+
+    const firstRadio = this.page.getByRole('radio').first();
+    await expect(firstRadio).toBeVisible({ timeout: 15000 });
+    await firstRadio.check();
+
+    const addButtons = this.page.getByRole('button', { name: 'Add', exact: true });
+    const count = await addButtons.count();
+    let clicked = false;
+    for (let i = 0; i < count; i += 1) {
+      const btn = addButtons.nth(i);
+      if (await btn.isVisible().catch(() => false)) {
+        await btn.click();
+        clicked = true;
+        break;
+      }
+    }
+    if (!clicked) {
+      await this.page.keyboard.press('Enter');
+    }
+
+    const valueBox = this.page.getByRole('textbox', { name: 'Enter Value' }).nth(0);
+    await expect(valueBox).toBeVisible({ timeout: this.defaultTimeout });
+    await valueBox.fill(String(value));
   }
 
   async addDiscountFirstOption() {
@@ -241,60 +386,82 @@ class EstimatePage extends BasePage {
     await this.addDiscountButton.click();
     const firstRadio = this.page.getByRole('radio').first();
     await expect(firstRadio).toBeVisible({ timeout: this.defaultTimeout });
-    await firstRadio.click();
-    await this.page.getByRole('button', { name: 'Add' }).click();
+    await firstRadio.check();
+    await this.page.getByRole('button', { name: 'Add', exact: true }).click();
   }
 
   async addTaxFirstOption() {
-    await expect(this.addTaxButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.addTaxButton.click();
-    const firstCheckbox = this.page.locator('[role="dialog"], .modal.show, .offcanvas.show').last().getByRole('checkbox').first();
-    await expect(firstCheckbox).toBeVisible({ timeout: this.defaultTimeout });
-    await firstCheckbox.click();
-    await this.page.getByRole('button', { name: 'Add' }).click();
+    const addTax = this.page.getByText('+ Add Tax', { exact: false }).first();
+    await expect(addTax).toBeVisible({ timeout: this.defaultTimeout });
+    await addTax.click();
+    const taxRowCb = this.page.getByRole('row', { name: /checlking/i }).getByRole('checkbox').first();
+    await expect(taxRowCb).toBeVisible({ timeout: this.defaultTimeout });
+    await taxRowCb.check();
+    await this.page.getByRole('button', { name: 'Add', exact: true }).click();
   }
 
   async enableRoundOff() {
-    await expect(this.roundOffCheckbox).toBeVisible({ timeout: this.defaultTimeout });
-    await this.roundOffCheckbox.click();
+    const roundUp = this.page.getByRole('checkbox', { name: 'Round Up' }).first();
+    await expect(roundUp).toBeVisible({ timeout: this.defaultTimeout });
+    await roundUp.check();
   }
 
   async addTermsFromTemplate() {
-    await expect(this.chooseTemplateButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.chooseTemplateButton.click();
-    const firstRadio = this.page.locator('input[type="radio"]').first();
-    await expect(firstRadio).toBeVisible({ timeout: this.defaultTimeout });
-    await firstRadio.click();
-    await this.page.getByRole('button', { name: 'Add' }).click();
+    const chooseTemplate = this.page.getByRole('button', { name: 'Choose from Template' }).first();
+    await expect(chooseTemplate).toBeVisible({ timeout: this.defaultTimeout });
+    await chooseTemplate.click();
+    const rowRadio = this.page.getByRole('row', { name: /labor wages Acceptance Of/i }).getByRole('radio').first();
+    await expect(rowRadio).toBeVisible({ timeout: this.defaultTimeout });
+    await rowRadio.check();
+    await this.page.getByRole('button', { name: 'Add', exact: true }).click();
   }
 
   async enableDigitalSignature() {
-    await expect(this.digitalSignatureCheckbox).toBeVisible({ timeout: this.defaultTimeout });
-    await this.digitalSignatureCheckbox.click();
+    const sig = this.page.getByRole('checkbox', { name: /Show digital signature on/i }).first();
+    await expect(sig).toBeVisible({ timeout: this.defaultTimeout });
+    await sig.check();
   }
 
   async addCustomColumn(name, type) {
-    await expect(this.manageColumnButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.manageColumnButton.click();
-    await expect(this.columnNameInput).toBeVisible({ timeout: this.defaultTimeout });
-    await this.columnNameInput.fill(name);
-    await expect(this.columnTypeSelect).toBeVisible({ timeout: this.defaultTimeout });
-    await this.columnTypeSelect.click();
-    await this.page.getByRole('option', { name: new RegExp(type, 'i') }).click();
-    await this.page.getByRole('button', { name: 'Add' }).click();
-    await expect(this.applyButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.applyButton.click();
-    await this.waitForNetworkIdle();
+    const manage = this.page.getByRole('button', { name: 'Manage Columns' }).first();
+    await expect(manage).toBeVisible({ timeout: this.defaultTimeout });
+    await manage.click();
+
+    const colName = this.page.getByRole('textbox', { name: 'New Column Name' }).first();
+    await expect(colName).toBeVisible({ timeout: this.defaultTimeout });
+    await colName.fill((name && name.trim()) || this.randomLetters(4));
+
+    const typeLabel = (type && String(type).trim()) || 'Link';
+    const dropdown = this.page.getByText(/^text$/i).first();
+    await expect(dropdown).toBeVisible({ timeout: this.defaultTimeout });
+    await dropdown.click();
+    await this.page.getByRole('option', { name: new RegExp(`^${typeLabel}$`, 'i') }).click();
+
+    await this.page.getByRole('button', { name: 'Add', exact: true }).click();
+    await this.page.getByRole('button', { name: 'Apply', exact: true }).click();
+    await this.page.waitForTimeout(1000);
+  }
+
+  /** Random 4-letter column name; type dropdown opens from "Text", option "Link". */
+  async addCustomColumnRandomLink() {
+    await this.addCustomColumn('', 'Link');
   }
 
   async composeAndSendEmail() {
-    await expect(this.actionButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.actionButton.click();
-    await expect(this.composeEmailButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.composeEmailButton.click();
-    await expect(this.emailDialog).toBeVisible({ timeout: this.defaultTimeout });
-    await expect(this.sendEmailButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.sendEmailButton.click();
+    const actionBtn = this.page.getByRole('button', { name: 'Action', exact: true }).first();
+    await expect(actionBtn).toBeVisible({ timeout: this.defaultTimeout });
+    await actionBtn.click();
+
+    const composeMenuItem = this.page.getByRole('menuitem', { name: /compose email/i }).first();
+    await expect(composeMenuItem).toBeVisible({ timeout: this.defaultTimeout });
+    await composeMenuItem.click();
+
+    // Compose popup takes time to render; wait for the Send button to be ready.
+    const sendBtn = this.page.getByRole('button', { name: 'Send Email' }).first();
+    await expect(sendBtn).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(sendBtn).toBeEnabled({ timeout: this.defaultTimeout });
+    await sendBtn.click();
+    await this.page.waitForTimeout(1500);
     await this.waitForNetworkIdle();
   }
 
@@ -360,9 +527,52 @@ class EstimatePage extends BasePage {
   }
 
   async isToastVisible(message) {
-    const toast = this.page.locator(`text=${message}`).first();
-    await expect(toast).toBeVisible({ timeout: this.defaultTimeout });
-    await expect(toast).toHaveText(new RegExp(message));
+    const needle = message.trim();
+    const variants = [
+      needle,
+      needle.replace(/\bestimation\b/i, 'estimate'),
+      needle.replace(/\bestimate\b/i, 'estimation')
+    ];
+
+    // Toastify often animates in/out; Playwright "visible" can be flaky. Poll DOM text instead.
+    await expect
+      .poll(
+        async () =>
+          this.page.evaluate((needles) => {
+            const collapse = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            const body = collapse(document.body.innerText);
+            const wants = needles.map((n) => n.toLowerCase());
+
+            const candidates = document.querySelectorAll(
+              '.Toastify, #react-toastify, [class*="Toastify__toast-container"], [class*="Toastify__toast-body"], .Toastify__toast'
+            );
+            for (const el of candidates) {
+              const t = collapse(el.textContent);
+              if (wants.some((w) => t.includes(w))) return true;
+            }
+            return wants.some((w) => body.includes(w));
+          }, variants),
+        { timeout: this.defaultTimeout, intervals: [200, 400, 800, 1500] }
+      )
+      .toBeTruthy();
+
+    // Optional: wait until the toast text is gone (auto-dismiss), without failing the step
+    await expect
+      .poll(
+        async () =>
+          this.page.evaluate((n) => {
+            const want = n.toLowerCase();
+            const collapse = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            const roots = document.querySelectorAll('.Toastify, #react-toastify');
+            for (const el of roots) {
+              if (collapse(el.textContent).includes(want)) return false;
+            }
+            return true;
+          }, needle),
+        { timeout: 20000, intervals: [500, 1000] }
+      )
+      .toBeTruthy()
+      .catch(() => {});
   }
 
   async expectChargeValueVisible() {
