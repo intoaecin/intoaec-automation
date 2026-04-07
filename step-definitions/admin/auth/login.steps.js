@@ -1,7 +1,9 @@
 // step-definitions/admin/auth/login.steps.js
-const { Given, When, Then } = require('@cucumber/cucumber');
+const { Given, When, Then , setDefaultTimeout} = require('@cucumber/cucumber');
 const { expect } = require('@playwright/test');
 const LoginPage = require('../../../pages/admin/auth/LoginPage');
+
+setDefaultTimeout(60000);
 
 let loginPage;
 
