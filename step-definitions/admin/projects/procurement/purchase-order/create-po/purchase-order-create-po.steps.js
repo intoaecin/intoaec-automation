@@ -55,6 +55,24 @@ When(
 );
 
 When(
+  'I ensure all purchase order line item units are filled',
+  { timeout: 180000 },
+  async function () {
+    const po = getPurchaseOrderCreatePoPage(this);
+    await po.ensureAllPoLineItemUnitsFilled();
+  }
+);
+
+When(
+  'I ensure all purchase order line item units are filled after vendor',
+  { timeout: 240000 },
+  async function () {
+    const po = getPurchaseOrderCreatePoPage(this);
+    await po.ensureAllPoLineItemUnitsFilled({ settleFirst: true });
+  }
+);
+
+When(
   'I add a manual line item with name {string} description {string} quantity {string} unit {string} rate {string}',
   { timeout: 120000 },
   async function (name, description, quantity, unit, rate) {
@@ -75,6 +93,17 @@ When(
   async function () {
     const po = getPurchaseOrderCreatePoPage(this);
     await po.openActionMenuAndComposeEmail();
+    await po.sendEmailFromComposeModal();
+  }
+);
+
+When(
+  'I compose and send the purchase order email capturing vendor Yopmail from the To field',
+  { timeout: 180000 },
+  async function () {
+    const po = getPurchaseOrderCreatePoPage(this);
+    await po.openActionMenuAndComposeEmail();
+    this.vendorYopmailEmail = await po.readYopmailAddressFromComposeDialog();
     await po.sendEmailFromComposeModal();
   }
 );
