@@ -1,0 +1,27 @@
+---
+description: Automation conventions for this Cucumber + Playwright repo
+alwaysApply: true
+---
+
+# Repo Automation Conventions
+
+## Always follow the 3-layer separation
+
+- **Feature files**: only Gherkin steps + tags/metadata. Do not add Playwright code here.
+- **Step definitions**: only translate a Gherkin `When/Then` into `await pageObject.someMethod(...)`.
+- **Page objects**: all Playwright locators, waits, and UI interactions live here.
+
+## Cucumber Tag Guidance
+
+- For scenarios tagged `@estimate` (under `features/admin/projects/design/estimate/`):
+  - Update `pages/admin/projects/design/estimate/estimate.page.js` with any new UI interaction.
+  - Update `step-definitions/admin/projects/design/estimate/estimate.steps.js` to map the new Gherkin steps to `EstimatePage` methods.
+  - Reuse the existing slow-load pattern when the scenario needs stable rendering:
+    - Prefer `EstimatePage.waitForFormSlowHandling()` (network idle + stable element visible).
+
+## Page object coding style
+
+- Define locators in the constructor.
+- Use `await expect(locator).toBeVisible({ timeout })` before interacting where reasonable.
+- Prefer `waitForNetworkIdle()` (or equivalent) over long arbitrary timeouts.
+

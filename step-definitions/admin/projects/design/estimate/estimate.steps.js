@@ -24,6 +24,11 @@ When('I start estimate from scratch and proceed', { timeout: 120000 }, async fun
   await estimatePage.startFromScratchAndProceed();
 });
 
+When('I fill estimate title with {string}', { timeout: 120000 }, async function (title) {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.fillEstimateTitleOnly(title);
+});
+
 When('I fill estimate mandatory details with title {string}', { timeout: 120000 }, async function (title) {
   const estimatePage = getEstimatePage(this);
   await estimatePage.fillMandatoryDetails({ title, createdOffset: 0, validOffset: 7 });
@@ -46,37 +51,46 @@ When('I add estimate section {string}', { timeout: 120000 }, async function (sec
 
 When('I add manual estimate item with name {string}', { timeout: 120000 }, async function (itemName) {
   const estimatePage = getEstimatePage(this);
-  await estimatePage.addManualItem({
-    name: itemName,
-    description: 'test description',
-    qty: 1,
-    unit: 'Nos',
-    rate: 100,
-    profit: 10
-  });
+  await estimatePage.addManualItem(
+    {
+      name: itemName,
+      description: 'test description',
+      qty: 1,
+      unit: 'Nos',
+      rate: 100,
+      profit: 10
+    },
+    { manualIndex: 0 }
+  );
 });
 
 When('I add another manual estimate item with name {string}', { timeout: 120000 }, async function (itemName) {
   const estimatePage = getEstimatePage(this);
-  await estimatePage.addManualItem({
-    name: itemName,
-    description: 'test description',
-    qty: 1,
-    unit: 'Nos',
-    rate: 100,
-    profit: 10
-  });
+  await estimatePage.addManualItem(
+    {
+      name: itemName,
+      description: 'test description',
+      qty: 1,
+      unit: 'Nos',
+      rate: 100,
+      profit: 10
+    },
+    { manualIndex: 1 }
+  );
 });
 
 When('I try to add manual estimate item without name', { timeout: 120000 }, async function () {
   const estimatePage = getEstimatePage(this);
-  await estimatePage.addManualItem({
-    description: 'test description',
-    qty: 1,
-    unit: 'Nos',
-    rate: 100,
-    profit: 10
-  });
+  await estimatePage.addManualItem(
+    {
+      description: 'test description',
+      qty: 1,
+      unit: 'Nos',
+      rate: 100,
+      profit: 10
+    },
+    { manualIndex: 0 }
+  );
 });
 
 When('I add first item from estimate library', { timeout: 120000 }, async function () {
@@ -137,6 +151,11 @@ When('I add custom estimate column {string} with type {string}', { timeout: 1200
 When('I click estimate action compose email and send', { timeout: 120000 }, async function () {
   const estimatePage = getEstimatePage(this);
   await estimatePage.composeAndSendEmail();
+});
+
+When('I click estimate action compose email', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.openComposeEmail();
 });
 
 When('I attempt to send estimate email', { timeout: 120000 }, async function () {
