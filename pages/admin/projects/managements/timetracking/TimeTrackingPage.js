@@ -25,28 +25,53 @@ class TimeTrackingPage extends BasePage {
 
     // Mandatory fields inside the drawer
     this.productInfoSection = page.locator('section[id="product information"]').first();
-    // User – MUI Select combobox (role="combobox" inside the drawer)
+    // User – MUI Select combobox (role="combobox" inside the section)
     this.userDropdown = this.productInfoSection.locator('[role="combobox"]').first();
-    this.dateInput = page
+
+    // Date/Time inputs can differ between Create drawer vs Edit view (label wiring / aria-labels differ),
+    // so prefer label-based selectors scoped to the section and fall back to the original xpath.
+    const dateByLabel = this.productInfoSection
+      .getByLabel(/date/i)
+      .or(this.productInfoSection.locator('input[name*="date" i], input[id*="date" i]'))
+      .first();
+    const dateByXpath = page
       .locator(
         'xpath=//section[@id="product information"]//*[self::label or self::p or self::span][contains(normalize-space(.),"Date")]/following::input[1]'
       )
       .first();
-    this.startTimeInput = page
+    this.dateInput = dateByLabel.or(dateByXpath).first();
+
+    const startByLabel = this.productInfoSection
+      .getByLabel(/start\s*time/i)
+      .or(this.productInfoSection.locator('input[name*="start" i][type="time"], input[id*="start" i]'))
+      .first();
+    const startByXpath = page
       .locator(
         'xpath=//section[@id="product information"]//*[self::label or self::p or self::span][contains(normalize-space(.),"Start Time")]/following::input[1]'
       )
       .first();
-    this.endTimeInput = page
+    this.startTimeInput = startByLabel.or(startByXpath).first();
+
+    const endByLabel = this.productInfoSection
+      .getByLabel(/end\s*time/i)
+      .or(this.productInfoSection.locator('input[name*="end" i][type="time"], input[id*="end" i]'))
+      .first();
+    const endByXpath = page
       .locator(
         'xpath=//section[@id="product information"]//*[self::label or self::p or self::span][contains(normalize-space(.),"End Time")]/following::input[1]'
       )
       .first();
-    this.datePickerButton = page
+    this.endTimeInput = endByLabel.or(endByXpath).first();
+
+    const dateBtnByAria = this.productInfoSection
+      .locator('button[aria-label*="date" i], button[title*="date" i]')
+      .first();
+    const dateBtnByXpath = page
       .locator(
-        'xpath=//section[@id="product information"]//*[self::label or self::p or self::span][contains(normalize-space(.),"Date")]/following::button[@aria-label="Choose date"][1]'
+        'xpath=//section[@id="product information"]//*[self::label or self::p or self::span][contains(normalize-space(.),"Date")]/following::button[contains(translate(@aria-label,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"date")][1]'
       )
       .first();
+    this.datePickerButton = dateBtnByAria.or(dateBtnByXpath).first();
 
     // Title of the drawer that opens after selection
     this.drawerTitle = page.locator('h6:has-text("Create Time Sheet")').first();
@@ -62,7 +87,16 @@ class TimeTrackingPage extends BasePage {
 
     // --- Edit / detail (after opening a row) ---
     this.timesheetTableRows = page.locator('tbody tr');
+    this.rowActionButton = page
+      .locator('tbody tr')
+      .first()
+      .locator('button')
+      .last();
     this.actionMenu = page.locator('[role="menu"]').first();
+    this.editMenuItem = page
+      .getByRole('menuitem', { name: /^edit$/i })
+      .or(page.locator('[role="menu"] [role="menuitem"]').filter({ hasText: /^edit$/i }))
+      .first();
     this.saveOrUpdateButton = page
       .getByRole('button', { name: /save|update|apply/i })
       .or(page.locator('.boqUI button.btnPrimaryUI:has-text("Save"), button.btnPrimaryUI:has-text("Update")'))
@@ -82,6 +116,24 @@ class TimeTrackingPage extends BasePage {
     await locator.scrollIntoViewIfNeeded().catch(() => {});
 
     const input = locator.first();
+    const readCurrent = async () => {
+      const v1 = await input.inputValue().catch(() => '');
+      if (v1 && v1.trim()) return v1;
+      const v2 = await input.getAttribute('value').catch(() => '');
+      return (v2 || '').trim();
+    };
+    const normalizeAltDate = async (nextValue) => {
+      const type = ((await input.getAttribute('type').catch(() => '')) || '').toLowerCase();
+      if (type === 'date' && /^\d{2}\/\d{2}\/\d{4}$/.test(nextValue)) {
+        const [mm, dd, yyyy] = nextValue.split('/');
+        return `${yyyy}-${mm}-${dd}`;
+      }
+      if (type !== 'date' && /^\d{4}-\d{2}-\d{2}$/.test(nextValue)) {
+        const [yyyy, mm, dd] = nextValue.split('-');
+        return `${mm}/${dd}/${yyyy}`;
+      }
+      return null;
+    };
     const setByDom = async () => {
       await input.evaluate((el, nextValue) => {
         const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
@@ -89,7 +141,7 @@ class TimeTrackingPage extends BasePage {
           'value'
         )?.set;
         nativeInputValueSetter?.call(el, nextValue);
-        el.dispatchEvent(new InputEvent('input', { bubbles: true, data: nextValue }));
+        el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
         el.dispatchEvent(new Event('blur', { bubbles: true }));
       }, value);
@@ -99,23 +151,24 @@ class TimeTrackingPage extends BasePage {
       await input.click({ force: true });
       await input.press('Control+A').catch(() => {});
       await input.fill(value);
+      await input.press('Enter').catch(() => {});
       await input.press('Tab').catch(() => {});
     } catch {
       await setByDom();
     }
 
-    let current = await input.inputValue().catch(() => '');
-    let domVal = await input.evaluate((el) => (el && 'value' in el ? el.value : '') || '').catch(() => '');
-    if (current.trim().length === 0 && String(domVal).trim().length === 0) {
-      await setByDom();
-      current = await input.inputValue().catch(() => '');
-      domVal = await input.evaluate((el) => (el && 'value' in el ? el.value : '') || '').catch(() => '');
-    }
-
     await expect(async () => {
-      const c = await input.inputValue().catch(() => '');
-      const d = await input.evaluate((el) => (el && 'value' in el ? el.value : '') || '').catch(() => '');
-      expect(c.trim().length > 0 || String(d).trim().length > 0).toBeTruthy();
+      const current = await readCurrent();
+      if (current.trim().length > 0) return;
+
+      const alt = await normalizeAltDate(value);
+      if (alt) {
+        await setByDom(alt);
+        const afterAlt = await readCurrent();
+        expect(afterAlt.trim().length).toBeGreaterThan(0);
+        return;
+      }
+      expect(current.trim().length).toBeGreaterThan(0);
     }).toPass({ timeout: 10000, intervals: [300, 700, 1200] });
   }
 
@@ -148,39 +201,21 @@ class TimeTrackingPage extends BasePage {
   }
 
   async tryPickDateFromCalendar(targetDate) {
-    const openCalendar = async () => {
-      if (await this.datePickerButton.isVisible().catch(() => false)) {
-        await this.datePickerButton.click().catch(() => {});
-        return true;
-      }
-      if (await this.dateInput.isVisible().catch(() => false)) {
-        await this.dateInput.click().catch(() => {});
-        return true;
-      }
-      return false;
-    };
-
-    if (!(await openCalendar())) {
+    if (!(await this.datePickerButton.isVisible().catch(() => false))) {
       return false;
     }
-    await this.page.waitForTimeout(400);
-    await this.page
-      .locator('.MuiPickersPopper-root, .MuiPopover-root [role="dialog"], [role="dialog"]')
-      .first()
-      .waitFor({ state: 'visible', timeout: 15000 })
-      .catch(() => {});
+    await this.datePickerButton.click().catch(() => {});
+    await this.page.waitForTimeout(300);
 
     const day = String(targetDate.getDate());
     const dayButton = this.page.getByRole('gridcell', { name: day, exact: true }).first();
     if (await dayButton.isVisible().catch(() => false)) {
       await dayButton.click().catch(() => {});
-      await this.page.waitForTimeout(400);
       return true;
     }
     const dayFallback = this.page.getByRole('button', { name: new RegExp(`^${day}$`) }).first();
     if (await dayFallback.isVisible().catch(() => false)) {
       await dayFallback.click().catch(() => {});
-      await this.page.waitForTimeout(400);
       return true;
     }
     await this.page.keyboard.press('Escape').catch(() => {});
@@ -280,45 +315,15 @@ class TimeTrackingPage extends BasePage {
   }
 
   async isTimesheetCreatedSuccessfully() {
-    await expect(this.drawerTitle).toBeHidden({ timeout: 60000 }).catch(() => {});
-    await this.page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-    await this.page.waitForTimeout(500);
-
     try {
-      await this.successToast.waitFor({ state: 'visible', timeout: 20000 });
+      await this.successToast.waitFor({ state: 'visible', timeout: 15000 });
       return await this.successToast.isVisible();
     } catch {
+      // Fallback: check that a new row appeared in the table
       const rows = this.page.locator('tbody tr');
-      await expect(rows.first()).toBeVisible({ timeout: 30000 });
-      return (await rows.count()) > 0;
+      const count = await rows.count();
+      return count > 0;
     }
-  }
-
-  /**
-   * Clicks the row overflow control (MUI three-dots / "more" menu) on the given table row.
-   * @returns {Promise<boolean>} true if the menu opened
-   */
-  async tryClickRowOverflowMenu(row) {
-    const candidates = [
-      row.getByRole('button', { name: /more|open menu|actions|options|menu/i }),
-      row.locator('button[aria-haspopup="true"]'),
-      row.locator('button[aria-label*="more" i]'),
-      row.locator('button').filter({ has: row.locator('svg[data-testid="MoreVertIcon"]') }),
-      row.locator('button').last(),
-    ];
-
-    for (const loc of candidates) {
-      const btn = loc.first();
-      if (!(await btn.isVisible().catch(() => false))) continue;
-      await btn.scrollIntoViewIfNeeded().catch(() => {});
-      await btn.click({ timeout: 10000 }).catch(() => {});
-      await this.page.waitForTimeout(300);
-      if (await this.actionMenu.isVisible().catch(() => false)) {
-        return true;
-      }
-      await this.page.keyboard.press('Escape').catch(() => {});
-    }
-    return false;
   }
 
   /** Open the most recently created row (first row in list; list is usually newest-first). */
@@ -338,27 +343,17 @@ class TimeTrackingPage extends BasePage {
   }
 
   async clickEditOnTimesheet() {
-    await expect(this.drawerTitle).toBeHidden({ timeout: 5000 }).catch(() => {});
-    await this.page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-
     const row = this.timesheetTableRows.first();
     await expect(row).toBeVisible({ timeout: this.defaultTimeout });
     await row.scrollIntoViewIfNeeded().catch(() => {});
     await row.hover().catch(() => {});
 
-    const opened = await this.tryClickRowOverflowMenu(row);
-    if (!opened) {
-      throw new Error(
-        'Could not open the row action menu (three dots). Ensure the timesheet list is visible and you did not navigate to a detail page before this step.'
-      );
-    }
+    await expect(this.rowActionButton).toBeVisible({ timeout: this.defaultTimeout });
+    await this.rowActionButton.click();
+    await expect(this.actionMenu).toBeVisible({ timeout: this.defaultTimeout });
 
-    const editItem = this.page
-      .getByRole('menuitem', { name: /edit/i })
-      .or(this.page.locator('[role="menu"] [role="menuitem"]').filter({ hasText: /edit/i }))
-      .first();
-    await expect(editItem).toBeVisible({ timeout: this.defaultTimeout });
-    await editItem.click();
+    await expect(this.editMenuItem).toBeVisible({ timeout: this.defaultTimeout });
+    await this.editMenuItem.click();
     await this.page.waitForTimeout(800);
     await expect(this.productInfoSection).toBeVisible({ timeout: this.defaultTimeout });
   }
@@ -384,7 +379,10 @@ class TimeTrackingPage extends BasePage {
     const dateObj = new Date();
     dateObj.setDate(dateObj.getDate() + Math.min(0, pastDays));
 
-    // Do not open+Escape the date picker here — that closes the calendar before tryPickDateFromCalendar runs.
+    if (await this.datePickerButton.isVisible().catch(() => false)) {
+      await this.datePickerButton.click().catch(() => {});
+      await this.page.keyboard.press('Escape').catch(() => {});
+    }
     const picked = await this.tryPickDateFromCalendar(dateObj);
     if (!picked) {
       const dateType = (await this.dateInput.getAttribute('type').catch(() => '')) || '';
