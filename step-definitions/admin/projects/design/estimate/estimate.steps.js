@@ -61,6 +61,11 @@ When('I add estimate section with random 6 letter name', { timeout: 120000 }, as
   await estimatePage.addSection(estimatePage.randomLetters(6));
 });
 
+When('I click Add Section button to add another section', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.clickAddSectionButton();
+});
+
 When('I add manual estimate item with name {string}', { timeout: 120000 }, async function (itemName) {
   const estimatePage = getEstimatePage(this);
   await estimatePage.addManualItem(
@@ -218,6 +223,36 @@ When('I add custom estimate column with random name and Link type', { timeout: 1
 When('I click estimate action compose email and send', { timeout: 120000 }, async function () {
   const estimatePage = getEstimatePage(this);
   await estimatePage.composeAndSendEmail();
+});
+
+When('I save estimate as draft from action menu', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.saveAsDraftFromActionMenu();
+});
+
+When('I open Draft tab in estimate module', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.openDraftTab();
+});
+
+When('I open first draft options menu and click Edit', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.openFirstDraftOptionsAndEdit();
+});
+
+When('I preview estimate and return to edit page', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.previewEstimateAndReturnToEditPage();
+});
+
+When('I preview first drafted estimate and close preview', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.previewFirstDraftAndClose();
+});
+
+When('I compose draft estimate email from Draft tab and send', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.composeDraftEmailFromDraftTabAndSend();
 });
 
 When('I click estimate action compose email', { timeout: 120000 }, async function () {
