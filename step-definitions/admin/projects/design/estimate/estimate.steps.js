@@ -108,9 +108,19 @@ When('I click Add Section button to add another section', { timeout: 120000 }, a
   await estimatePage.clickAddSectionButton();
 });
 
-When('I fill second section name and add manual item details with random data', { timeout: 120000 }, async function () {
+When('I fill second section name and add manual item details with random data', { timeout: 240000 }, async function () {
   const estimatePage = getEstimatePage(this);
   await estimatePage.createSecondSectionAndAddItemRandom();
+});
+
+When('I fill Qty Unit Rate Profit for second section item', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.fillSecondSectionItemCostsRandom();
+});
+
+When('I add material row and fill material details in second section', { timeout: 180000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.addMaterialsAndFillMaterialCostsRandom();
 });
 
 When('I fill Qty Unit Rate Profit and add materials in second section', { timeout: 120000 }, async function () {
@@ -133,7 +143,7 @@ When('I add manual estimate item with name {string}', { timeout: 120000 }, async
   );
 });
 
-When('I add manual estimate item with random 4 letter name', { timeout: 120000 }, async function () {
+When('I add manual estimate item with random 4 letter name', { timeout: 180000 }, async function () {
   const estimatePage = getEstimatePage(this);
   await estimatePage.addManualItem(
     {

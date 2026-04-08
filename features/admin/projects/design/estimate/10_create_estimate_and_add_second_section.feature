@@ -21,4 +21,9 @@ Feature: Estimate create workflow - add second section
     And I add manual estimate item with random 4 letter name
     And I click Add Section button to add another section
     And I fill second section name and add manual item details with random data
+    And I fill Qty Unit Rate Profit for second section item
+    And I add material row and fill material details in second section
+    And I select random Created on and Valid till dates from calendar
+    And I save estimate as draft from action menu
+    And I open Draft tab in estimate module
 
