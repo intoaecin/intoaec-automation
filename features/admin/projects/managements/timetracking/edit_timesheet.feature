@@ -13,8 +13,8 @@ Feature: Edit Timesheet
     And I fill mandatory fields for timesheet
     And I submit the timesheet form
     Then I verify the timesheet is created successfully
-    # Stay on the list: row overflow (three dots) → Edit. Do not open the row first — detail view has no list row menu.
-    When I click Edit on the timesheet
+    When I open the created timesheet
+    And I click Edit on the timesheet
     And I update all prefilled fields on the timesheet
     And I add break time with start and end
     And I select a random AEC work category
