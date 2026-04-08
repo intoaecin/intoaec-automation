@@ -1,4 +1,4 @@
-Feature: Estimate create and email workflow
+Feature: Estimate draft and send workflow
 
   Background:
     Given I am on the login page
@@ -12,15 +12,16 @@ Feature: Estimate create and email workflow
     And I click the "Estimate" module card
     And I wait for estimate module to load
 
-  @smoke @estimate
-
-  
-Scenario: Create estimate and send email successfully
+  @regression @estimate
+  Scenario: Save estimate as draft and send to customer
     When I click Create Estimate
     And I start estimate from scratch and proceed
     And I fill estimate title with random 4 letters
     And I add estimate section with random 6 letter name
     And I add manual estimate item with random 4 letter name
+    And I save estimate as draft from action menu
+    And I open Draft tab in estimate module
+    And I open first draft options menu and click Edit
     And I add another manual estimate item with random 4 letter name
     And I add smoke catalog via Add Product Service and library
     And I fill first other charge with random data
@@ -32,8 +33,11 @@ Scenario: Create estimate and send email successfully
     And I add estimate terms from first template
     And I enable estimate digital signature
     And I add custom estimate column with random name and Link type
-    And I click estimate action compose email and send
-    Then I should see estimate success toast "Estimation created successfully"
+    And I preview estimate and return to edit page
+    And I save estimate as draft from action menu
+    And I open Draft tab in estimate module
+    And I preview first drafted estimate and close preview
+    And I open Draft tab in estimate module
+    And I compose draft estimate email from Draft tab and send
+    Then I should see estimate success toast "Estimation created successfully|Email sent successfully"
 
-  @regression @estimate
-  

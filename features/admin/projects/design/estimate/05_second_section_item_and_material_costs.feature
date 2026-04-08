@@ -1,4 +1,4 @@
-Feature: Estimate create and email workflow
+Feature: Estimate - second section item and materials costs
 
   Background:
     Given I am on the login page
@@ -12,14 +12,14 @@ Feature: Estimate create and email workflow
     And I click the "Estimate" module card
     And I wait for estimate module to load
 
-  @smoke @estimate
-  Scenario: Create estimate and send email from compose email popup
+  @regression @estimate
+  Scenario: Add costs for second section item and material
     When I click Create Estimate
     And I start estimate from scratch and proceed
     And I fill estimate title with random 4 letters
     And I add estimate section with random 6 letter name
     And I add manual estimate item with random 4 letter name
-    And I save estimate as draft from action menu
-    And I open Draft tab in estimate module
+    And I click Add Section button to add another section
+    And I fill second section name and add manual item details with random data
+    And I fill Qty Unit Rate Profit and add materials in second section
 
-  

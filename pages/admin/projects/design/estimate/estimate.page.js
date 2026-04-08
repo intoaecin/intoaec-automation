@@ -37,7 +37,7 @@ class EstimatePage extends BasePage {
     this.columnNameInput = page.getByRole('textbox', { name: /new column name/i }).first();
     this.columnTypeSelect = page.getByText(/^text$/i).first();
     this.applyButton = page.getByRole('button', { name: 'Apply' });
-    this.actionButton = page.getByRole('button', { name: 'Action' });
+    this.actionButton = page.getByRole('button', { name: 'Action', exact: true }).first();
     this.composeEmailButton = page.getByText(/compose email/i).first();
     this.sendEmailButton = page.getByRole('button', { name: /send email/i }).first();
     this.emailDialog = page.locator('[role="dialog"], .modal.show, .offcanvas.show').first();
@@ -56,6 +56,22 @@ class EstimatePage extends BasePage {
     this.editPreviewButton = page.getByRole('button').filter({ hasText: /^$/ }).nth(4);
     this.backToEditBoqLink = page.getByText('Boq', { exact: true }).first();
     this.closePreviewButton = page.getByRole('button').first();
+
+    // Start-from-template locators
+    this.startFromTemplateCard = page
+      .locator('div')
+      .filter({ hasText: /^Start from templateStart building your estimation with our template$/ })
+      .first();
+    this.categoryCombo = page.getByRole('combobox').first();
+    this.subCategoryCombo = page.getByRole('combobox').nth(1);
+    // Template dropdown in the recorded flow had an empty label
+    this.templateCombo = page.getByLabel('', { exact: true }).first();
+    this.yesButton = page.getByRole('button', { name: 'Yes', exact: true }).first();
+    this.estimateMainTab = page.getByRole('main').getByText('Estimate', { exact: true }).first();
+    this.saveAsDraftContinueButton = page.getByRole('button', { name: 'Save as draft & Continue', exact: true }).first();
+
+    // Section name placeholders: per DOM, a div with title="Add section name"
+    this.addSectionNameTitles = page.getByTitle('Add section name');
   }
 
   randomLetters(len) {
@@ -73,6 +89,7 @@ class EstimatePage extends BasePage {
   }
 
   async waitForNetworkIdle() {
+    if (this.page.isClosed()) return;
     await this.page.waitForLoadState('networkidle', { timeout: this.defaultTimeout });
   }
 
@@ -91,6 +108,49 @@ class EstimatePage extends BasePage {
     await this.proceedButton.click();
     // Post-proceed, the form can be heavy and network may never fully go idle; use the repo's slow-load helper.
     await this.waitForFormSlowHandling();
+  }
+
+  async startFromTemplateAndProceed() {
+    await expect(this.startFromTemplateCard).toBeVisible({ timeout: this.defaultTimeout });
+    await this.startFromTemplateCard.click();
+    await expect(this.proceedButton).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(this.proceedButton).toBeEnabled({ timeout: this.defaultTimeout });
+    await this.proceedButton.click();
+  }
+
+  async selectTemplateFromPopup({ category, subCategory, template }) {
+    await expect(this.categoryCombo).toBeVisible({ timeout: this.defaultTimeout });
+    await this.categoryCombo.click();
+    await this.page.getByRole('option', { name: category, exact: true }).click();
+
+    await expect(this.subCategoryCombo).toBeVisible({ timeout: this.defaultTimeout });
+    await this.subCategoryCombo.click();
+    await this.page.getByRole('option', { name: subCategory }).click();
+
+    await expect(this.templateCombo).toBeVisible({ timeout: this.defaultTimeout });
+    await this.templateCombo.click();
+    await this.page.getByRole('option', { name: template }).click();
+  }
+
+  async confirmTemplateSelectionYes() {
+    await expect(this.yesButton).toBeVisible({ timeout: this.defaultTimeout });
+    await this.yesButton.click();
+    await this.waitForFormSlowHandling();
+  }
+
+  async goBackToEstimateMainTab() {
+    await expect(this.estimateMainTab).toBeVisible({ timeout: this.defaultTimeout });
+    await this.estimateMainTab.click();
+    await this.page.waitForTimeout(800);
+  }
+
+  async clickSaveAsDraftContinue() {
+    await expect(this.saveAsDraftContinueButton).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(this.saveAsDraftContinueButton).toBeEnabled({ timeout: this.defaultTimeout });
+    await this.saveAsDraftContinueButton.click();
+    // This screen often keeps background requests open; avoid waiting for full network idle.
+    await this.page.waitForTimeout(1200);
+    await expect(this.draftTab).toBeVisible({ timeout: this.defaultTimeout });
   }
 
   formatDate(offsetDays = 0) {
@@ -118,6 +178,146 @@ class EstimatePage extends BasePage {
 
     await expect(this.validTillInput).toBeVisible({ timeout: this.defaultTimeout });
     await this.validTillInput.fill(this.formatDate(validOffset));
+  }
+
+  async pickRandomCreatedOnAndValidTillFromCalendar() {
+    const pickDay = async (labelText, day) => {
+      const label = this.page.locator(`label:has-text("${labelText}")`).first();
+      await expect(label).toBeVisible({ timeout: this.defaultTimeout });
+
+      const container = label.locator('xpath=ancestor::div[1]');
+      const btn = container.getByRole('button', { name: /choose date/i }).first();
+      await expect(btn).toBeVisible({ timeout: this.defaultTimeout });
+      await btn.click();
+
+      const dayCell = this.page.getByRole('gridcell', { name: String(day), exact: true });
+      await expect(dayCell).toBeVisible({ timeout: this.defaultTimeout });
+      await dayCell.click();
+      await this.page.waitForTimeout(400);
+    };
+
+    const createdDay = 1 + Math.floor(Math.random() * 20); // keep it low so validTill can be >= easily
+    await pickDay('Created on', createdDay);
+
+    // Valid till in UI is typically next month (as per screenshots), so any 1..28 is after created.
+    // If it happens to be same month, we still keep it >= createdDay.
+    let validDay = 1 + Math.floor(Math.random() * 28);
+    if (validDay < createdDay) validDay = Math.min(createdDay + 1, 28);
+    await pickDay('Valid till', validDay);
+  }
+
+  async fillSecondSectionItemAndMaterialCostsRandom() {
+    const sectionIndex = 1;
+    const manualIndex = 0;
+
+    const itemNameContainer = this.itemNameFieldForSectionRow(sectionIndex, manualIndex);
+    await expect(itemNameContainer).toBeVisible({ timeout: this.defaultTimeout });
+    const itemRow = itemNameContainer.locator('xpath=ancestor::tr[1]');
+    await expect(itemRow).toBeVisible({ timeout: this.defaultTimeout });
+
+    const td = itemRow.locator('td');
+
+    const fillSpinFromCell = async (cell, value) => {
+      await cell.scrollIntoViewIfNeeded().catch(() => {});
+      await cell.click({ force: true });
+      // Some MUI grids render an editor without a standard input/role. Type into the focused editor.
+      const txt = String(value);
+      await this.page.keyboard.press('Control+A').catch(() => {});
+      await this.page.keyboard.type(txt, { delay: 20 });
+      await this.page.keyboard.press('Enter').catch(() => this.page.keyboard.press('Tab'));
+      await this.page.waitForTimeout(400);
+    };
+
+    // Qty (1..5) usually in 3rd column.
+    const qty = 1 + Math.floor(Math.random() * 5);
+    await fillSpinFromCell(td.nth(2), qty);
+
+    // Unit dropdown (3rd/4th column depending on UI)
+    const unitCell = td.nth(3);
+    await unitCell.dblclick({ force: true }).catch(() => unitCell.click({ force: true }));
+    const options = this.page.getByRole('option');
+    if (await options.first().isVisible({ timeout: 5000 }).catch(() => false)) {
+      const optCount = await options.count().catch(() => 0);
+      const pick = optCount > 0 ? Math.floor(Math.random() * optCount) : 0;
+      await options.nth(pick).click();
+      await this.page.waitForTimeout(300);
+    } else {
+      // fallback: pick "in" if present
+      await this.page.getByRole('option', { name: 'in', exact: true }).click().catch(() => {});
+      await this.page.waitForTimeout(300);
+    }
+
+    // Rate/Unit (3-digit)
+    const rate = 100 + Math.floor(Math.random() * 900);
+    await fillSpinFromCell(td.nth(4), rate);
+
+    // Profit % (5..30)
+    const profit = 5 + Math.floor(Math.random() * 26);
+    await fillSpinFromCell(td.nth(5), profit);
+
+    // Open item actions menu and click "Add Materials"
+    const actionsBtnInRow = itemRow.getByRole('button', { name: /item-actions/i }).first();
+    if (await actionsBtnInRow.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await actionsBtnInRow.click({ timeout: 20000 });
+    } else {
+      // Fallback to the recorded approach: nth(1)
+      await this.page.getByRole('button', { name: 'item-actions' }).nth(1).click({ timeout: 20000 });
+    }
+    const addMaterials = this.page.locator('li').filter({ hasText: 'Add Materials' }).first();
+    await expect(addMaterials).toBeVisible({ timeout: 15000 });
+    await addMaterials.click();
+    await this.page.waitForTimeout(800);
+
+    // Material row wrapper id (per user): estimate-materialName-wrapper-1-0-0
+    const materialWrapper = this.page.locator('#estimate-materialName-wrapper-1-0-0');
+    await expect(materialWrapper).toBeVisible({ timeout: this.defaultTimeout });
+    const materialRow = materialWrapper.locator('xpath=ancestor::tr[1]');
+    await expect(materialRow).toBeVisible({ timeout: this.defaultTimeout });
+
+    // Material name
+    const matNameCell = materialWrapper.getByText(/add material name/i).first();
+    if (await matNameCell.isVisible().catch(() => false)) {
+      await matNameCell.dblclick();
+      const input = materialWrapper.locator('input, textarea').first();
+      await expect(input).toBeVisible({ timeout: 15000 });
+      await input.fill(this.randomLetters(4));
+      await this.page.keyboard.press('Enter').catch(() => this.page.keyboard.press('Tab'));
+    }
+
+    // Material description
+    const matDescCell = materialWrapper.getByText(/add description/i).first();
+    if (await matDescCell.isVisible().catch(() => false)) {
+      await matDescCell.dblclick().catch(() => matDescCell.click());
+      const descInput = this.page.locator(':focus');
+      const ok = await descInput
+        .evaluate((el) => !!(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')))
+        .catch(() => false);
+      if (ok) {
+        await descInput.fill(this.randomLetters(10));
+        await this.page.keyboard.press('Enter').catch(() => this.page.keyboard.press('Tab'));
+      }
+    }
+
+    // Material Qty/Unit/Rate/Profit (columns 3..6 like items)
+    const mtd = materialRow.locator('td');
+    const mqty = 1 + Math.floor(Math.random() * 5);
+    await fillSpinFromCell(mtd.nth(2), mqty);
+
+    const mUnitCell = mtd.nth(3);
+    await mUnitCell.dblclick({ force: true }).catch(() => mUnitCell.click({ force: true }));
+    const mOptions = this.page.getByRole('option');
+    if (await mOptions.first().isVisible({ timeout: 5000 }).catch(() => false)) {
+      const optCount = await mOptions.count().catch(() => 0);
+      const pick = optCount > 0 ? Math.floor(Math.random() * optCount) : 0;
+      await mOptions.nth(pick).click();
+      await this.page.waitForTimeout(300);
+    }
+
+    const mRate = 100 + Math.floor(Math.random() * 900);
+    await fillSpinFromCell(mtd.nth(4), mRate);
+
+    const mProfit = 5 + Math.floor(Math.random() * 26);
+    await fillSpinFromCell(mtd.nth(5), mProfit);
   }
 
   async addSection(name) {
@@ -160,6 +360,159 @@ class EstimatePage extends BasePage {
 
   rowForManualIndex(manualIndex) {
     return this.itemNameFieldForRow(manualIndex).locator('xpath=ancestor::tr[1]');
+  }
+
+  itemNameFieldForSectionRow(sectionIndex, manualIndex) {
+    return this.page.locator(`#estimate-itemName-${sectionIndex}-${manualIndex}`);
+  }
+
+  async fillSectionNameAtIndex(sectionIndex, name) {
+    const titleCell = this.addSectionNameTitles.nth(sectionIndex);
+    if (await titleCell.isVisible().catch(() => false)) {
+      await titleCell.scrollIntoViewIfNeeded().catch(() => {});
+      await titleCell.dblclick();
+      await expect(this.sectionNameInput).toBeVisible({ timeout: this.defaultTimeout });
+      await this.sectionNameInput.fill(name);
+      await this.page.keyboard.press('Enter').catch(() => this.page.keyboard.press('Tab'));
+      await this.page.waitForTimeout(600);
+      return;
+    }
+
+    // Fallback: the page uses text placeholders
+    const placeholder = this.addSectionNamePlaceholders.nth(sectionIndex);
+    await expect(placeholder).toBeVisible({ timeout: this.defaultTimeout });
+    await placeholder.dblclick();
+    await expect(this.sectionNameInput).toBeVisible({ timeout: this.defaultTimeout });
+    await this.sectionNameInput.fill(name);
+    await this.page.keyboard.press('Enter').catch(() => this.page.keyboard.press('Tab'));
+    await this.page.waitForTimeout(600);
+  }
+
+  async ensureSectionExpanded(sectionIndex) {
+    // In the DOM screenshots, each section header row has a chevron button (ExpandMoreIcon) when collapsed.
+    const droppable = this.page.locator(`[data-rbd-droppable-id="ITEMS/${sectionIndex}"]`).first();
+    if (await droppable.isVisible({ timeout: 2000 }).catch(() => false)) {
+      const headerRow = droppable.locator('tr').first();
+      const expandMore = headerRow.locator('button:has([data-testid="ExpandMoreIcon"])').first();
+      if (await expandMore.isVisible({ timeout: 1000 }).catch(() => false)) {
+        await expandMore.click({ timeout: 20000 });
+        await this.page.waitForTimeout(600);
+      }
+      return;
+    }
+
+    // Fallback: click the section header placeholder/title if we can't reach the droppable directly.
+    const titleCell = this.addSectionNameTitles.nth(sectionIndex);
+    if (await titleCell.isVisible({ timeout: 1500 }).catch(() => false)) {
+      const row = titleCell.locator('xpath=ancestor::tr[1]');
+      const expandMore = row.locator('button:has([data-testid="ExpandMoreIcon"])').first();
+      if (await expandMore.isVisible({ timeout: 1000 }).catch(() => false)) {
+        await expandMore.click({ timeout: 20000 });
+        await this.page.waitForTimeout(600);
+      }
+    }
+  }
+
+  async createSecondSectionAndAddItemRandom() {
+    // Resolve the newly added section as the last ITEMS/* droppable.
+    const droppables = this.page.locator('[data-rbd-droppable-id^="ITEMS/"]');
+    await expect(droppables.first()).toBeVisible({ timeout: this.defaultTimeout });
+    const sectionBody = droppables.last();
+    await expect(sectionBody).toBeVisible({ timeout: this.defaultTimeout });
+
+    // Expand section body if needed (header row within droppable)
+    const bodyHeaderRow = sectionBody.locator('tr[role="button"]').first();
+    const bodyExpandMore = bodyHeaderRow.locator('button:has([data-testid="ExpandMoreIcon"])').first();
+    if (await bodyExpandMore.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await bodyExpandMore.click({ timeout: 20000 });
+      await this.page.waitForTimeout(600);
+    }
+
+    // If there is an "Add Manually" CTA in this section, click it to render the first item row.
+    const addManuallyLink = sectionBody.getByText(/add manually/i).first();
+    if (await addManuallyLink.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await addManuallyLink.click({ timeout: 20000 });
+      await this.page.waitForTimeout(800);
+    }
+
+    // Add item name in this section
+    const addItemText = sectionBody.getByText(/add item name/i).first();
+    await expect(addItemText).toBeVisible({ timeout: this.defaultTimeout });
+    await addItemText.dblclick({ timeout: 20000 }).catch(() => addItemText.click({ clickCount: 2, delay: 120 }));
+
+    const itemNameInput = sectionBody.locator('input').first();
+    await expect(itemNameInput).toBeVisible({ timeout: this.defaultTimeout });
+    await itemNameInput.fill(this.randomLetters(4));
+    await this.page.keyboard.press('Enter').catch(() => this.page.keyboard.press('Tab'));
+    await this.page.waitForTimeout(700);
+  }
+
+  async addManualItemInSection(sectionIndex, item, { manualIndex = 0 } = {}) {
+    // If adding a second item in the same section, click Add Manually first
+    if (manualIndex > 0) {
+      const addManuallyBtn = this.page.getByText('Add Manually', { exact: false }).first();
+      await expect(addManuallyBtn).toBeVisible({ timeout: this.defaultTimeout });
+      await addManuallyBtn.click();
+      await this.page.waitForTimeout(1000);
+    }
+
+    let itemNameContainer = this.itemNameFieldForSectionRow(sectionIndex, manualIndex);
+    const directVisible = await itemNameContainer.isVisible({ timeout: 3000 }).catch(() => false);
+    if (!directVisible) {
+      // Fallback: resolve by section droppable (second sections sometimes render different ids).
+      const droppables = this.page.locator('[data-rbd-droppable-id^="ITEMS/"]');
+      await expect(droppables.first()).toBeVisible({ timeout: this.defaultTimeout });
+      const droppable = (await droppables.nth(sectionIndex).isVisible({ timeout: 1500 }).catch(() => false))
+        ? droppables.nth(sectionIndex)
+        : droppables.last();
+
+      const byId = droppable.locator(`[id^="estimate-itemName-${sectionIndex}-"]`).nth(manualIndex);
+      const anyInSection = droppable.locator('[id^="estimate-itemName-"]').nth(manualIndex);
+      itemNameContainer = (await byId.count().catch(() => 0)) > 0 ? byId : anyInSection;
+    }
+
+    await expect
+      .poll(async () => itemNameContainer.isVisible().catch(() => false), {
+        timeout: this.defaultTimeout,
+        intervals: [300, 600, 1200]
+      })
+      .toBeTruthy();
+    const addItemText = itemNameContainer.getByText('Add Item name', { exact: false }).first();
+    await expect(addItemText).toBeVisible({ timeout: this.defaultTimeout });
+    await addItemText.dblclick();
+
+    const itemNameInput = itemNameContainer.locator('input').first();
+    await expect(itemNameInput).toBeVisible({ timeout: this.defaultTimeout });
+    await itemNameInput.fill(item.name);
+    await this.page.keyboard.press('Enter');
+    await this.page.waitForTimeout(700);
+
+    const row = itemNameContainer.locator('xpath=ancestor::tr[1]');
+
+    // Description (best-effort; some builds show textarea)
+    if (item.description) {
+      const desc = row
+        .locator('textarea[placeholder*="Description" i], input[placeholder*="Description" i], textarea[name*="description" i], input[name*="description" i]')
+        .first();
+      if (await desc.isVisible().catch(() => false)) {
+        await desc.fill(String(item.description));
+        await this.page.keyboard.press('Enter').catch(() => this.page.keyboard.press('Tab'));
+      }
+    }
+
+    // Material name (best-effort; placeholder/name varies)
+    if (item.material) {
+      const material = row
+        .locator('input[placeholder*="material" i], textarea[placeholder*="material" i], input[name*="material" i], textarea[name*="material" i]')
+        .first();
+      if (await material.isVisible().catch(() => false)) {
+        await material.fill(String(item.material));
+        await this.page.keyboard.press('Enter').catch(() => this.page.keyboard.press('Tab'));
+      }
+    }
+
+    // Background requests can stay open; don't wait for full network idle here.
+    await this.page.waitForTimeout(800);
   }
 
   async addManualItem(item, { manualIndex = 0 } = {}) {

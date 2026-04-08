@@ -26,6 +26,43 @@ When('I start estimate from scratch and proceed', { timeout: 120000 }, async fun
   await estimatePage.startFromScratchAndProceed();
 });
 
+When('I start estimate from template and proceed', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.startFromTemplateAndProceed();
+});
+
+When('I select estimate template category {string}', { timeout: 120000 }, async function (category) {
+  this._estimateTemplateSelection = { ...(this._estimateTemplateSelection || {}), category };
+});
+
+When('I select estimate template sub category {string}', { timeout: 120000 }, async function (subCategory) {
+  this._estimateTemplateSelection = { ...(this._estimateTemplateSelection || {}), subCategory };
+});
+
+When('I select estimate template {string}', { timeout: 120000 }, async function (template) {
+  const estimatePage = getEstimatePage(this);
+  const current = this._estimateTemplateSelection || {};
+  const category = current.category || 'Commercial';
+  const subCategory = current.subCategory || 'Waterproofing';
+  await estimatePage.selectTemplateFromPopup({ category, subCategory, template });
+  this._estimateTemplateSelection = { category, subCategory, template };
+});
+
+When('I confirm estimate template selection', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.confirmTemplateSelectionYes();
+});
+
+When('I click back to Estimate page', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.goBackToEstimateMainTab();
+});
+
+When('I click Save as draft & Continue', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.clickSaveAsDraftContinue();
+});
+
 When('I fill estimate title with {string}', { timeout: 120000 }, async function (title) {
   const estimatePage = getEstimatePage(this);
   await estimatePage.fillEstimateTitleOnly(title);
@@ -34,6 +71,11 @@ When('I fill estimate title with {string}', { timeout: 120000 }, async function 
 When('I fill estimate title with random 4 letters', { timeout: 120000 }, async function () {
   const estimatePage = getEstimatePage(this);
   await estimatePage.fillEstimateTitleOnly(estimatePage.randomLetters(4));
+});
+
+When('I select random Created on and Valid till dates from calendar', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.pickRandomCreatedOnAndValidTillFromCalendar();
 });
 
 When('I fill estimate mandatory details with title {string}', { timeout: 120000 }, async function (title) {
@@ -64,6 +106,16 @@ When('I add estimate section with random 6 letter name', { timeout: 120000 }, as
 When('I click Add Section button to add another section', { timeout: 120000 }, async function () {
   const estimatePage = getEstimatePage(this);
   await estimatePage.clickAddSectionButton();
+});
+
+When('I fill second section name and add manual item details with random data', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.createSecondSectionAndAddItemRandom();
+});
+
+When('I fill Qty Unit Rate Profit and add materials in second section', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.fillSecondSectionItemAndMaterialCostsRandom();
 });
 
 When('I add manual estimate item with name {string}', { timeout: 120000 }, async function (itemName) {

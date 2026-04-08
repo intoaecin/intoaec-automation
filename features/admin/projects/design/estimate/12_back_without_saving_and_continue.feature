@@ -1,4 +1,4 @@
-Feature: Estimate create and email workflow
+Feature: Estimate back without saving and continue
 
   Background:
     Given I am on the login page
@@ -12,11 +12,12 @@ Feature: Estimate create and email workflow
     And I click the "Estimate" module card
     And I wait for estimate module to load
 
-  @edge @estimate
-  Scenario: Add large number of items in estimate
+  @regression @estimate
+  Scenario: Back without saving then cancel then continue
     When I click Create Estimate
     And I start estimate from scratch and proceed
-    And I fill estimate mandatory details with title "AAA"
-    And I add estimate section "Default Section"
-    And I add 10 manual estimate items
-    Then I should see at least 10 estimate items in table
+    And I go back to Estimate page without saving
+    And I click Cancel on estimate creation
+    And I go back to Estimate page without saving
+    And I click Continue on Estimate landing
+

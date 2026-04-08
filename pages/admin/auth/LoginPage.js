@@ -16,8 +16,21 @@ class LoginPage extends BasePage {
   }
 
   async login(email, password) {
-    await this.emailInput.fill(email);
-    await this.passwordInput.fill(password);
+    // The sign-in form can re-render, detaching inputs; do guarded fill + retry.
+    await this.emailInput.waitFor({ state: 'visible', timeout: 15000 });
+    await this.passwordInput.waitFor({ state: 'visible', timeout: 15000 });
+
+    await this.emailInput.fill(email).catch(async () => {
+      await this.page.waitForTimeout(300);
+      await this.emailInput.fill(email);
+    });
+
+    await this.passwordInput.fill(password).catch(async () => {
+      await this.page.waitForTimeout(300);
+      await this.passwordInput.fill(password);
+    });
+
+    await this.loginButton.waitFor({ state: 'visible', timeout: 15000 });
     await this.loginButton.click();
   }
 

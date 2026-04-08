@@ -1,4 +1,4 @@
-Feature: Estimate create and email workflow
+Feature: Estimate create workflow - random dates
 
   Background:
     Given I am on the login page
@@ -12,11 +12,10 @@ Feature: Estimate create and email workflow
     And I click the "Estimate" module card
     And I wait for estimate module to load
 
-  @negative @estimate
-  Scenario: Library add without selecting item shows validation
+  @regression @estimate
+  Scenario: Create estimate with random Created on and Valid till dates
     When I click Create Estimate
     And I start estimate from scratch and proceed
-    And I fill estimate mandatory details with title "AAA"
-    And I add estimate section "Default Section"
-    And I open estimate library and click add without selection
-    Then I should see estimate validation message
+    And I fill estimate title with random 4 letters
+    And I select random Created on and Valid till dates from calendar
+

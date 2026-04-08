@@ -3,9 +3,6 @@ const fs = require('fs');
 const path = require('path');
 const { closeSharedSession } = require('./world');
 
-setDefaultTimeout(30000);
-const { Before, After, AfterStep, setDefaultTimeout } = require('@cucumber/cucumber');
-
 /** Default step/scenario timeout (ms) — see AGENTS.md */
 setDefaultTimeout(60000);
 
@@ -39,7 +36,7 @@ Before(async function () {
 });
 
 After(async function (scenario) {
-  if (scenario.result.status === 'FAILED' && this.page) {
+  if (scenario.result.status === 'FAILED' && this.page && !this.page.isClosed()) {
     const screenshotDir = path.join(process.cwd(), 'screenshots');
     const safeName = scenario.pickle.name.replace(/[<>:"/\\|?*]+/g, '_');
     fs.mkdirSync(screenshotDir, { recursive: true });

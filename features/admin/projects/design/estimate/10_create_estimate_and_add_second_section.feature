@@ -20,5 +20,5 @@ Feature: Estimate create workflow - add second section
     And I add estimate section with random 6 letter name
     And I add manual estimate item with random 4 letter name
     And I click Add Section button to add another section
-    
+    And I fill second section name and add manual item details with random data
 
