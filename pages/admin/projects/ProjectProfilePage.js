@@ -19,12 +19,23 @@ class ProjectProfilePage extends BasePage {
 
   async clickModuleCard(name) {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const label = this.page
-      .getByText(new RegExp(`^\\s*${escaped}\\s*$`, 'i'))
-      .first();
+    const text = new RegExp(`^\\s*${escaped}\\s*$`, 'i');
+
+    // Prefer clicking inside the main content area to avoid hidden sidebar duplicates.
+    const main = this.page.locator('main, [role="main"]').first();
+    const scope = (await main.isVisible({ timeout: 1500 }).catch(() => false)) ? main : this.page;
+
+    const label = scope.getByText(text).first();
     await label.scrollIntoViewIfNeeded();
     await expect(label).toBeVisible({ timeout: 60000 });
-    await label.click();
+
+    // Click the closest clickable ancestor (card/button/link) rather than the text span itself.
+    const clickable = label.locator('xpath=ancestor-or-self::*[self::button or self::a or @role="button"][1]');
+    if (await clickable.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await clickable.click();
+    } else {
+      await label.click();
+    }
     await this.page.waitForLoadState('domcontentloaded');
   }
 }

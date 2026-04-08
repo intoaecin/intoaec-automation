@@ -1,9 +1,17 @@
 const { setWorldConstructor } = require('@cucumber/cucumber');
 const { chromium } = require('playwright');
 
+function isHeadlessRun() {
+  return (
+    process.env.HEADLESS === 'true' ||
+    process.env.CI === 'true' ||
+    process.env.HEADED === 'false'
+  );
+}
+
 class CustomWorld {
   async init() {
-    const headed = process.env.HEADED === 'true';
+    const headed = !isHeadlessRun();
     this.browser = await chromium.launch({
       headless: !headed,
       args: headed ? ['--start-maximized'] : [],

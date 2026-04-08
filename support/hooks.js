@@ -15,6 +15,10 @@ function isHeadlessRun() {
   );
 }
 
+function isHeadedRun() {
+  return !isHeadlessRun();
+}
+
 function getStepDelayMs() {
   if (isHeadlessRun()) return 0;
   const raw = process.env.STEP_DELAY_MS;
@@ -45,7 +49,7 @@ After(async function () {
 
 /**
  * After each step in @po-smoke-full-journey (or legacy @po-smoke-po) or @po-full-flow: pause for headed runs.
- * PO_FLOW_STEP_PAUSE_MS: milliseconds (0 = off). If unset and HEADED=true, default 800ms.
+ * PO_FLOW_STEP_PAUSE_MS: milliseconds (0 = off). If unset during headed runs, default 800ms.
  */
 AfterStep(async function () {
   if (!this.poSmokeStepPause || !this.page) {
@@ -57,7 +61,7 @@ AfterStep(async function () {
     process.env.PO_FLOW_STEP_PAUSE_MS !== ''
   ) {
     ms = Number(process.env.PO_FLOW_STEP_PAUSE_MS);
-  } else if (process.env.HEADED === 'true') {
+  } else if (isHeadedRun()) {
     ms = 800;
   } else {
     ms = 0;

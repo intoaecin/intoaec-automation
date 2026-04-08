@@ -43,6 +43,19 @@ class EstimatePage extends BasePage {
     this.emailDialog = page.locator('[role="dialog"], .modal.show, .offcanvas.show').first();
     this.recipientInput = page.locator('input[placeholder*="To"], input[name*="recipient"], input[name*="email"]').first();
     this.validationMessage = page.locator('[role="alert"], .toast-message, .ant-message-notice-content, .invalid-feedback').first();
+    // Default section title before rename (match anywhere visible; RBD subtree alone is unreliable in some builds).
+    this.addSectionNamePlaceholders = page.getByText(/add section name/i);
+    this.itemDroppableSections = page.locator('[data-rbd-droppable-id^="ITEMS/"]');
+
+    // Draft-related locators
+    this.saveAsDraftMenuItem = page.getByRole('menuitem', { name: /save as draft/i }).first();
+    this.draftTab = page.getByRole('tab', { name: 'Draft', exact: true }).first();
+    this.draftRowOptionsButton = page.locator('[id^="demo-customized-button"]').first();
+    this.editMenuItem = page.getByRole('menuitem', { name: 'Edit', exact: true }).first();
+    // Provided locator: getByRole('button').filter({ hasText: /^$/ }).nth(4)
+    this.editPreviewButton = page.getByRole('button').filter({ hasText: /^$/ }).nth(4);
+    this.backToEditBoqLink = page.getByText('Boq', { exact: true }).first();
+    this.closePreviewButton = page.getByRole('button').first();
   }
 
   randomLetters(len) {
@@ -66,7 +79,8 @@ class EstimatePage extends BasePage {
   async clickCreateEstimate() {
     await expect(this.createEstimateButton).toBeVisible({ timeout: this.defaultTimeout });
     await this.createEstimateButton.click();
-    await this.waitForNetworkIdle();
+    // Network can stay "busy" on dashboards; wait for the next UI state instead.
+    await expect(this.startFromScratchButton).toBeVisible({ timeout: this.defaultTimeout });
   }
 
   async startFromScratchAndProceed() {
@@ -75,8 +89,8 @@ class EstimatePage extends BasePage {
     await expect(this.proceedButton).toBeVisible({ timeout: this.defaultTimeout });
     await expect(this.proceedButton).toBeEnabled({ timeout: this.defaultTimeout });
     await this.proceedButton.click();
-    await this.waitForNetworkIdle();
-    await this.page.waitForTimeout(3000);
+    // Post-proceed, the form can be heavy and network may never fully go idle; use the repo's slow-load helper.
+    await this.waitForFormSlowHandling();
   }
 
   formatDate(offsetDays = 0) {
@@ -114,6 +128,30 @@ class EstimatePage extends BasePage {
     await this.sectionNameInput.fill(name);
     await this.page.keyboard.press('Tab').catch(() => {});
     await this.page.waitForTimeout(600);
+  }
+
+  async clickAddSectionButton() {
+    // Footer "+ Add Section" is usually the last button matching this name.
+    const toolbarBtn = this.page.getByRole('button', { name: /add section/i }).last();
+    await expect(toolbarBtn).toBeVisible({ timeout: this.defaultTimeout });
+    await toolbarBtn.scrollIntoViewIfNeeded();
+
+    const beforePlaceholders = await this.addSectionNamePlaceholders.count();
+    const beforeDroppables = await this.itemDroppableSections.count();
+
+    await toolbarBtn.click();
+    await this.page.waitForTimeout(800);
+
+    await expect
+      .poll(
+        async () => {
+          const titles = await this.addSectionNamePlaceholders.count();
+          const drops = await this.itemDroppableSections.count();
+          return titles > beforePlaceholders || drops > beforeDroppables;
+        },
+        { timeout: this.defaultTimeout, intervals: [200, 400, 800, 1500] }
+      )
+      .toBeTruthy();
   }
 
   itemNameFieldForRow(manualIndex) {
@@ -465,6 +503,112 @@ class EstimatePage extends BasePage {
     await this.waitForNetworkIdle();
   }
 
+  async saveAsDraftFromActionMenu() {
+    const actionBtn = this.page.getByRole('button', { name: 'Action', exact: true }).first();
+    await expect(actionBtn).toBeVisible({ timeout: this.defaultTimeout });
+    await this.page.waitForTimeout(2000);
+    await actionBtn.click();
+    await this.page.waitForTimeout(2000);
+
+    await expect(this.saveAsDraftMenuItem).toBeVisible({ timeout: this.defaultTimeout });
+    await this.saveAsDraftMenuItem.click();
+    await this.page.waitForTimeout(1000);
+    await this.waitForNetworkIdle().catch(() => {});
+  }
+
+  async openDraftTab() {
+    await expect(this.draftTab).toBeVisible({ timeout: this.defaultTimeout });
+    await this.draftTab.click();
+    await this.page.waitForTimeout(1000);
+    await this.waitForNetworkIdle().catch(() => {});
+  }
+
+  async openFirstDraftOptionsAndEdit() {
+    await expect(this.draftRowOptionsButton).toBeVisible({ timeout: this.defaultTimeout });
+    await this.draftRowOptionsButton.click();
+    await expect(this.editMenuItem).toBeVisible({ timeout: this.defaultTimeout });
+    await this.editMenuItem.click();
+    await this.waitForNetworkIdle().catch(() => {});
+    await this.waitForFormSlowHandling();
+  }
+
+  async previewEstimateAndReturnToEditPage() {
+    await expect(this.editPreviewButton).toBeVisible({ timeout: this.defaultTimeout });
+    await this.editPreviewButton.click();
+    await this.page.waitForTimeout(1500);
+    await expect(this.backToEditBoqLink).toBeVisible({ timeout: this.defaultTimeout });
+    await this.backToEditBoqLink.click();
+    await this.page.waitForTimeout(800);
+  }
+
+  async previewFirstDraftAndClose() {
+    const directCandidates = [
+      this.page.getByRole('button', { name: /preview/i }).first(),
+      this.page.locator('[aria-label*="preview" i], [title*="preview" i]').first(),
+      this.page
+        .locator('svg[data-testid="VisibilityIcon"], svg[data-testid="PreviewIcon"], svg[aria-label*="preview" i]')
+        .first()
+        .locator('xpath=ancestor::button[1]')
+        .first()
+    ];
+
+    let opened = false;
+    for (const c of directCandidates) {
+      if (await c.isVisible().catch(() => false)) {
+        await c.click();
+        opened = true;
+        break;
+      }
+    }
+
+    if (!opened) {
+      // Some builds put preview under the row "..." options menu.
+      if (await this.draftRowOptionsButton.isVisible().catch(() => false)) {
+        await this.draftRowOptionsButton.click();
+        const previewMenu = this.page.getByRole('menuitem', { name: /preview|view/i }).first();
+        if (await previewMenu.isVisible().catch(() => false)) {
+          await previewMenu.click();
+          opened = true;
+        }
+      }
+    }
+
+    if (!opened) {
+      throw new Error('Could not find a Preview control in Draft tab');
+    }
+
+    await this.page.waitForTimeout(1000);
+    const closeBtn = this.page.getByRole('button', { name: /close/i }).first();
+    if (await closeBtn.isVisible().catch(() => false)) {
+      await closeBtn.click();
+    } else if (await this.closePreviewButton.isVisible().catch(() => false)) {
+      await this.closePreviewButton.click();
+    } else {
+      await this.page.keyboard.press('Escape').catch(() => {});
+    }
+
+    await this.page.waitForTimeout(800);
+  }
+
+  async composeDraftEmailFromDraftTabAndSend() {
+    const actionBtn = this.page.getByRole('button', { name: 'Action', exact: true }).first();
+    await expect(actionBtn).toBeVisible({ timeout: this.defaultTimeout });
+    await this.page.waitForTimeout(2000);
+    await actionBtn.click();
+    await this.page.waitForTimeout(2000);
+
+    const composeMenuItem = this.page.getByRole('menuitem', { name: /compose email/i }).first();
+    await expect(composeMenuItem).toBeVisible({ timeout: this.defaultTimeout });
+    await composeMenuItem.click();
+
+    const sendBtn = this.page.getByRole('button', { name: 'Send Email' }).first();
+    await expect(sendBtn).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(sendBtn).toBeEnabled({ timeout: this.defaultTimeout });
+    await sendBtn.click();
+    await this.page.waitForTimeout(1500);
+    await this.waitForNetworkIdle();
+  }
+
   async openComposeEmail() {
     await expect(this.actionButton).toBeVisible({ timeout: this.defaultTimeout });
     await this.actionButton.click();
@@ -518,8 +662,10 @@ class EstimatePage extends BasePage {
   }
 
   async waitForFormSlowHandling() {
-    await this.waitForNetworkIdle();
+    // Some pages keep long-polling, so "networkidle" can hang. Gate readiness on a stable element first.
+    await this.page.waitForLoadState('domcontentloaded', { timeout: this.defaultTimeout }).catch(() => {});
     await expect(this.estimateTitleInput).toBeVisible({ timeout: this.defaultTimeout });
+    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
   }
 
   async expectValidationMessageVisible() {
@@ -527,12 +673,16 @@ class EstimatePage extends BasePage {
   }
 
   async isToastVisible(message) {
-    const needle = message.trim();
-    const variants = [
-      needle,
-      needle.replace(/\bestimation\b/i, 'estimate'),
-      needle.replace(/\bestimate\b/i, 'estimation')
-    ];
+    const needles = String(message)
+      .split('|')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const variants = needles.flatMap((n) => [
+      n,
+      n.replace(/\bestimation\b/i, 'estimate'),
+      n.replace(/\bestimate\b/i, 'estimation')
+    ]);
 
     // Toastify often animates in/out; Playwright "visible" can be flaky. Poll DOM text instead.
     await expect
@@ -561,14 +711,14 @@ class EstimatePage extends BasePage {
       .poll(
         async () =>
           this.page.evaluate((n) => {
-            const want = n.toLowerCase();
+            const want = String(n || '').toLowerCase();
             const collapse = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
             const roots = document.querySelectorAll('.Toastify, #react-toastify');
             for (const el of roots) {
               if (collapse(el.textContent).includes(want)) return false;
             }
             return true;
-          }, needle),
+          }, needles[0] || ''),
         { timeout: 20000, intervals: [500, 1000] }
       )
       .toBeTruthy()
