@@ -22,9 +22,9 @@ Feature: Purchase Order — vendor accepts PO via Yopmail (same browser)
 
   Scenario: Create PO, send email, Yopmail View PO, vendor accepts
     When I start creating a purchase order from scratch
-    And I fill purchase order title with "Vendor Yopmail PO"
+    And I fill purchase order title with "PO - Cable wire procurement (Vendor accept via Yopmail)"
     And I add the first vendor from the vendor modal
-    And I add a manual line item with name "cable wire" description "vendor flow" quantity "10" unit "Nos" rate "2000"
+    And I add a manual line item with name "cable wire" description "Cable wire procurement for project needs — vendor to review and accept." quantity "10" unit "Nos" rate "2000"
     And I compose and send the purchase order email capturing vendor Yopmail from the To field
     Then I should see the purchase order created and sent success toast
     When I open Yopmail for the vendor in a new browser tab

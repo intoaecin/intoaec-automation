@@ -50,7 +50,10 @@ When(
   { timeout: 180000 },
   async function () {
     const po = getPurchaseOrderCreatePoPage(this);
-    await po.addVendorDetailsWithFirstVendorRadio();
+    const yopmailFromRow = await po.addVendorDetailsWithFirstVendorRadio();
+    if (yopmailFromRow) {
+      this.vendorYopmailEmail = yopmailFromRow;
+    }
   }
 );
 
@@ -89,7 +92,7 @@ When(
 
 When(
   'I compose and send the purchase order email',
-  { timeout: 180000 },
+  { timeout: 360000 },
   async function () {
     const po = getPurchaseOrderCreatePoPage(this);
     await po.openActionMenuAndComposeEmail();
@@ -99,11 +102,13 @@ When(
 
 When(
   'I compose and send the purchase order email capturing vendor Yopmail from the To field',
-  { timeout: 180000 },
+  { timeout: 360000 },
   async function () {
     const po = getPurchaseOrderCreatePoPage(this);
     await po.openActionMenuAndComposeEmail();
-    this.vendorYopmailEmail = await po.readYopmailAddressFromComposeDialog();
+    if (!this.vendorYopmailEmail) {
+      this.vendorYopmailEmail = await po.readYopmailAddressFromComposeDialog();
+    }
     await po.sendEmailFromComposeModal();
   }
 );

@@ -140,7 +140,7 @@ class PurchaseOrderImportPdfPage extends PurchaseOrderCreatePoPage {
   }
 
   async fillPurchaseOrderTitleWithRandomValue() {
-    const title = `Import PO ${Date.now()}`;
+    const title = `PO - PDF import (Materials) - ${Date.now()}`;
     await this.fillPurchaseOrderTitle(title);
     return title;
   }

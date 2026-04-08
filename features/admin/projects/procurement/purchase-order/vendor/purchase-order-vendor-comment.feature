@@ -16,9 +16,9 @@ Feature: Purchase Order — vendor adds comment via Yopmail (same browser)
 
   Scenario: Create PO, send email, Yopmail View PO, vendor submits comment
     When I start creating a purchase order from scratch
-    And I fill purchase order title with "Vendor Comment Yopmail PO"
+    And I fill purchase order title with "PO - Cable wire procurement (Vendor comment via Yopmail)"
     And I add the first vendor from the vendor modal
-    And I add a manual line item with name "cable wire" description "vendor comment" quantity "10" unit "Nos" rate "2000"
+    And I add a manual line item with name "cable wire" description "Cable wire required for project procurement — vendor to review and add comment." quantity "10" unit "Nos" rate "2000"
     And I compose and send the purchase order email capturing vendor Yopmail from the To field
     Then I should see the purchase order created and sent success toast
     When I open Yopmail for the vendor in a new browser tab

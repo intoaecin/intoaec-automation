@@ -17,9 +17,9 @@ Feature: Purchase Order — vendor declines PO via Yopmail (same browser)
 
   Scenario: Create PO, send email, Yopmail View PO, vendor declines
     When I start creating a purchase order from scratch
-    And I fill purchase order title with "Vendor Declined Yopmail PO"
+    And I fill purchase order title with "PO - Cable wire procurement (Vendor decline via Yopmail)"
     And I add the first vendor from the vendor modal
-    And I add a manual line item with name "cable wire" description "vendor decline" quantity "10" unit "Nos" rate "2000"
+    And I add a manual line item with name "cable wire" description "Cable wire procurement request — vendor to review and decline if not available." quantity "10" unit "Nos" rate "2000"
     And I compose and send the purchase order email capturing vendor Yopmail from the To field
     Then I should see the purchase order created and sent success toast
     When I open Yopmail for the vendor in a new browser tab
