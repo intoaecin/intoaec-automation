@@ -8,6 +8,8 @@ class PurchaseOrderCreatePoPage extends BasePage {
   constructor(page) {
     super(page);
     this.defaultTimeout = 120000;
+    /** Compose modal often waits on APIs before To/subject render and Send enables. */
+    this.composeModalTimeout = Number(process.env.PO_COMPOSE_MODAL_TIMEOUT_MS) || 180000;
   }
 
   async waitForNetworkSettled() {
@@ -130,6 +132,23 @@ class PurchaseOrderCreatePoPage extends BasePage {
     await this.waitForNetworkSettled();
   }
 
+  /**
+   * @returns {string | null} *@yopmail.com from the first vendor row if present (avoids reading compose To later).
+   */
+  async tryReadYopmailFromVendorModalFirstRow(vendorModal) {
+    const yopRe = /[\w.+-]+@yopmail\.com/i;
+    const row = vendorModal.locator('table tbody tr').first();
+    if (!(await row.isVisible({ timeout: 8000 }).catch(() => false))) {
+      return null;
+    }
+    const text = (await row.innerText().catch(() => '')) || '';
+    const m = text.match(yopRe);
+    return m ? m[0].toLowerCase() : null;
+  }
+
+  /**
+   * @returns {Promise<string | null>} Yopmail seen on the selected vendor row, if any.
+   */
   async addVendorDetailsWithFirstVendorRadio() {
     const addVendorBtn = this.page.getByRole('button', {
       name: /add vendor details/i,
@@ -168,6 +187,10 @@ class PurchaseOrderCreatePoPage extends BasePage {
     }
     await expect(firstRadio).toBeChecked({ timeout: 15000 });
 
+    const yopmailFromRow = await this.tryReadYopmailFromVendorModalFirstRow(
+      vendorModal
+    );
+
     const addBtn = vendorModal.getByRole('button', { name: /^Add$/i }).last();
     await expect(addBtn).toBeEnabled({ timeout: 20000 });
     await addBtn.click();
@@ -188,6 +211,8 @@ class PurchaseOrderCreatePoPage extends BasePage {
     } catch {
       /* Slide/off-canvas may still leave nodes in DOM; vendor add is confirmed by Change Vendor */
     }
+
+    return yopmailFromRow;
   }
 
   async ensurePoLineItemsTableVisible() {
@@ -207,6 +232,272 @@ class PurchaseOrderCreatePoPage extends BasePage {
     await addManually.scrollIntoViewIfNeeded();
     await addManually.click({ force: true });
     await this.waitForNetworkSettled();
+  }
+
+  isPoLineUnitPlaceholderText(text) {
+    const t = String(text || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!t) return true;
+    return /^(select(\s+unit)?|choose(\s+unit)?|unit|uom|—|-|–|\.\.\.)$/i.test(
+      t
+    );
+  }
+
+  poLineItemRowUnitControl(row) {
+    const unitCell = row.locator('td').nth(2);
+    const mui = unitCell.locator('.MuiSelect-select').first();
+    return { unitCell, mui, combobox: unitCell.getByRole('combobox').first() };
+  }
+
+  /** True when this `tr` looks like a PO line data row (has a unit dropdown in column 3). */
+  async poLineRowHasUnitControl(row) {
+    if ((await row.locator('td').count()) < 3) {
+      return false;
+    }
+    const { mui, combobox } = this.poLineItemRowUnitControl(row);
+    return (
+      (await mui.count()) > 0 ||
+      (await combobox.count()) > 0
+    );
+  }
+
+  async getPoLineRowUnitSelectLocator(row) {
+    const { mui, combobox } = this.poLineItemRowUnitControl(row);
+    if ((await mui.count()) > 0) {
+      return mui;
+    }
+    if ((await combobox.count()) > 0) {
+      return combobox;
+    }
+    return null;
+  }
+
+  async getPoLineRowUnitDisplayText(row) {
+    const sel = await this.getPoLineRowUnitSelectLocator(row);
+    if (!sel) {
+      return null;
+    }
+    return (await sel.innerText())
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
+   * @param {import('@playwright/test').Locator} listbox
+   */
+  async pickRandomPoLineUnitFromOpenListbox(listbox) {
+    const opts = listbox.getByRole('option');
+    await expect(opts.first()).toBeVisible({ timeout: 8000 });
+    const oc = await opts.count();
+    const candidates = [];
+    for (let j = 0; j < oc; j++) {
+      const o = opts.nth(j);
+      const ot = (await o.innerText())
+        .replace(/\u00a0/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!ot || this.isPoLineUnitPlaceholderText(ot)) {
+        continue;
+      }
+      candidates.push(o);
+    }
+    if (candidates.length === 0) {
+      throw new Error(
+        'No selectable unit options in the dropdown (only placeholders or empty).'
+      );
+    }
+    const choice = candidates[Math.floor(Math.random() * candidates.length)];
+    await choice.click();
+  }
+
+  async countPoLineRowsWithMissingUnit(table) {
+    const rows = table.locator('tbody tr');
+    const n = await rows.count();
+    let missing = 0;
+    for (let i = 0; i < n; i++) {
+      const row = rows.nth(i);
+      if (!(await this.poLineRowHasUnitControl(row))) {
+        continue;
+      }
+      const text = await this.getPoLineRowUnitDisplayText(row);
+      if (this.isPoLineUnitPlaceholderText(text)) {
+        missing += 1;
+      }
+    }
+    return missing;
+  }
+
+  /**
+   * One full scan: fill every line row whose unit is still placeholder/empty (random real option).
+   * @returns {number} how many rows were updated this pass
+   */
+  async fillMissingPoLineItemUnitsOnePass(table) {
+    const rows = table.locator('tbody tr');
+    const n = await rows.count();
+    let filledCount = 0;
+
+    for (let i = 0; i < n; i++) {
+      const row = rows.nth(i);
+      if (!(await this.poLineRowHasUnitControl(row))) {
+        continue;
+      }
+      await row.scrollIntoViewIfNeeded();
+
+      const unitSelect = await this.getPoLineRowUnitSelectLocator(row);
+      if (!unitSelect) {
+        continue;
+      }
+
+      const displayText = await this.getPoLineRowUnitDisplayText(row);
+      if (!this.isPoLineUnitPlaceholderText(displayText)) {
+        continue;
+      }
+
+      await unitSelect.click({ timeout: 10000 }).catch(async () => {
+        await unitSelect.click({ force: true, timeout: 5000 });
+      });
+
+      const listbox = this.page.getByRole('listbox').last();
+      await expect(listbox).toBeVisible({ timeout: 10000 });
+
+      try {
+        await this.pickRandomPoLineUnitFromOpenListbox(listbox);
+        filledCount += 1;
+      } catch (e) {
+        await this.page.keyboard.press('Escape');
+        throw e;
+      }
+
+      await listbox.waitFor({ state: 'hidden', timeout: 15000 }).catch(() => {});
+      await this.waitForNetworkSettled();
+    }
+
+    return filledCount;
+  }
+
+  async assertEveryPoLineItemUnitFilled(table) {
+    const rows = table.locator('tbody tr');
+    const n = await rows.count();
+    for (let i = 0; i < n; i++) {
+      const row = rows.nth(i);
+      if (!(await this.poLineRowHasUnitControl(row))) {
+        continue;
+      }
+      await row.scrollIntoViewIfNeeded();
+      const text = await this.getPoLineRowUnitDisplayText(row);
+      if (this.isPoLineUnitPlaceholderText(text)) {
+        throw new Error(
+          `PO line item row ${i + 1} still has an empty or placeholder unit (Compose email must not run until all units are set).`
+        );
+      }
+    }
+  }
+
+  /**
+   * Ensures every PO line row with a unit control shows a real unit. Call after vendor if the table re-renders.
+   * @param {{ settleFirst?: boolean }} [options] — wait for network after vendor / navigation before scanning.
+   */
+  async ensureAllPoLineItemUnitsFilled(options = {}) {
+    if (options.settleFirst) {
+      await this.page.waitForLoadState('domcontentloaded');
+      await this.waitForNetworkSettled();
+    }
+
+    const maxRounds = 12;
+    for (let round = 0; round < maxRounds; round++) {
+      const table = await this.ensurePoLineItemsTableVisible();
+      await table.scrollIntoViewIfNeeded();
+
+      const missingBefore = await this.countPoLineRowsWithMissingUnit(table);
+      if (missingBefore === 0) {
+        await this.assertEveryPoLineItemUnitFilled(table);
+        return;
+      }
+
+      await this.fillMissingPoLineItemUnitsOnePass(table);
+      await this.waitForNetworkSettled();
+
+      const tableAfter = await this.ensurePoLineItemsTableVisible();
+      const missingAfter = await this.countPoLineRowsWithMissingUnit(tableAfter);
+      if (missingAfter === 0) {
+        await this.assertEveryPoLineItemUnitFilled(tableAfter);
+        return;
+      }
+
+      if (round === maxRounds - 1) {
+        await this.assertEveryPoLineItemUnitFilled(tableAfter);
+      }
+    }
+
+    throw new Error(
+      'ensureAllPoLineItemUnitsFilled: exceeded retry rounds without clearing all unit placeholders.'
+    );
+  }
+
+  /**
+   * Waits for you to finish units in the browser, then continues to Action → Compose email.
+   * - Default: `page.pause()` — use Playwright Inspector ▶ to resume after units are set (headed).
+   * - `PO_IMPORT_MANUAL_UNITS_STDIN=1`: press ENTER in the terminal instead of Inspector.
+   * After resume, asserts every line row with a unit control has a real unit selected.
+   */
+  async waitForManualPoLineUnitCompletionBeforeCompose() {
+    await this.ensurePoLineItemsTableVisible();
+    await this.page.waitForLoadState('domcontentloaded');
+    await this.waitForNetworkSettled();
+
+    const useStdin =
+      process.env.PO_IMPORT_MANUAL_UNITS_STDIN === '1' ||
+      /^true$/i.test(String(process.env.PO_IMPORT_MANUAL_UNITS_STDIN || ''));
+
+    // eslint-disable-next-line no-console
+    console.log(
+      '\n[PO import] Fill any missing line-item units in the browser, then continue the test.\n' +
+        (useStdin
+          ? '            → Press ENTER in this terminal when done.\n'
+          : '            → Resume in the Playwright Inspector (▶) when done.\n')
+    );
+
+    if (useStdin) {
+      await this.waitForEnterInTerminal(
+        'Press ENTER here after all units are filled (then Action → Compose email → Send).'
+      );
+    } else {
+      await this.page.pause();
+    }
+
+    const table = await this.ensurePoLineItemsTableVisible();
+    await this.assertEveryPoLineItemUnitFilled(table);
+  }
+
+  async waitForEnterInTerminal(promptText) {
+    const readline = require('readline');
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    await new Promise((resolve) => {
+      rl.question(`${promptText}\n`, () => {
+        rl.close();
+        resolve(undefined);
+      });
+    });
+  }
+
+  /**
+   * Import flow before compose: auto-fills units after vendor, unless `PO_IMPORT_MANUAL_UNITS_BEFORE_COMPOSE=1`.
+   */
+  async preparePoLineUnitsBeforeComposeEmailImportFlow() {
+    const manual =
+      process.env.PO_IMPORT_MANUAL_UNITS_BEFORE_COMPOSE === '1' ||
+      /^true$/i.test(String(process.env.PO_IMPORT_MANUAL_UNITS_BEFORE_COMPOSE || ''));
+    if (manual) {
+      await this.waitForManualPoLineUnitCompletionBeforeCompose();
+    } else {
+      await this.ensureAllPoLineItemUnitsFilled({ settleFirst: true });
+    }
   }
 
   async fillLastPoLineItemRow({
@@ -263,34 +554,120 @@ class PurchaseOrderCreatePoPage extends BasePage {
     await this.fillLastPoLineItemRow(args);
   }
 
+  /**
+   * Reads the first *@yopmail.com address from the visible compose dialog (text, chips, or inputs).
+   * Polls while APIs populate the To field (same budget as PO_COMPOSE_MODAL_TIMEOUT_MS).
+   */
+  async readYopmailAddressFromComposeDialog() {
+    const yopRe = /[\w.+-]+@yopmail\.com/i;
+    const deadline = Date.now() + this.composeModalTimeout;
+
+    const tryExtract = async (emailDialog) => {
+      const blob = (await emailDialog.textContent()) || '';
+      let m = blob.match(yopRe);
+      if (m) return m[0].toLowerCase();
+
+      const inputs = emailDialog.locator('input');
+      const n = await inputs.count();
+      for (let i = 0; i < n; i++) {
+        const v = await inputs.nth(i).inputValue().catch(() => '');
+        m = v.match(yopRe);
+        if (m) return m[0].toLowerCase();
+      }
+
+      const combobox = emailDialog.getByRole('combobox').first();
+      if (await combobox.isVisible({ timeout: 400 }).catch(() => false)) {
+        const v = await combobox.inputValue().catch(() => '');
+        m = v.match(yopRe);
+        if (m) return m[0].toLowerCase();
+      }
+      return null;
+    };
+
+    while (Date.now() < deadline) {
+      const anyVisible = this.page.getByRole('dialog').filter({ visible: true });
+      const count = await anyVisible.count().catch(() => 0);
+      for (let i = 0; i < count; i++) {
+        const dlg = anyVisible.nth(i);
+        const found = await tryExtract(dlg);
+        if (found) return found;
+      }
+      await this.page.waitForTimeout(450);
+    }
+
+    throw new Error(
+      'Could not find a *@yopmail.com address in the compose email To field after waiting. Ensure the first vendor uses Yopmail.'
+    );
+  }
+
+  /**
+   * Waits until the compose modal is open (Send control present). Does not wait for Send to enable —
+   * use click({ timeout }) on Send so Playwright waits until the button is actionable.
+   */
+  async waitForComposeEmailDialogShellOpen() {
+    await expect
+      .poll(
+        async () => await this.visibleComposeEmailDialog().count(),
+        {
+          message:
+            'Compose email dialog did not open (no visible dialog with Send email control)',
+          timeout: this.composeModalTimeout,
+          intervals: [400, 800, 1200, 2000],
+        }
+      )
+      .toBeGreaterThan(0);
+
+    await expect(this.visibleComposeEmailDialog().first()).toBeVisible({
+      timeout: 20000,
+    });
+  }
+
+  /**
+   * Dialog visible + Send visible (may still be disabled while loading).
+   * Override wait with PO_COMPOSE_MODAL_TIMEOUT_MS (ms) on slow environments.
+   */
+  async waitForComposeEmailModalReady() {
+    await this.waitForComposeEmailDialogShellOpen();
+    const send = this.visibleComposeEmailDialog()
+      .first()
+      .getByRole('button', { name: /send email/i });
+    await expect(send).toBeVisible({ timeout: this.composeModalTimeout });
+  }
+
+  /**
+   * Action → Compose email only. Does not wait for the modal (Send click uses a long actionability timeout).
+   */
   async openActionMenuAndComposeEmail() {
     const actionBtn = this.page.getByRole('button', { name: /^action$/i }).first();
     await expect(actionBtn).toBeVisible({ timeout: this.defaultTimeout });
+    await actionBtn.scrollIntoViewIfNeeded();
     await actionBtn.click();
 
     const compose = this.page.getByRole('menuitem', { name: /compose email/i });
     await expect(compose).toBeVisible({ timeout: this.defaultTimeout });
     await compose.click();
 
-    const emailDialog = this.page
+    await this.page.waitForLoadState('domcontentloaded');
+  }
+
+  /** Topmost visible “Send email” in a portal stack (compose opens before inner tree finishes). */
+  locatorVisibleComposeSendEmailButton() {
+    return this.page
+      .getByRole('button', { name: /send email/i })
+      .filter({ visible: true })
+      .last();
+  }
+
+  /** Dialog that hosts the compose Send control (for close / toast race after send). */
+  locatorComposeEmailDialogForClose() {
+    return this.page
       .getByRole('dialog')
-      .filter({ has: this.page.getByText(/send email|subject|to/i) })
-      .first();
-    await expect(emailDialog).toBeVisible({ timeout: this.defaultTimeout });
-    await expect(
-      emailDialog.getByRole('button', { name: /send email/i })
-    ).toBeVisible({ timeout: this.defaultTimeout });
+      .filter({ has: this.page.getByRole('button', { name: /send email/i }) })
+      .last();
   }
 
   async expectPurchaseOrderComposeEmailDialogFromActionMenu() {
-    const emailDialog = this.page
-      .getByRole('dialog')
-      .filter({ has: this.page.getByText(/send email|subject|to/i) })
-      .first();
-    await expect(emailDialog).toBeVisible({ timeout: 120000 });
-    await expect(
-      emailDialog.getByRole('button', { name: /send email/i })
-    ).toBeVisible({ timeout: this.defaultTimeout });
+    await this.waitForComposeEmailModalReady();
   }
 
   async getPoLineItemsTableRowCount() {
@@ -350,14 +727,9 @@ class PurchaseOrderCreatePoPage extends BasePage {
    */
   async sendEmailFromComposeModal(options = {}) {
     const prioritizeEmailSentToast = !!options.prioritizeEmailSentToast;
-    const emailDialog = this.page
-      .getByRole('dialog')
-      .filter({ has: this.page.getByRole('button', { name: /send email/i }) })
-      .first();
-    await expect(emailDialog).toBeVisible({ timeout: this.defaultTimeout });
-    const send = emailDialog.getByRole('button', { name: /send email/i });
-    await expect(send).toBeEnabled({ timeout: this.defaultTimeout });
-    await send.click();
+    const emailDialog = this.locatorComposeEmailDialogForClose();
+    const send = this.locatorVisibleComposeSendEmailButton();
+    await send.click({ timeout: this.composeModalTimeout });
 
     const emailSentToast = this.locatorEmailSentSuccessToast();
     const poCreatedSentToast = this.locatorPoCreatedAndSentToast();
@@ -380,7 +752,10 @@ class PurchaseOrderCreatePoPage extends BasePage {
 
     await this.dismissOpenMenusAndPopovers();
 
-    const stillOpen = await emailDialog.isVisible().catch(() => false);
+    const stillOpen = await this.visibleComposeEmailDialog()
+      .first()
+      .isVisible()
+      .catch(() => false);
     if (stillOpen) {
       await emailDialog
         .waitFor({ state: 'hidden', timeout: 20000 })
