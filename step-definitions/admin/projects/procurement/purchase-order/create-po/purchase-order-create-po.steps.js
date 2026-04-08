@@ -50,7 +50,28 @@ When(
   { timeout: 180000 },
   async function () {
     const po = getPurchaseOrderCreatePoPage(this);
-    await po.addVendorDetailsWithFirstVendorRadio();
+    const yopmailFromRow = await po.addVendorDetailsWithFirstVendorRadio();
+    if (yopmailFromRow) {
+      this.vendorYopmailEmail = yopmailFromRow;
+    }
+  }
+);
+
+When(
+  'I ensure all purchase order line item units are filled',
+  { timeout: 180000 },
+  async function () {
+    const po = getPurchaseOrderCreatePoPage(this);
+    await po.ensureAllPoLineItemUnitsFilled();
+  }
+);
+
+When(
+  'I ensure all purchase order line item units are filled after vendor',
+  { timeout: 240000 },
+  async function () {
+    const po = getPurchaseOrderCreatePoPage(this);
+    await po.ensureAllPoLineItemUnitsFilled({ settleFirst: true });
   }
 );
 
@@ -71,10 +92,23 @@ When(
 
 When(
   'I compose and send the purchase order email',
-  { timeout: 180000 },
+  { timeout: 360000 },
   async function () {
     const po = getPurchaseOrderCreatePoPage(this);
     await po.openActionMenuAndComposeEmail();
+    await po.sendEmailFromComposeModal();
+  }
+);
+
+When(
+  'I compose and send the purchase order email capturing vendor Yopmail from the To field',
+  { timeout: 360000 },
+  async function () {
+    const po = getPurchaseOrderCreatePoPage(this);
+    await po.openActionMenuAndComposeEmail();
+    if (!this.vendorYopmailEmail) {
+      this.vendorYopmailEmail = await po.readYopmailAddressFromComposeDialog();
+    }
     await po.sendEmailFromComposeModal();
   }
 );

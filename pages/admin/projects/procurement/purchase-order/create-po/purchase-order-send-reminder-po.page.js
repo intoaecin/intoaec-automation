@@ -54,14 +54,7 @@ class PurchaseOrderSendReminderPoPage extends PurchaseOrderCreatePoPage {
   }
 
   async expectPurchaseOrderComposeEmailDialogReady() {
-    const emailDialog = this.page
-      .getByRole('dialog')
-      .filter({ has: this.page.getByText(/send email|subject|to/i) })
-      .first();
-    await expect(emailDialog).toBeVisible({ timeout: 120000 });
-    await expect(
-      emailDialog.getByRole('button', { name: /send email/i })
-    ).toBeVisible({ timeout: this.defaultTimeout });
+    await this.waitForComposeEmailModalReady();
   }
 
   async clickSendEmailInPurchaseOrderComposeDialog() {

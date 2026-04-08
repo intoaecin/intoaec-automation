@@ -27,7 +27,18 @@ class LoginPage extends BasePage {
         url => !url.toString().includes('signIn'), { timeout: 15000 }
       );
       return true;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
+  }
+
+  /** True when the app is already past the sign-in screen (reused session / same browser run). */
+  isAlreadyAuthenticated() {
+    const url = this.page.url();
+    if (!url || url === 'about:blank') {
+      return false;
+    }
+    return !url.includes('signIn');
   }
 
   async isErrorVisible() {

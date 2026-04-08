@@ -11,23 +11,17 @@ function isHeadlessRun() {
 
 class CustomWorld {
   async init() {
-    const headed = !isHeadlessRun();
-    this.browser = await chromium.launch({
-      headless: !headed,
-      args: headed ? ['--start-maximized'] : [],
-    });
-    this.context = await this.browser.newContext(
-      headed
-        ? { viewport: null }
-        : { viewport: { width: 1280, height: 720 } }
-    );
-    this.page = await this.context.newPage();
+    const session = await ensureSharedSession();
+    this.browser = session.browser;
+    this.context = session.context;
+    this.page = session.page;
   }
+
   async cleanup() {
-    if (this.browser) {
-      await this.browser.close();
-    }
+    // Browser is closed once in AfterAll (see hooks.js).
   }
 }
 
 setWorldConstructor(CustomWorld);
+
+module.exports = { closeSharedSession };
