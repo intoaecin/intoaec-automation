@@ -24,6 +24,29 @@ function getStepDelayMs() {
   return Number.isFinite(n) && n >= 0 ? n : 2000;
 }
 
+/**
+ * Native “Open file” / Explorer dialogs only appear in a headed browser.
+ * This project defaults to headless unless HEADED=true — so @po-import-pdf (and PO_IMPORT_PDF_MANUAL)
+ * turn on a visible window before world.init() runs (unless CI / HEADLESS / HEADED=false).
+ */
+Before(function (options = {}) {
+  const { pickle } = options;
+  if (
+    process.env.HEADLESS === 'true' ||
+    process.env.CI === 'true' ||
+    process.env.HEADED === 'false'
+  ) {
+    return;
+  }
+  const importPdfScenario = pickle?.tags?.some((t) => t.name === '@po-import-pdf');
+  const manualImport =
+    process.env.PO_IMPORT_PDF_MANUAL === '1' ||
+    /^true$/i.test(String(process.env.PO_IMPORT_PDF_MANUAL || ''));
+  if (importPdfScenario || manualImport) {
+    process.env.HEADED = 'true';
+  }
+});
+
 Before(async function (options = {}) {
   const { pickle } = options;
   await this.init();
