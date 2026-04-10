@@ -1,4 +1,4 @@
-@smoke @po @procurement @create-po @po-cancel @po-smoke-full-journey
+@smoke @regression @po @procurement @create-po @po-cancel @po-smoke-full-journey
 Feature: Purchase Order — full journey ending with cancel
 
   End-to-end: create → send → edit → add from library → update → list → preview →

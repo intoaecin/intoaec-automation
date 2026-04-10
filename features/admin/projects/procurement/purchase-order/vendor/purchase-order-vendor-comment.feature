@@ -1,9 +1,9 @@
-@po @procurement @vendor @po-vendor-comment
+@smoke @regression @po @procurement @vendor @po-vendor-comment
 Feature: Purchase Order — vendor adds comment via Yopmail (same browser)
 
   Create PO → send to Yopmail vendor → **View PO** → submit a **comment** on the vendor portal and assert it appears.
 
-  Prerequisites: same as `@po-vendor-yopmail` (Yopmail vendor in To, optional env overrides).
+  Prerequisites: same as `@po-vendor-yopmail` (Yopmail vendor in To, optional env overrides). Yopmail waits use a refresh burst + the scenario PO title to avoid opening an older PO email.
   - If the comment box is custom: **PO_VENDOR_COMMENT_SELECTOR** (CSS) or **PO_VENDOR_COMMENT_PLACEHOLDER** (regex source for placeholder text).
 
   Background:

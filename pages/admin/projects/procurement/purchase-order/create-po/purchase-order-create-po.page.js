@@ -439,30 +439,42 @@ class PurchaseOrderCreatePoPage extends BasePage {
 
   /**
    * Waits for you to finish units in the browser, then continues to Action → Compose email.
-   * - Default: `page.pause()` — use Playwright Inspector ▶ to resume after units are set (headed).
-   * - `PO_IMPORT_MANUAL_UNITS_STDIN=1`: press ENTER in the terminal instead of Inspector.
+   * - Default: **Press ENTER in this terminal** when `stdin` is a TTY (typical PowerShell/cmd run).
+   * - `PO_IMPORT_MANUAL_UNITS_INSPECTOR=1`: use Playwright Inspector ▶ instead of ENTER.
+   * - `PO_IMPORT_MANUAL_UNITS_STDIN=1` / `=0`: force ENTER / force Inspector regardless of TTY.
    * After resume, asserts every line row with a unit control has a real unit selected.
+   * @param {string} [userHint] — extra line(s) printed before ENTER / Inspector instructions.
    */
-  async waitForManualPoLineUnitCompletionBeforeCompose() {
+  async waitForManualPoLineUnitCompletionBeforeCompose(userHint) {
     await this.ensurePoLineItemsTableVisible();
     await this.page.waitForLoadState('domcontentloaded');
     await this.waitForNetworkSettled();
 
+    const forceInspector =
+      process.env.PO_IMPORT_MANUAL_UNITS_INSPECTOR === '1' ||
+      /^true$/i.test(String(process.env.PO_IMPORT_MANUAL_UNITS_INSPECTOR || ''));
+    const stdinRaw = process.env.PO_IMPORT_MANUAL_UNITS_STDIN;
+    const forceStdin =
+      stdinRaw === '1' || /^true$/i.test(String(stdinRaw || ''));
+    const forceNoStdin =
+      stdinRaw === '0' || /^false$/i.test(String(stdinRaw || ''));
+
     const useStdin =
-      process.env.PO_IMPORT_MANUAL_UNITS_STDIN === '1' ||
-      /^true$/i.test(String(process.env.PO_IMPORT_MANUAL_UNITS_STDIN || ''));
+      forceStdin || (!forceInspector && !forceNoStdin && process.stdin.isTTY);
 
     // eslint-disable-next-line no-console
     console.log(
-      '\n[PO import] Fill any missing line-item units in the browser, then continue the test.\n' +
+      '\n[PO import] Do not click **Action** yet — the test opens it after you continue.\n' +
+        (userHint ? `            ${userHint}\n` : '') +
+        '            Fix any empty or placeholder **Unit** cells on imported line items in the browser.\n' +
         (useStdin
-          ? '            → Press ENTER in this terminal when done.\n'
-          : '            → Resume in the Playwright Inspector (▶) when done.\n')
+          ? '            → Press ENTER in this terminal when units are correct.\n'
+          : '            → Resume in the Playwright Inspector (▶), or set PO_IMPORT_MANUAL_UNITS_STDIN=1 from a real terminal.\n')
     );
 
     if (useStdin) {
       await this.waitForEnterInTerminal(
-        'Press ENTER here after all units are filled (then Action → Compose email → Send).'
+        'Press ENTER after units are set (next: Action → Compose email → Send).'
       );
     } else {
       await this.page.pause();
@@ -487,17 +499,55 @@ class PurchaseOrderCreatePoPage extends BasePage {
   }
 
   /**
-   * Import flow before compose: auto-fills units after vendor, unless `PO_IMPORT_MANUAL_UNITS_BEFORE_COMPOSE=1`.
+   * Import flow before **Action → Compose**:
+   * - Optionally auto-fills placeholder units (skipped if `PO_IMPORT_MANUAL_UNITS_BEFORE_COMPOSE=1`).
+   * - **By default** always stops for you to review/fix units, then ENTER (TTY) or Inspector — so we never
+   *   hit Action while units are still wrong (automation often misses real UI state after PDF import).
+   * - `PO_IMPORT_SKIP_UNITS_MANUAL_GATE=1`: skip that pause; only assert all units filled (CI / fully trusted PDFs).
    */
   async preparePoLineUnitsBeforeComposeEmailImportFlow() {
-    const manual =
+    const skipAutoFill =
       process.env.PO_IMPORT_MANUAL_UNITS_BEFORE_COMPOSE === '1' ||
       /^true$/i.test(String(process.env.PO_IMPORT_MANUAL_UNITS_BEFORE_COMPOSE || ''));
-    if (manual) {
-      await this.waitForManualPoLineUnitCompletionBeforeCompose();
-    } else {
-      await this.ensureAllPoLineItemUnitsFilled({ settleFirst: true });
+
+    const skipManualGate =
+      process.env.PO_IMPORT_SKIP_UNITS_MANUAL_GATE === '1' ||
+      /^true$/i.test(String(process.env.PO_IMPORT_SKIP_UNITS_MANUAL_GATE || ''));
+
+    await this.ensurePoLineItemsTableVisible();
+    await this.page.waitForLoadState('domcontentloaded');
+    await this.waitForNetworkSettled();
+
+    if (!skipAutoFill) {
+      try {
+        await this.ensureAllPoLineItemUnitsFilled({ settleFirst: false });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[PO import] Automatic unit fill did not complete:',
+          e && e.message ? e.message : e
+        );
+      }
     }
+
+    const table = await this.ensurePoLineItemsTableVisible();
+
+    if (skipManualGate) {
+      await this.assertEveryPoLineItemUnitFilled(table);
+      return;
+    }
+
+    const missing = await this.countPoLineRowsWithMissingUnit(table);
+    if (missing > 0) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[PO import] Detected ${missing} row(s) with placeholder/empty unit — set real units in the UI.`
+      );
+    }
+
+    await this.waitForManualPoLineUnitCompletionBeforeCompose(
+      '(Automation may have pre-filled some units — verify every line before continuing.)'
+    );
   }
 
   async fillLastPoLineItemRow({

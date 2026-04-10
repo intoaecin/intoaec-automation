@@ -1,12 +1,12 @@
-@po @procurement @import-po @po-import-pdf
+@smoke @regression @po @procurement @import-po @po-import-pdf
 Feature: Purchase Order — import from PDF
 
   From the PO list: Upload PDF → create form → title → vendor → prepare units → Action → Compose email → Send email.
 
-  Units before compose: default = auto-fill empty units after vendor. `PO_IMPORT_MANUAL_UNITS_BEFORE_COMPOSE=1` = you fill units, then resume (Inspector ▶) or `PO_IMPORT_MANUAL_UNITS_STDIN=1` + ENTER in terminal; then compose runs.
+  Before Action → Compose: auto-fill may run, then the test **always** waits — finish unfilled units in the UI, then press ENTER (real terminal) or resume Inspector. It will not click **Action** until then. `PO_IMPORT_SKIP_UNITS_MANUAL_GATE=1` skips that pause (CI). `PO_IMPORT_MANUAL_UNITS_BEFORE_COMPOSE=1` skips auto-fill only. `PO_IMPORT_MANUAL_UNITS_INSPECTOR=1` / `PO_IMPORT_MANUAL_UNITS_STDIN` control Inspector vs ENTER.
 
-  Automated: bundled sample PDF, or PO_IMPORT_PDF_PATH when that file exists.
-  Manual (headed): PO_IMPORT_PDF_MANUAL=1, or a missing/wrong PO_IMPORT_PDF_PATH — Upload PDF opens Explorer; select file; test waits for Proceed then clicks it.
+  Automated: bundled sample PDF (if present) or PO_IMPORT_PDF_PATH — setInputFiles, no Explorer.
+  Explorer: PO_IMPORT_PDF_MANUAL=1 or PO_IMPORT_USE_EXPLORER=1 — click Upload PDF card → pick file → test waits for file + Proceed enabled → clicks Proceed. Missing PO_IMPORT_PDF_PATH also opens Explorer.
   Runs only this folder — not merged with the full create-po / cancel journey.
 
   Background:

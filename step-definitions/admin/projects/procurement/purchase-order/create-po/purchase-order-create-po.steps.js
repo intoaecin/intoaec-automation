@@ -32,6 +32,7 @@ When(
   { timeout: 120000 },
   async function (title) {
     const po = getPurchaseOrderCreatePoPage(this);
+    this.poYopmailSubjectHint = title;
     await po.fillPurchaseOrderTitle(title);
   }
 );
@@ -41,6 +42,7 @@ When(
   { timeout: 120000 },
   async function (title) {
     const po = getPurchaseOrderCreatePoPage(this);
+    this.poYopmailSubjectHint = title;
     await po.fillPurchaseOrderTitle(title);
   }
 );

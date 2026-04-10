@@ -1,4 +1,4 @@
-@po @procurement @vendor @po-vendor-declined
+@smoke @regression @po @procurement @vendor @po-vendor-declined
 Feature: Purchase Order — vendor declines PO via Yopmail (same browser)
 
   Same journey as accept: create PO → compose (capture Yopmail) → send → Yopmail → **View PO** on vendor portal,

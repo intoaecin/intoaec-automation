@@ -1,4 +1,4 @@
-@smoke @po @procurement @create-po @po-send-reminder
+@smoke @regression @po @procurement @create-po @po-send-reminder
 Feature: Purchase Order — send reminder (or follow-up email) from list
 
   After create, send, and edit/update, open Send on the card → Send reminder (or Send email if status is EDITED),

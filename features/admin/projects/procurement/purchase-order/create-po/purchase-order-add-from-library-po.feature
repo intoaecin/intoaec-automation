@@ -1,4 +1,4 @@
-@smoke @po @procurement @create-po @po-add-from-library
+@smoke @regression @po @procurement @create-po @po-add-from-library
 Feature: Purchase Order — add from library after edit
 
   After opening the PO edit screen: open the library slide-over, select two rows, Add,

@@ -1,4 +1,4 @@
-@smoke @po @procurement @create-po @po-create
+@smoke @regression @po @procurement @create-po @po-create
 Feature: Purchase Order — create PO and send email
 
   Create from scratch, add vendor and line item, send via Action → Compose email.

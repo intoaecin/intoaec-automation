@@ -18,12 +18,28 @@ function getMailHintRegex() {
   return /purchase order|\bPO\b|p\.?\s*o\.?\s*(no\.?|#)?/i;
 }
 
+function compileSubjectFilter(pattern) {
+  const s = String(pattern || '').trim();
+  if (!s) {
+    return null;
+  }
+  return new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+}
+
 /** Yopmail inbox + reading PO mail + opening vendor portal from “View PO”. */
 class PurchaseOrderVendorYopmailPage extends BasePage {
   constructor(page) {
     super(page);
     this.inboxTimeoutMs = parseInt(
       process.env.PO_YOPMAIL_INBOX_TIMEOUT_MS || '180000',
+      10
+    );
+    this.initialRefreshBurstCount = parseInt(
+      process.env.PO_YOPMAIL_INITIAL_REFRESH_COUNT || '5',
+      10
+    );
+    this.refreshBurstDelayMs = parseInt(
+      process.env.PO_YOPMAIL_REFRESH_BURST_MS || '1200',
       10
     );
   }
@@ -72,23 +88,63 @@ class PurchaseOrderVendorYopmailPage extends BasePage {
   }
 
   /**
-   * Poll inbox: refresh, find a row matching PO subject hint, open it, click View PO.
+   * Yopmail often shows stale inbox until refreshed several times; newest mail is usually the first row after refresh.
+   */
+  async refreshInboxBurst(count, delayBetweenMs) {
+    const n = Math.max(0, Math.min(count, 20));
+    for (let i = 0; i < n; i++) {
+      await this.refreshInbox();
+      if (delayBetweenMs > 0 && i < n - 1) {
+        await this.page.waitForTimeout(delayBetweenMs);
+      }
+    }
+    if (n > 0) {
+      await this.page.waitForTimeout(600);
+    }
+  }
+
+  /**
+   * Prefer scenario title (passed from steps), else **PO_YOPMAIL_SUBJECT_CONTAINS** env.
+   */
+  resolveSubjectFilter(explicitContains) {
+    return (
+      compileSubjectFilter(explicitContains) ||
+      compileSubjectFilter(process.env.PO_YOPMAIL_SUBJECT_CONTAINS)
+    );
+  }
+
+  poInboxRowLocator(inbox, hint, subjectRe) {
+    let rows = inbox
+      .locator('div.m, .lm, tr, .l')
+      .filter({ hasText: hint })
+      .filter({ hasNotText: /^view\s*po$/i });
+    if (subjectRe) {
+      rows = rows.filter({ hasText: subjectRe });
+    }
+    return rows;
+  }
+
+  /**
+   * Poll inbox: burst-refresh so the latest PO email surfaces, then refresh + open the **first** matching row (newest after refresh), View PO.
+   * @param {{ subjectContains?: string }} [options] — e.g. same string as PO title so an older PO row is not opened.
    * @returns {import('playwright').Page} Vendor portal page (new tab or same tab).
    */
-  async waitOpenPoMessageAndClickViewPo() {
+  async waitOpenPoMessageAndClickViewPo(options = {}) {
     const hint = getMailHintRegex();
+    const subjectRe = this.resolveSubjectFilter(options.subjectContains);
     const deadline = Date.now() + this.inboxTimeoutMs;
     const inbox = this.inboxFrame();
+
+    await this.refreshInboxBurst(
+      this.initialRefreshBurstCount,
+      this.refreshBurstDelayMs
+    );
 
     while (Date.now() < deadline) {
       await this.refreshInbox();
       await this.page.waitForTimeout(1400);
 
-      const row = inbox
-        .locator('div.m, .lm, tr, .l')
-        .filter({ hasText: hint })
-        .filter({ hasNotText: /^view\s*po$/i })
-        .first();
+      const row = this.poInboxRowLocator(inbox, hint, subjectRe).first();
 
       if (await row.isVisible({ timeout: 2500 }).catch(() => false)) {
         await row.click();
@@ -96,7 +152,9 @@ class PurchaseOrderVendorYopmailPage extends BasePage {
         return this.clickViewPoAndResolveVendorPortalPage();
       }
 
-      const fallback = inbox.getByText(hint, { exact: false }).first();
+      const fallback = subjectRe
+        ? inbox.getByText(subjectRe).first()
+        : inbox.getByText(hint, { exact: false }).first();
       if (await fallback.isVisible({ timeout: 800 }).catch(() => false)) {
         await fallback.click();
         await this.page.waitForTimeout(600);
@@ -104,8 +162,9 @@ class PurchaseOrderVendorYopmailPage extends BasePage {
       }
     }
 
+    const extraMsg = subjectRe ? ` and subject containing ${subjectRe}` : '';
     throw new Error(
-      `No purchase-order email matched ${hint} in Yopmail within ${this.inboxTimeoutMs}ms.`
+      `No purchase-order email matched ${hint}${extraMsg} in Yopmail within ${this.inboxTimeoutMs}ms.`
     );
   }
 
