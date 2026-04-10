@@ -51,6 +51,7 @@ When(
   async function () {
     const po = getPurchaseOrderImportPdfPage(this);
     this.importPoTitle = await po.fillPurchaseOrderTitleWithRandomValue();
+    this.poYopmailSubjectHint = this.importPoTitle;
   }
 );
 

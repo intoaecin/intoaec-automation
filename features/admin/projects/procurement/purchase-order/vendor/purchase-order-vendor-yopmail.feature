@@ -1,4 +1,4 @@
-@po @procurement @vendor @po-vendor-yopmail
+@smoke @regression @po @procurement @vendor @po-vendor-yopmail
 Feature: Purchase Order — vendor accepts PO via Yopmail (same browser)
 
   Reuses the create-po journey (list → scratch → title → vendor → line item → compose → send), then opens Yopmail in a **new tab**,
@@ -11,6 +11,7 @@ Feature: Purchase Order — vendor accepts PO via Yopmail (same browser)
   - Optional **PO_VENDOR_PORTAL_URL_REGEX**: tighten the vendor portal URL check (e.g. your app host pattern).
   - Optional **PO_YOPMAIL_INBOX_TIMEOUT_MS** (default 180000): max time to refresh inbox until the PO email appears.
   - Optional **PO_YOPMAIL_MAIL_HINT_REGEX**: custom regex to match the email row in the inbox list (default: purchase order / PO phrases; excludes "View PO" so list links do not steal the click).
+  - After opening Yopmail, the test runs **5 inbox refreshes** by default (set **PO_YOPMAIL_INITIAL_REFRESH_COUNT** / **PO_YOPMAIL_REFRESH_BURST_MS**). The **PO title from the scenario** narrows the row so an older PO email is not opened; override with **PO_YOPMAIL_SUBJECT_CONTAINS** if needed.
 
   Background:
     Given I am logged in

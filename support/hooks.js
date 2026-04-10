@@ -3,9 +3,6 @@ const fs = require('fs');
 const path = require('path');
 const { closeSharedSession } = require('./world');
 
-setDefaultTimeout(30000);
-const { Before, After, AfterStep, setDefaultTimeout } = require('@cucumber/cucumber');
-
 /** Default step/scenario timeout (ms) — see AGENTS.md */
 setDefaultTimeout(60000);
 

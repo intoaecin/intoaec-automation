@@ -1,4 +1,4 @@
-@smoke @po @procurement @create-po @po-preview
+@smoke @regression @po @procurement @create-po @po-preview
 Feature: Purchase Order — preview from list
 
   After create and send, open the card kebab → Preview and validate the full-screen dialog.

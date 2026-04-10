@@ -1,1 +1,2 @@
-﻿Feature: PurchaseOrder Report
+﻿@smoke @regression @po @reports
+Feature: PurchaseOrder Report

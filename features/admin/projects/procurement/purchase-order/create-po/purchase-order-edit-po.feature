@@ -1,4 +1,4 @@
-@smoke @po @procurement @create-po @po-edit
+@smoke @regression @po @procurement @create-po @po-edit
 Feature: Purchase Order — edit PO and update
 
   Create and send a PO, then edit from the card menu, add a line, and Action → Update.

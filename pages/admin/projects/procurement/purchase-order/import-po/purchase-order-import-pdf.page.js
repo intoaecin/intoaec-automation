@@ -6,13 +6,13 @@ const { expect } = require('@playwright/test');
 /**
  * List → Create PO → Get Started → Upload PDF → Proceed.
  *
- * Mode: `@po-import-pdf` / `PO_IMPORT_PDF_MANUAL=1` force a headed browser (see hooks.js).
- * Manual: no `waitForEvent('filechooser')` — Playwright only intercepts the picker when a listener exists;
- * without it, Windows Explorer opens. Then wait for Proceed → click.
- * Automated: `waitForEvent` + `setFiles` (no Explorer — fully programmatic).
- * - `PO_IMPORT_PDF_PATH` set and file exists → automated `setFiles` / `setInputFiles`.
- * - `PO_IMPORT_PDF_PATH` set but missing → manual (no crash; warns in console).
- * - No path env → bundled sample PDF if present, else manual.
+ * **Automated (default when bundled or PO_IMPORT_PDF_PATH exists):** `setInputFiles` — no Explorer.
+ *
+ * **Explorer (you pick the PDF):** set one of:
+ * - `PO_IMPORT_PDF_MANUAL=1`
+ * - `PO_IMPORT_USE_EXPLORER=1` / `PO_IMPORT_OPEN_EXPLORER=1`
+ * Flow: click **Upload PDF** card (same as UI) → OS picker → wait until file is on the input inside the Get Started
+ * dialog (page-level DOM check, avoids stale locators) → wait until **Proceed** is enabled → click Proceed.
  */
 class PurchaseOrderImportPdfPage extends PurchaseOrderCreatePoPage {
   bundledImportPdfPath() {
@@ -27,11 +27,17 @@ class PurchaseOrderImportPdfPage extends PurchaseOrderCreatePoPage {
     return v === '1' || /^true$/i.test(String(v || ''));
   }
 
+  isUseExplorerImport() {
+    const v =
+      process.env.PO_IMPORT_USE_EXPLORER ?? process.env.PO_IMPORT_OPEN_EXPLORER;
+    return v === '1' || /^true$/i.test(String(v || ''));
+  }
+
   /**
    * @returns {{ manual: boolean, automatedPath: string | null }}
    */
   resolveImportModeAndPath() {
-    if (this.isManualPdfImport()) {
+    if (this.isManualPdfImport() || this.isUseExplorerImport()) {
       return { manual: true, automatedPath: null };
     }
 
@@ -59,23 +65,73 @@ class PurchaseOrderImportPdfPage extends PurchaseOrderCreatePoPage {
   }
 
   /**
-   * Clicks the control that opens the native file picker. Prefer the MUI card (app wires onClick → input.click());
-   * fall back to the “Upload PDF” label.
-   * @param {{ clickTimeout?: number }} [opts] — use a long `clickTimeout` in manual mode (click may block until the dialog closes).
+   * True if any dialog that looks like “Get started” has a file on its file input.
+   * Uses page.evaluate so we are not tied to a single Playwright locator if React remounts the input.
+   */
+  async hasPdfFileInGetStartedDialog() {
+    return this.page.evaluate(() => {
+      const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
+      for (const d of dialogs) {
+        const t = (d.textContent || '').toLowerCase();
+        if (!t.includes('get started')) continue;
+        const inp = d.querySelector('input[type="file"]');
+        if (inp && inp.files && inp.files.length > 0) return true;
+      }
+      return false;
+    });
+  }
+
+  /**
+   * Opens the OS file picker the same way a user does: **Upload PDF** card first (app wires this to the input).
+   * Uses a long timeout so the click can complete after you dismiss Explorer (Chromium often blocks until then).
    */
   async clickUploadPdfToOpenNativeFileDialog(dlg, opts = {}) {
     const clickTimeout = opts.clickTimeout ?? 15000;
-    const label = dlg.getByText(/^Upload PDF$/i).first();
-    await label.scrollIntoViewIfNeeded();
 
     const cards = dlg
       .locator('.MuiCard-root')
-      .filter({ has: dlg.getByText(/^Upload PDF$/i) });
+      .filter({ has: dlg.getByText(/upload pdf/i) });
     if ((await cards.count()) > 0) {
       await cards.first().click({ timeout: clickTimeout });
       return;
     }
+
+    const label = dlg.getByText(/upload pdf/i).first();
+    await label.scrollIntoViewIfNeeded();
     await label.click({ timeout: clickTimeout });
+  }
+
+  /**
+   * After Explorer closes or setInputFiles: wait until a file is present (DOM scan), optional busy copy clears,
+   * then **Proceed** is enabled inside the start dialog.
+   */
+  async waitForPdfStagedAndProceedReady(dlg, timeoutMs) {
+    const proceed = dlg.getByRole('button', { name: /proceed/i });
+    const pollTimeout = Math.min(timeoutMs, 600000);
+
+    try {
+      await expect
+        .poll(async () => this.hasPdfFileInGetStartedDialog(), {
+          timeout: pollTimeout,
+        })
+        .toBe(true);
+    } catch {
+      console.warn(
+        '[PO import] File input still empty after wait; will continue when Proceed enables.'
+      );
+    }
+
+    const busy = dlg.getByText(
+      /uploading|processing|parsing|extracting|please wait/i
+    ).first();
+    try {
+      await busy.waitFor({ state: 'visible', timeout: 8000 });
+      await busy.waitFor({ state: 'hidden', timeout: Math.min(timeoutMs, 300000) });
+    } catch {
+      /* no busy copy in dialog */
+    }
+
+    await expect(proceed).toBeEnabled({ timeout: timeoutMs });
   }
 
   async uploadPdfInGetStartedDialogAndProceed() {
@@ -84,33 +140,30 @@ class PurchaseOrderImportPdfPage extends PurchaseOrderCreatePoPage {
     const dlg = this.purchaseOrderStartDialog();
     await expect(dlg).toBeVisible({ timeout: 30000 });
 
-    const uploadLabel = dlg.getByText(/^Upload PDF$/i).first();
+    const uploadLabel = dlg.getByText(/upload pdf/i).first();
     await expect(uploadLabel).toBeVisible({ timeout: 15000 });
 
     const fileInput = dlg.locator('input[type="file"]').first();
     await fileInput.waitFor({ state: 'attached', timeout: 15000 });
 
-    const proceed = dlg.getByRole('button', { name: /^proceed$/i });
+    const stagingTimeout = manual ? 600000 : 120000;
 
     if (manual) {
+      console.warn(
+        '[PO import] Explorer mode: choose your PDF in the file dialog. Waiting up to ' +
+          Math.round(stagingTimeout / 60000) +
+          ' min for upload + Proceed to enable, then clicking Proceed.'
+      );
       await this.clickUploadPdfToOpenNativeFileDialog(dlg, {
-        clickTimeout: 600000,
+        clickTimeout: stagingTimeout,
       });
-      await expect(proceed).toBeEnabled({ timeout: 600000 });
     } else {
-      try {
-        const [fileChooser] = await Promise.all([
-          this.page.waitForEvent('filechooser', { timeout: 25000 }),
-          this.clickUploadPdfToOpenNativeFileDialog(dlg),
-        ]);
-        await fileChooser.setFiles(automatedPath);
-      } catch {
-        await fileInput.setInputFiles(automatedPath);
-      }
-      await expect(proceed).toBeEnabled({ timeout: 60000 });
+      await fileInput.setInputFiles(automatedPath);
     }
 
-    await proceed.click();
+    await this.waitForPdfStagedAndProceedReady(dlg, stagingTimeout);
+
+    await dlg.getByRole('button', { name: /proceed/i }).click();
 
     const uploading = this.page.getByText(/uploading file/i).first();
     if (

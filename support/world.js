@@ -9,6 +9,37 @@ function isHeadlessRun() {
   );
 }
 
+/** One browser per process; closed in AfterAll (hooks.js). */
+let sharedSession = null;
+
+async function ensureSharedSession() {
+  if (sharedSession) {
+    return sharedSession;
+  }
+  const headless = isHeadlessRun();
+  const browser = await chromium.launch({
+    headless,
+    ...(headless ? {} : { args: ['--start-maximized'] }),
+  });
+  const context = await browser.newContext(
+    headless ? {} : { viewport: null }
+  );
+  const page = await context.newPage();
+  sharedSession = { browser, context, page };
+  return sharedSession;
+}
+
+async function closeSharedSession() {
+  if (!sharedSession?.browser) {
+    return;
+  }
+  try {
+    await sharedSession.browser.close();
+  } finally {
+    sharedSession = null;
+  }
+}
+
 class CustomWorld {
   async init() {
     const session = await ensureSharedSession();
