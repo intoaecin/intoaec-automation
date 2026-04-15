@@ -43,6 +43,8 @@
     "test:admin:projects:management:timetracking": "npx cucumber-js features/admin/projects/management/TimeTracking.feature",
     "test:admin:projects:managements:timetracking:create": "npx cucumber-js features/admin/projects/managements/timetracking/create_timesheet.feature",
     "test:admin:projects:managements:timetracking:edit": "npx cucumber-js features/admin/projects/managements/timetracking/edit_timesheet.feature",
+    "test:admin:projects:managements:timetracking:delete": "npx cucumber-js features/admin/projects/managements/timetracking/delete_timesheet.feature",
+    "test:admin:projects:managements:timetracking:convert-expense": "npx cucumber-js features/admin/projects/managements/timetracking/convert_timesheet_to_expense.feature",
     "test:admin:projects:management:workers": "npx cucumber-js features/admin/projects/management/Workers.feature",
     "test:admin:projects:procurement:goodsreceipt": "npx cucumber-js features/admin/projects/procurement/GoodsReceipt.feature",
     "test:admin:projects:procurement:indent": "npx cucumber-js features/admin/projects/procurement/Indent.feature",
