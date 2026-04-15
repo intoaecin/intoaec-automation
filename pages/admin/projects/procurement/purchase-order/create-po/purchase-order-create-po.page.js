@@ -133,6 +133,215 @@ class PurchaseOrderCreatePoPage extends BasePage {
   }
 
   /**
+   * Scroll the window and the PO form’s scrollable panes so the lower part of the page (Terms) is reachable.
+   */
+  async scrollPurchaseOrderPageToRevealTermsSection(headingLocator) {
+    const scrollTableAncestorsToBottom = async () => {
+      const table = this.page.locator('[aria-label="PO line items table"]');
+      if (!(await table.isVisible({ timeout: 3000 }).catch(() => false))) {
+        return;
+      }
+      await table.evaluate((tableEl) => {
+        let n = tableEl.parentElement;
+        for (let d = 0; d < 14 && n; d += 1) {
+          const st = window.getComputedStyle(n);
+          if (
+            (st.overflowY === 'auto' || st.overflowY === 'scroll') &&
+            n.scrollHeight > n.clientHeight + 20
+          ) {
+            n.scrollTop = n.scrollHeight;
+          }
+          n = n.parentElement;
+        }
+      });
+    };
+
+    const headingInViewport = async () => {
+      const h = headingLocator.first();
+      if ((await h.count()) === 0) {
+        return false;
+      }
+      return h
+        .evaluate((el) => {
+          const st = window.getComputedStyle(el);
+          if (st.visibility === 'hidden' || st.display === 'none') {
+            return false;
+          }
+          const r = el.getBoundingClientRect();
+          return (
+            r.width > 0 &&
+            r.height > 0 &&
+            r.top < window.innerHeight - 24 &&
+            r.bottom > 48
+          );
+        })
+        .catch(() => false);
+    };
+
+    for (let step = 0; step < 36; step += 1) {
+      if (await headingInViewport()) {
+        break;
+      }
+      await this.page.evaluate(() => {
+        window.scrollBy(0, Math.floor(window.innerHeight * 0.92));
+      });
+      await scrollTableAncestorsToBottom();
+      await this.page.waitForTimeout(60);
+    }
+
+    await scrollTableAncestorsToBottom();
+    await this.page.evaluate(() => {
+      const se = document.scrollingElement || document.documentElement;
+      if (se && se.scrollHeight > se.clientHeight) {
+        se.scrollTop = se.scrollHeight;
+      }
+    });
+    await this.page.waitForTimeout(80);
+
+    await headingLocator.first().scrollIntoViewIfNeeded();
+    await this.page.waitForTimeout(120);
+  }
+
+  /**
+   * Terms field: first textarea after the PO line items table (matches typical layout: lines → totals → T&C).
+   */
+  locatorPurchaseOrderTermsField() {
+    const termsHeadingRe = /terms\s*(and|&)\s*conditions?/i;
+    const table = this.page.locator('[aria-label="PO line items table"]');
+    const afterTableTa = table.locator('xpath=./following::textarea[1]');
+    const afterHeadingTa = this.page
+      .getByText(termsHeadingRe)
+      .filter({ visible: true })
+      .first()
+      .locator('xpath=./following::textarea[1]');
+    const byLabel = this.page
+      .getByLabel(/terms\s*(and|&)?\s*conditions?/i)
+      .first();
+    const afterTableEditable = table.locator(
+      'xpath=./following::*[@contenteditable="true"][1]'
+    );
+    return {
+      primary: afterTableTa,
+      afterHeading: afterHeadingTa,
+      byLabel,
+      editable: afterTableEditable,
+      fallbackTa: this.page.locator('textarea').filter({ visible: true }).last(),
+    };
+  }
+
+  /**
+   * PO create/edit: scroll page to Terms, then click and fill (before Action → Compose email).
+   */
+  async fillPurchaseOrderTermsAndConditions(text) {
+    const value = String(text || '').trim();
+    if (!value) {
+      throw new Error('Terms and conditions text must be non-empty');
+    }
+    await expect(this.page).toHaveURL(/purchase-order\/(create|edit)/);
+    await this.waitForNetworkSettled();
+
+    const termsHeadingRe = /terms\s*(and|&)\s*conditions?/i;
+    const heading = this.page
+      .getByText(termsHeadingRe)
+      .filter({ visible: true })
+      .first();
+
+    await this.scrollPurchaseOrderPageToRevealTermsSection(heading);
+    await expect(heading).toBeVisible({ timeout: 90000 });
+
+    const {
+      primary,
+      afterHeading,
+      byLabel,
+      editable,
+      fallbackTa,
+    } = this.locatorPurchaseOrderTermsField();
+
+    let field = primary;
+    if (!(await primary.isVisible({ timeout: 8000 }).catch(() => false))) {
+      field = afterHeading;
+    }
+    if (!(await field.isVisible({ timeout: 4000 }).catch(() => false))) {
+      field = byLabel;
+    }
+    if (!(await field.isVisible({ timeout: 4000 }).catch(() => false))) {
+      field = editable;
+    }
+    if (!(await field.isVisible({ timeout: 4000 }).catch(() => false))) {
+      field = fallbackTa;
+    }
+
+    await expect(field).toBeVisible({ timeout: 45000 });
+    await field.scrollIntoViewIfNeeded();
+    await this.page.waitForTimeout(100);
+
+    const isSlateLike = await field
+      .evaluate((el) => {
+        return (
+          el.getAttribute('contenteditable') === 'true' ||
+          el.hasAttribute('data-slate-editor')
+        );
+      })
+      .catch(() => false);
+
+    const fillTimeoutMs = Math.min(
+      300000,
+      Math.max(45000, Number(process.env.PO_TERMS_FILL_TIMEOUT_MS) || 90000)
+    );
+
+    await field.click({ timeout: 20000 });
+    if (isSlateLike) {
+      await this.page.keyboard.press('ControlOrMeta+a');
+      await this.page.keyboard.press('Backspace');
+    } else {
+      await field.fill('');
+    }
+
+    const useSlowTyping =
+      /^1|true|yes$/i.test(String(process.env.PO_TERMS_SLOW_TYPING || ''));
+    const keystrokeDelayMs = Math.min(
+      80,
+      Math.max(5, Number(process.env.PO_TERMS_KEYSTROKE_DELAY_MS) || 12)
+    );
+
+    if (useSlowTyping) {
+      await field.pressSequentially(value, {
+        delay: keystrokeDelayMs,
+        timeout: Math.min(
+          600000,
+          Math.max(
+            120000,
+            value.length * (keystrokeDelayMs + (isSlateLike ? 20 : 8)) + 60000
+          )
+        ),
+      });
+    } else {
+      await field.fill(value, { timeout: fillTimeoutMs });
+    }
+
+    const head = value.slice(0, Math.min(80, value.length));
+    const tail = value.slice(-Math.min(60, value.length));
+    await expect
+      .poll(
+        async () => {
+          const raw = await field
+            .evaluate((el) => {
+              if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+                return (el.value || '').trim();
+              }
+              return (el.textContent || el.innerText || '').trim();
+            })
+            .catch(() => '');
+          return raw.includes(head) && (tail.length < 5 || raw.includes(tail));
+        },
+        { timeout: 45000, intervals: [200, 400, 800] }
+      )
+      .toBe(true);
+
+    await this.waitForNetworkSettled();
+  }
+
+  /**
    * @returns {string | null} *@yopmail.com from the first vendor row if present (avoids reading compose To later).
    */
   async tryReadYopmailFromVendorModalFirstRow(vendorModal) {

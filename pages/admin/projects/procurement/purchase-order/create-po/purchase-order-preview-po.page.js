@@ -68,6 +68,65 @@ class PurchaseOrderPreviewPoPage extends PurchaseOrderCreatePoPage {
     });
   }
 
+  /**
+   * In full-screen preview dialog: click Download and wait for the file to download.
+   * @returns {Promise<string>} downloaded suggested filename
+   */
+  async downloadPurchaseOrderFromPreview() {
+    const dialog = this.fullScreenPoPreviewDialog();
+    await expect(dialog).toBeVisible({ timeout: this.defaultTimeout });
+
+    // Common candidates: text button, icon button, aria-label/title.
+    const downloadCandidates = [
+      dialog.getByRole('button', { name: /^download$/i }),
+      dialog.getByRole('button', { name: /download/i }),
+      dialog.locator('button[aria-label*="download" i]'),
+      dialog.locator('button[title*="download" i]'),
+      dialog.locator('a[download]'),
+      dialog.locator('button:has(svg[data-testid*="Download" i])'),
+    ];
+
+    let downloadControl = null;
+    for (const loc of downloadCandidates) {
+      const el = loc.first();
+      if (await el.isVisible({ timeout: 1500 }).catch(() => false)) {
+        downloadControl = el;
+        break;
+      }
+    }
+    if (!downloadControl) {
+      throw new Error('Download control not found in PO preview dialog.');
+    }
+
+    await downloadControl.scrollIntoViewIfNeeded();
+
+    const downloadPromise = this.page.waitForEvent('download', {
+      timeout: 120000,
+    });
+    await downloadControl.click({ timeout: 20000 }).catch(async () => {
+      await downloadControl.click({ timeout: 20000, force: true });
+    });
+
+    const download = await downloadPromise;
+    const suggested = download.suggestedFilename();
+
+    // Save to a stable place if possible; if not, just ensure it completes.
+    const outDir = process.env.PO_DOWNLOAD_DIR;
+    if (outDir && String(outDir).trim()) {
+      const path = require('path');
+      const fs = require('fs');
+      const dir = String(outDir).trim();
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      await download.saveAs(path.join(dir, suggested));
+    } else {
+      await download.path().catch(() => {});
+    }
+
+    return suggested;
+  }
+
   async expectPurchaseOrderListWithCreateActionVisible() {
     await expect(
       this.page.getByRole('button', { name: /create purchase order/i })
