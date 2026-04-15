@@ -176,11 +176,27 @@ class PurchaseOrderVendorYopmailPage extends BasePage {
       .or(ifmail.locator('a').filter({ hasText: /view\s*po/i }))
       .first();
 
-    await expect(viewPo).toBeVisible({ timeout: 90000 });
+    // Yopmail sometimes takes a while to render the message iframe after you click a row.
+    // Poll for the View PO control, then click with a longer popup budget.
+    await expect
+      .poll(async () => await viewPo.isVisible().catch(() => false), {
+        timeout: 120000,
+        intervals: [300, 600, 1200, 1800],
+      })
+      .toBe(true);
+
+    await viewPo.scrollIntoViewIfNeeded().catch(() => {});
 
     const ctx = this.page.context();
-    const popupPromise = ctx.waitForEvent('page', { timeout: 8000 }).catch(() => null);
-    await viewPo.click();
+    const popupPromise = ctx.waitForEvent('page', { timeout: 20000 }).catch(() => null);
+
+    // Click is occasionally swallowed by iframe overlays; retry with force.
+    try {
+      await viewPo.click({ timeout: 15000 });
+    } catch {
+      await viewPo.click({ timeout: 15000, force: true });
+    }
+
     const popup = await popupPromise;
 
     if (popup) {
@@ -188,10 +204,20 @@ class PurchaseOrderVendorYopmailPage extends BasePage {
       return popup;
     }
 
-    await this.page.waitForURL(
-      (u) => !String(u).toLowerCase().includes('yopmail.com'),
-      { timeout: 120000 }
-    );
+    // Some Yopmail flows navigate the same tab (no popup).
+    // Give it a bit more time after the click.
+    await this.page
+      .waitForURL((u) => !String(u).toLowerCase().includes('yopmail.com'), {
+        timeout: 180000,
+      })
+      .catch(async () => {
+        // One last attempt: click again in case the first click didn't register.
+        await viewPo.click({ timeout: 15000, force: true }).catch(() => {});
+        await this.page.waitForURL(
+          (u) => !String(u).toLowerCase().includes('yopmail.com'),
+          { timeout: 180000 }
+        );
+      });
     return this.page;
   }
 }
