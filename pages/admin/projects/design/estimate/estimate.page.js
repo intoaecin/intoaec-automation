@@ -70,6 +70,21 @@ class EstimatePage extends BasePage {
     this.estimateMainTab = page.getByRole('main').getByText('Estimate', { exact: true }).first();
     this.saveAsDraftContinueButton = page.getByRole('button', { name: 'Save as draft & Continue', exact: true }).first();
 
+    // Back/unsaved-changes flow (Estimate create/edit)
+    // User-provided DOM: <span class="ml-1">Estimate</span> inside the back/breadcrumb button
+    this.backEstimateSpan = page.locator('span.ml-1').filter({ hasText: /estimate/i }).first();
+    // Some builds wrap the span in a button, some use role="button" or link-like element.
+    this.backEstimateClickable = this.backEstimateSpan.locator(
+      'xpath=ancestor::*[self::button or @role="button" or self::a][1]'
+    );
+    this.backEstimateButton = page.locator(':is(button,[role="button"],a):has(span.ml-1)').filter({ hasText: /estimate/i }).first();
+    // User-provided selector: class="MuiTouchRipple-root css-w0pj6f" (Cancel/Continue buttons via ripple root)
+    this.unsavedChangesDialog = page.locator('[role="dialog"], .MuiDialog-root, .modal.show').first();
+    this.unsavedDialogRippleButtons = this.unsavedChangesDialog.locator('button:has(.MuiTouchRipple-root.css-w0pj6f)');
+    // Fallbacks if the dialog has proper accessible names
+    this.cancelEstimateCreationButton = page.getByRole('button', { name: /cancel/i }).first();
+    this.continueEstimateLandingButton = page.getByRole('button', { name: /continue/i }).first();
+
     // Section name placeholders: per DOM, a div with title="Add section name"
     this.addSectionNameTitles = page.getByTitle('Add section name');
 
@@ -156,6 +171,82 @@ class EstimatePage extends BasePage {
     // This screen often keeps background requests open; avoid waiting for full network idle.
     await this.page.waitForTimeout(1200);
     await expect(this.draftTab).toBeVisible({ timeout: this.defaultTimeout });
+  }
+
+  async goBackToEstimatePageWithoutSaving() {
+    // Click the actual button containing the <span class="ml-1">Estimate</span>.
+    // Clicking the span itself is often a no-op due to pointer-events / overlay structure.
+    const candidates = [
+      this.backEstimateButton,
+      this.backEstimateClickable,
+      this.backEstimateSpan,
+      this.page.getByRole('button', { name: /^estimate$/i }).first()
+    ];
+
+    let clicked = false;
+    for (const c of candidates) {
+      if (await c.isVisible({ timeout: 2500 }).catch(() => false)) {
+        await c.scrollIntoViewIfNeeded().catch(() => {});
+        await c.click({ timeout: 20000, force: true });
+        // Give the UI a moment to mount dialog/navigation handlers before we start polling.
+        await this.page.waitForTimeout(500);
+        clicked = true;
+        break;
+      }
+    }
+    if (!clicked) {
+      await this.page.goBack().catch(() => {});
+    }
+
+    // Outcomes vary by build:
+    // - Unsaved-changes dialog appears (Cancel/Continue)
+    // - Immediate navigation back to Estimate landing (Create Estimate visible)
+    await expect
+      .poll(
+        async () => {
+          const dlgVis = await this.unsavedChangesDialog.isVisible().catch(() => false);
+          const rippleCount = await this.unsavedDialogRippleButtons.count().catch(() => 0);
+          const cancelVis = await this.cancelEstimateCreationButton.isVisible().catch(() => false);
+          const contVis = await this.continueEstimateLandingButton.isVisible().catch(() => false);
+          const landingVis = await this.createEstimateButton.isVisible().catch(() => false);
+          return landingVis || (dlgVis && (rippleCount >= 1 || cancelVis || contVis));
+        },
+        { timeout: this.defaultTimeout, intervals: [200, 400, 800, 1200, 2000] }
+      )
+      .toBeTruthy();
+  }
+
+  async clickCancelOnEstimateCreation() {
+    // Prefer accessible name; fall back to the ripple-based selector if needed.
+    let cancelBtn = this.cancelEstimateCreationButton;
+    if (!(await cancelBtn.isVisible({ timeout: 2000 }).catch(() => false))) {
+      // In some builds the buttons are icon-only/no visible text; rely on the dialog's ripple buttons order.
+      const byDialog = this.unsavedDialogRippleButtons.nth(0);
+      if (await byDialog.isVisible({ timeout: 5000 }).catch(() => false)) cancelBtn = byDialog;
+    }
+
+    await expect(cancelBtn).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(cancelBtn).toBeEnabled({ timeout: this.defaultTimeout });
+    await cancelBtn.click({ timeout: 20000 });
+
+    // After Cancel, we should remain on the estimate form.
+    await expect(this.estimateTitleInput).toBeVisible({ timeout: this.defaultTimeout });
+  }
+
+  async clickContinueOnEstimateLanding() {
+    // Prefer accessible name; fall back to the ripple-based selector if needed.
+    let continueBtn = this.continueEstimateLandingButton;
+    if (!(await continueBtn.isVisible({ timeout: 2000 }).catch(() => false))) {
+      const byDialog = this.unsavedDialogRippleButtons.nth(1);
+      if (await byDialog.isVisible({ timeout: 5000 }).catch(() => false)) continueBtn = byDialog;
+    }
+
+    await expect(continueBtn).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(continueBtn).toBeEnabled({ timeout: this.defaultTimeout });
+    await continueBtn.click({ timeout: 20000 });
+
+    // After Continue, we should land back on estimate module with Create Estimate visible.
+    await expect(this.createEstimateButton).toBeVisible({ timeout: this.defaultTimeout });
   }
 
   formatDate(offsetDays = 0) {

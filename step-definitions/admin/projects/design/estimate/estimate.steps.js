@@ -63,6 +63,21 @@ When('I click Save as draft & Continue', { timeout: 120000 }, async function () 
   await estimatePage.clickSaveAsDraftContinue();
 });
 
+When('I go back to Estimate page without saving', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.goBackToEstimatePageWithoutSaving();
+});
+
+When('I click Cancel on estimate creation', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.clickCancelOnEstimateCreation();
+});
+
+When('I click Continue on Estimate landing', { timeout: 120000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.clickContinueOnEstimateLanding();
+});
+
 When('I fill estimate title with {string}', { timeout: 120000 }, async function (title) {
   const estimatePage = getEstimatePage(this);
   await estimatePage.fillEstimateTitleOnly(title);

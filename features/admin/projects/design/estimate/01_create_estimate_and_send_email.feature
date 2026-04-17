@@ -34,6 +34,4 @@ Scenario: Create estimate and send email successfully
     And I add custom estimate column with random name and Link type
     And I click estimate action compose email and send
     Then I should see estimate success toast "Estimation created successfully"
-
-  @regression @estimate
-  
+    
