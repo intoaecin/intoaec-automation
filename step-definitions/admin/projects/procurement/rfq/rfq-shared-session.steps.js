@@ -1,5 +1,4 @@
 const { Given, AfterAll } = require('@cucumber/cucumber');
-const { expect } = require('@playwright/test');
 const LoginPage = require('../../../../../pages/admin/auth/LoginPage');
 const ProjectNavigationPage = require('../../../../../pages/admin/projects/ProjectNavigationPage');
 const ProjectProfilePage = require('../../../../../pages/admin/projects/ProjectProfilePage');
@@ -15,8 +14,7 @@ async function loginAndNavigateToRfqModule(world, email, password) {
   const loginPage = new LoginPage(page);
   await loginPage.goto();
   await loginPage.login(email, password);
-  const ok = await loginPage.isLoginSuccessful();
-  expect(ok).toBeTruthy();
+  await loginPage.assertLoginSuccessful();
 
   const nav = new ProjectNavigationPage(page);
   await nav.navigateToProjects();

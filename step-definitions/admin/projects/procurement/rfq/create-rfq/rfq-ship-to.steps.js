@@ -1,5 +1,5 @@
 const { When } = require('@cucumber/cucumber');
-const RfqShipToPage = require('../../../../../pages/admin/projects/procurement/rfq/rfq-ship-to.page');
+const RfqShipToPage = require('../../../../../../pages/admin/projects/procurement/rfq/create-rfq/rfq-ship-to.page');
 
 function getRfqShipToPage(world) {
   if (!world.rfqShipToPage) {
@@ -16,3 +16,4 @@ When(
     await rfq.clickShipToAddressOnRfqForm();
   }
 );
+

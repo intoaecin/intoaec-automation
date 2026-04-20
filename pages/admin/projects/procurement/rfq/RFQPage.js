@@ -134,10 +134,93 @@ class RFQPage extends BasePage {
   }
 
   async dismissOpenMenusAndPopovers() {
-    await this.page.keyboard.press('Escape');
-    await this.page.waitForTimeout(200);
-    await this.page.keyboard.press('Escape');
-    await this.page.waitForTimeout(200);
+    if (!this.page || this.page.isClosed()) {
+      return;
+    }
+    await this.page.keyboard.press('Escape').catch(() => {});
+    await this.page.waitForTimeout(80).catch(() => {});
+    if (this.page.isClosed()) {
+      return;
+    }
+    await this.page.keyboard.press('Escape').catch(() => {});
+    await this.page.waitForTimeout(80).catch(() => {});
+  }
+
+  /**
+   * After scrolling to Attachments (bottom of form), the **Action** button is often in the header/toolbar.
+   * Reset window + main scroll so Action → Compose email is clickable.
+   */
+  async scrollRfqPageAndMainToTop() {
+    if (!this.page || this.page.isClosed()) {
+      return;
+    }
+    await this.page
+      .evaluate(() => {
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+        const doc = document.scrollingElement || document.documentElement;
+        if (doc) {
+          doc.scrollTop = 0;
+        }
+        document.body.scrollTop = 0;
+        document.documentElement.scrollTop = 0;
+        document.querySelectorAll('main, [role="main"]').forEach((m) => {
+          try {
+            m.scrollTop = 0;
+          } catch (_) {
+            /* ignore */
+          }
+        });
+      })
+      .catch(() => {});
+    await this.page.waitForTimeout(120).catch(() => {});
+  }
+
+  /**
+   * Prefer a visible **Action** in the form toolbar/header. After long scrolls (attachments),
+   * `getByRole(...).first()` can resolve to a hidden duplicate in the DOM.
+   */
+  async resolveVisibleRfqFormActionButton() {
+    const namePatterns = [
+      /^action$/i,
+      /^actions$/i,
+      /\bmore actions\b/i,
+      /\baction menu\b/i,
+      /\baction\b/i,
+    ];
+
+    const scopes = [
+      this.page.locator('header').filter({ visible: true }),
+      this.page.getByRole('banner').filter({ visible: true }),
+      this.page.locator('[class*="MuiToolbar-root"]').filter({ visible: true }),
+      this.page.locator('[class*="toolbar"]').filter({ visible: true }),
+    ];
+
+    for (const scope of scopes) {
+      if ((await scope.count()) === 0) {
+        continue;
+      }
+      const root = scope.first();
+      if (!(await root.isVisible({ timeout: 600 }).catch(() => false))) {
+        continue;
+      }
+      for (const nameRe of namePatterns) {
+        const loc = root.getByRole('button', { name: nameRe }).filter({ visible: true });
+        const n = await loc.count().catch(() => 0);
+        if (n > 0) {
+          return loc.last();
+        }
+      }
+    }
+
+    for (const nameRe of namePatterns) {
+      const loc = this.page.getByRole('button', { name: nameRe }).filter({ visible: true });
+      const n = await loc.count().catch(() => 0);
+      if (n > 0) {
+        return loc.last();
+      }
+    }
+
+    return this.page.getByRole('button', { name: /\baction\b/i }).filter({ visible: true }).last();
   }
 
   async scrollRfqCreateFormForDateFields() {
@@ -675,9 +758,15 @@ class RFQPage extends BasePage {
 
   /** Toasts can sit above the header and intercept Action clicks (same as PO). */
   async dismissVisibleToastNotifications() {
+    if (!this.page || this.page.isClosed()) {
+      return;
+    }
     const closeSelectors =
       '.Toastify__toast .Toastify__close-button, .Toastify__close-button[aria-label], [class*="Toastify__close-button"]';
     for (let i = 0; i < 10; i += 1) {
+      if (this.page.isClosed()) {
+        return;
+      }
       const btn = this.page.locator(closeSelectors).first();
       if (!(await btn.isVisible({ timeout: 400 }).catch(() => false))) {
         break;
@@ -692,7 +781,7 @@ class RFQPage extends BasePage {
     await this.dismissOpenMenusAndPopovers();
     await this.waitForNetworkSettled();
 
-    const actionBtn = this.page.getByRole('button', { name: /^action$/i }).first();
+    const actionBtn = await this.resolveVisibleRfqFormActionButton();
     await expect(actionBtn).toBeVisible({ timeout: this.defaultTimeout });
     await actionBtn.scrollIntoViewIfNeeded();
 

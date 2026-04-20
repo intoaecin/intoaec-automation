@@ -14,7 +14,17 @@ let sharedSession = null;
 
 async function ensureSharedSession() {
   if (sharedSession) {
-    return sharedSession;
+    const browserOk = !!sharedSession.browser && sharedSession.browser.isConnected();
+    const pageOk = !!sharedSession.page && !sharedSession.page.isClosed();
+    const contextOk = !!sharedSession.context;
+    if (browserOk && contextOk && pageOk) {
+      return sharedSession;
+    }
+    try {
+      await sharedSession.browser?.close().catch(() => {});
+    } finally {
+      sharedSession = null;
+    }
   }
   const headless = isHeadlessRun();
   const browser = await chromium.launch({

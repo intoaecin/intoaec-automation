@@ -25,7 +25,16 @@ When('I start RFQ from scratch and proceed', { timeout: 120000 }, async function
 
 When('I fill RFQ title with {string}', { timeout: 120000 }, async function (title) {
   const rfq = getRfqPage(this);
-  await rfq.fillRfqTitle(title);
+  const suffix =
+    process.env.RFQ_UNIQUE_TITLE_SUFFIX ||
+    `${Date.now()}`; // fast + unique across runs
+  const base = String(title);
+  const finalTitle =
+    base.includes('{unique}')
+      ? base.replace('{unique}', suffix)
+      : base;
+  this.lastRfqTitle = finalTitle;
+  await rfq.fillRfqTitle(finalTitle);
 });
 
 When('I set RFQ required by date to today', { timeout: 120000 }, async function () {

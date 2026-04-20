@@ -1,5 +1,5 @@
 const { When, Then } = require('@cucumber/cucumber');
-const RfqAddFromLibraryPage = require('../../../../../pages/admin/projects/procurement/rfq/rfq-add-from-library.page');
+const RfqAddFromLibraryPage = require('../../../../../../pages/admin/projects/procurement/rfq/create-rfq/rfq-add-from-library.page');
 
 function getRfqAddFromLibraryPage(world) {
   if (!world.rfqAddFromLibraryPage) {
@@ -81,3 +81,4 @@ Then(
     );
   }
 );
+

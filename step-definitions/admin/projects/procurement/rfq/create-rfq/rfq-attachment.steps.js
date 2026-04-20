@@ -1,5 +1,5 @@
 const { When } = require('@cucumber/cucumber');
-const RfqAttachmentPage = require('../../../../../pages/admin/projects/procurement/rfq/rfq-attachment.page');
+const RfqAttachmentPage = require('../../../../../../pages/admin/projects/procurement/rfq/create-rfq/rfq-attachment.page');
 
 function getRfqAttachmentPage(world) {
   if (!world.rfqAttachmentPage) {
@@ -32,3 +32,4 @@ When(
     }
   }
 );
+

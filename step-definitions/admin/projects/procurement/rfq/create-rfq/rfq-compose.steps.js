@@ -1,5 +1,5 @@
 const { When, Then } = require('@cucumber/cucumber');
-const RFQComposePage = require('../../../../../pages/admin/projects/procurement/rfq/rfq-compose.page');
+const RFQComposePage = require('../../../../../../pages/admin/projects/procurement/rfq/create-rfq/rfq-compose.page');
 
 function getRfqComposePage(world) {
   if (!world.rfqComposePage) {
@@ -14,6 +14,16 @@ When(
   async function () {
     const rfq = getRfqComposePage(this);
     await rfq.openActionMenuAndComposeEmail();
+  }
+);
+
+When(
+  'I compose and send the RFQ email',
+  { timeout: 360000 },
+  async function () {
+    const rfq = getRfqComposePage(this);
+    await rfq.openActionMenuAndComposeEmail();
+    await rfq.sendEmailFromRfqComposeModal();
   }
 );
 
@@ -34,3 +44,4 @@ Then(
     await rfq.expectRfqComposeEmailSuccessToast();
   }
 );
+
