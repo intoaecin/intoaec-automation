@@ -1,39 +1,36 @@
-const { expect } = require('@playwright/test');
-const RFQComposePage = require('./rfq-compose.page');
 const fs = require('fs');
 const path = require('path');
+const { expect } = require('@playwright/test');
+const RFQComposePage = require('./rfq-compose.page');
 
-function rfqAttachmentLog(tag, detail) {
-  const ts = new Date().toISOString();
-  const suffix = detail ? ` - ${detail}` : '';
-  // eslint-disable-next-line no-console
-  console.log(`[RFQ attachment][${ts}] ${tag}${suffix}`);
-}
-
+/**
+ * RFQ create: attach a file before Action → Compose (same pattern as PO attachment).
+ *
+ * **Default (Explorer):** locate control below Terms & Conditions, long-timeout force click, then
+ * ENTER in terminal (TTY) or Inspector — same as `PO_ATTACHMENT_*` behavior with `RFQ_ATTACHMENT_*` envs.
+ *
+ * **Automation:** RFQ_ATTACHMENT_AUTO=1 + RFQ_ATTACHMENT_FILE_PATH or fixtures/sample-po-import.pdf.
+ *
+ * **RFQ_ATTACHMENT_TRIGGER_TEXT** — substring of the visible control if auto-detection misses.
+ *
+ * This step does **not** open Action → Compose; the next Gherkin step does (like PO).
+ */
 class RfqAttachmentPage extends RFQComposePage {
-  shouldAutoSendAfterCompose() {
-    const v = process.env.RFQ_ATTACHMENT_AUTO_SEND_AFTER_COMPOSE;
-    return v === '1' || /^true$/i.test(String(v || ''));
-  }
-
   defaultAttachmentFixturePath() {
-    return path.join(
-      __dirname,
-      '../../../../../../fixtures/sample-po-import.pdf'
-    );
+    return path.join(__dirname, '../../../../../../fixtures/sample-po-import.pdf');
   }
 
   isAttachmentAutomationMode() {
     return (
       /^1|true$/i.test(String(process.env.RFQ_ATTACHMENT_AUTO || '')) ||
-      /^1|true$/i.test(String(process.env.RFQ_ATTACHMENT_USE_FILECHOOSER || ''))
+      /^1|true$/i.test(String(process.env.RFQ_ATTACHMENT_USE_SET_FILES || ''))
     );
   }
 
   resolveAttachmentFilePathForAutomation() {
     const envPath = process.env.RFQ_ATTACHMENT_FILE_PATH;
-    if (envPath && String(envPath).trim()) {
-      const resolved = path.resolve(String(envPath).trim());
+    if (envPath) {
+      const resolved = path.resolve(envPath);
       if (!fs.existsSync(resolved)) {
         throw new Error(`RFQ_ATTACHMENT_FILE_PATH does not exist: ${resolved}`);
       }
@@ -55,146 +52,53 @@ class RfqAttachmentPage extends RFQComposePage {
     return Math.max(60000, Math.min(1200000, n));
   }
 
-  attachmentNameRegex() {
-    return /attach|attachment|upload|browse|choose\s*file|add\s*files?|select\s*file|add\s*document|supporting\s+doc/i;
+  termsMarkerLocator() {
+    return this.page
+      .getByText(/terms\s*(and|&)\s*conditions?/i)
+      .filter({ visible: true })
+      .first();
   }
 
-  attachmentSectionMarkerRegex() {
-    return /attachments?|terms\s*(and|&)\s*conditions?/i;
-  }
-
-  async locateByCustomTriggerText() {
-    const custom = process.env.RFQ_ATTACHMENT_TRIGGER_TEXT?.trim();
-    if (!custom) {
+  /**
+   * First file input in document order after the visible Terms heading (usually Attachments).
+   */
+  async locateFileInputFollowingTerms() {
+    const terms = this.termsMarkerLocator();
+    if ((await terms.count()) === 0) {
       return null;
     }
-
-    const escaped = custom.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(escaped, 'i');
-
-    const btn = this.page.getByRole('button', { name: re }).first();
-    if (await btn.isVisible({ timeout: 2000 }).catch(() => false)) {
-      return { kind: 'locator', target: btn };
-    }
-
-    const text = this.page.getByText(re).filter({ visible: true }).first();
-    if (await text.isVisible({ timeout: 2000 }).catch(() => false)) {
-      const clickable = text
-        .locator('xpath=ancestor-or-self::button[1]')
-        .or(text.locator('xpath=ancestor-or-self::a[1]'))
-        .or(text.locator('xpath=ancestor-or-self::*[@role="button"][1]'))
-        .first();
-      if (await clickable.isVisible({ timeout: 1000 }).catch(() => false)) {
-        return { kind: 'locator', target: clickable };
-      }
-      return { kind: 'locator', target: text };
-    }
-
-    return null;
-  }
-
-  sectionMarkerLocator() {
-    return this.page.getByText(this.attachmentSectionMarkerRegex()).filter({ visible: true }).first();
-  }
-
-  async locateFileInputFollowingSectionMarker() {
-    const marker = this.sectionMarkerLocator();
-    if ((await marker.count()) === 0) {
+    const inp = terms.locator('xpath=./following::input[@type="file"][1]');
+    if ((await inp.count()) === 0) {
       return null;
     }
-
-    const input = marker.locator('xpath=./following::input[@type="file"][1]');
-    if ((await input.count()) === 0) {
-      return null;
-    }
-
-    const id = await input.getAttribute('id').catch(() => null);
+    const id = await inp.getAttribute('id').catch(() => null);
     if (id) {
-      const label = this.page.locator(`label[for=${JSON.stringify(id)}]`).first();
-      if (await label.isVisible({ timeout: 1200 }).catch(() => false)) {
-        return { kind: 'locator', target: label };
+      const lbl = this.page.locator(`label[for=${JSON.stringify(id)}]`).first();
+      if (await lbl.isVisible({ timeout: 1200 }).catch(() => false)) {
+        return { kind: 'locator', target: lbl };
       }
     }
-
-    const wrapBtn = input
+    const wrapBtn = inp
       .locator('xpath=ancestor::button[1]')
-      .or(input.locator('xpath=ancestor::*[@role="button"][1]'))
+      .or(inp.locator('xpath=ancestor::*[@role="button"][1]'))
       .first();
     if (await wrapBtn.isVisible({ timeout: 800 }).catch(() => false)) {
       return { kind: 'locator', target: wrapBtn };
     }
-
-    return { kind: 'locator', target: input };
+    return { kind: 'locator', target: inp };
   }
 
-  async locateAttachmentTriggerLegacy() {
-    const nameRe = this.attachmentNameRegex();
-
-    const directCandidates = [
-      this.page.getByRole('button', { name: nameRe }).first(),
-      this.page.getByRole('link', { name: nameRe }).first(),
-      this.page.getByLabel(nameRe).first(),
-      this.page.locator('label').filter({ hasText: nameRe }).first(),
-      this.page.locator('button, a, [role="button"]').filter({ hasText: nameRe }).first(),
-      this.page.locator('[aria-label*="attach" i]').first(),
-      this.page.locator('[aria-label*="upload" i]').first(),
-      this.page.locator('[data-testid*="attach" i]').first(),
-      this.page.locator('[data-testid*="upload" i]').first(),
-    ];
-
-    for (const candidate of directCandidates) {
-      if (await candidate.isVisible({ timeout: 1500 }).catch(() => false)) {
-        return { kind: 'locator', target: candidate };
-      }
-    }
-
-    const fileInputs = this.page.locator('input[type="file"]');
-    const n = await fileInputs.count();
-    for (let i = 0; i < n; i += 1) {
-      const firstFileInput = fileInputs.nth(i);
-      const exists = await firstFileInput
-        .evaluate((el) => !!el && document.body.contains(el))
-        .catch(() => false);
-      if (!exists) {
-        continue;
-      }
-
-      if (await firstFileInput.isVisible({ timeout: 1000 }).catch(() => false)) {
-        return { kind: 'locator', target: firstFileInput };
-      }
-
-      const id = await firstFileInput.getAttribute('id').catch(() => null);
-      if (id) {
-        const labelForInput = this.page.locator(`label[for=${JSON.stringify(id)}]`).first();
-        if (await labelForInput.isVisible({ timeout: 1500 }).catch(() => false)) {
-          return { kind: 'locator', target: labelForInput };
-        }
-      }
-
-      const triggerLikeParent = firstFileInput
-        .locator('xpath=ancestor::button[1]')
-        .or(firstFileInput.locator('xpath=ancestor::*[@role="button"][1]'))
-        .first();
-      if (await triggerLikeParent.isVisible({ timeout: 1000 }).catch(() => false)) {
-        return { kind: 'locator', target: triggerLikeParent };
-      }
-
-      return { kind: 'locator', target: firstFileInput };
-    }
-
-    return null;
-  }
-
-  async locateAttachmentElementHandleAfterSection() {
-    const handle = await this.page.evaluateHandle((sectionMarkerSource, attachmentSource) => {
-      const sectionMarkerRe = new RegExp(sectionMarkerSource, 'i');
-      const attachmentRe = new RegExp(attachmentSource, 'i');
+  async locateAttachmentElementHandleAfterTerms() {
+    const handle = await this.page.evaluateHandle(() => {
+      const termsRe = /terms\s*(and|&)\s*conditions?/i;
+      const nameRe =
+        /\b(attach|attachments?|upload|browse|choose\s*file|add\s*files?|select\s*file)\b/i;
 
       let anchor = null;
       const tw = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
       let node;
       while ((node = tw.nextNode())) {
-        if (sectionMarkerRe.test(node.textContent || '')) {
+        if (termsRe.test(node.textContent || '')) {
           anchor = node.parentElement;
           break;
         }
@@ -204,27 +108,30 @@ class RfqAttachmentPage extends RFQComposePage {
       }
 
       const scored = [];
-      const followsAnchor = (el) => {
+      const followsTerms = (el) => {
         const pos = anchor.compareDocumentPosition(el);
         return !!(pos & Node.DOCUMENT_POSITION_FOLLOWING);
       };
 
       document.querySelectorAll('input[type="file"]').forEach((el) => {
-        if (!followsAnchor(el)) {
+        if (!followsTerms(el)) {
           return;
         }
         scored.push({ el, score: 200 });
       });
 
       document
-        .querySelectorAll('button, a, [role="button"], label, span, div[role="button"]')
+        .querySelectorAll(
+          'button, a, [role="button"], label, span, div[role="button"]'
+        )
         .forEach((el) => {
-          if (!followsAnchor(el)) {
+          if (!followsTerms(el)) {
             return;
           }
-          const text = `${el.textContent || ''} ${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''}`;
-          if (attachmentRe.test(text)) {
-            scored.push({ el, score: 120 });
+          const t =
+            `${el.textContent || ''} ${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''}`;
+          if (nameRe.test(t)) {
+            scored.push({ el, score: 100 });
           }
         });
 
@@ -234,21 +141,25 @@ class RfqAttachmentPage extends RFQComposePage {
         if (!/^attachments?$/i.test(tx)) {
           return;
         }
-        if (!followsAnchor(h)) {
+        if (!followsTerms(h)) {
           return;
         }
-        const nested = h.querySelector('button, [role="button"], label, input[type="file"], a');
-        if (nested && followsAnchor(nested)) {
+        const nested = h.querySelector(
+          'button, [role="button"], label, input[type="file"], a'
+        );
+        if (nested && followsTerms(nested)) {
           scored.push({ el: nested, score: 150 });
         }
-        let sib = h.nextElementSibling;
-        for (let i = 0; i < 6 && sib; i += 1) {
-          const hit = sib.querySelector('button, [role="button"], label, input[type="file"], a');
-          if (hit && followsAnchor(hit)) {
+        let s = h.nextElementSibling;
+        for (let i = 0; i < 6 && s; i += 1) {
+          const hit = s.querySelector(
+            'button, [role="button"], label, input[type="file"], a'
+          );
+          if (hit && followsTerms(hit)) {
             scored.push({ el: hit, score: 140 });
             break;
           }
-          sib = sib.nextElementSibling;
+          s = s.nextElementSibling;
         }
       });
 
@@ -257,7 +168,7 @@ class RfqAttachmentPage extends RFQComposePage {
       }
       scored.sort((a, b) => b.score - a.score);
       return scored[0].el;
-    }, this.attachmentSectionMarkerRegex().source, this.attachmentNameRegex().source);
+    });
 
     const el = handle.asElement();
     if (!el) {
@@ -267,23 +178,152 @@ class RfqAttachmentPage extends RFQComposePage {
     return el;
   }
 
+  async locateByCustomTriggerText() {
+    const custom = process.env.RFQ_ATTACHMENT_TRIGGER_TEXT?.trim();
+    if (!custom) {
+      return null;
+    }
+    const escaped = custom.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(escaped, 'i');
+
+    const btn = this.page.getByRole('button', { name: re }).first();
+    if (await btn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      return { kind: 'locator', target: btn };
+    }
+    const t = this.page.getByText(re).filter({ visible: true }).first();
+    if (await t.isVisible({ timeout: 2000 }).catch(() => false)) {
+      const asBtn = t
+        .locator('xpath=ancestor-or-self::button[1]')
+        .or(t.locator('xpath=ancestor-or-self::a[1]'))
+        .or(t.locator('xpath=ancestor-or-self::*[@role="button"][1]'))
+        .first();
+      if (await asBtn.isVisible({ timeout: 800 }).catch(() => false)) {
+        return { kind: 'locator', target: asBtn };
+      }
+      return { kind: 'locator', target: t };
+    }
+    return null;
+  }
+
+  async locateRfqAttachmentTriggerLegacy() {
+    const nameRe =
+      /attach|attachment|upload|browse|choose\s+file|add\s+files?|select\s+file|add\s+document|supporting\s+doc/i;
+
+    const fileInputs = this.page.locator('input[type="file"]');
+    const n = await fileInputs.count();
+    for (let i = 0; i < n; i += 1) {
+      const inp = fileInputs.nth(i);
+      const ok = await inp
+        .evaluate((el) => {
+          if (!el || !document.body.contains(el)) {
+            return false;
+          }
+          const st = window.getComputedStyle(el);
+          return !(st.display === 'none' && st.visibility === 'hidden');
+        })
+        .catch(() => false);
+      if (!ok) {
+        continue;
+      }
+      const id = await inp.getAttribute('id').catch(() => null);
+      if (id) {
+        const lbl = this.page
+          .locator(`label[for=${JSON.stringify(id)}]`)
+          .first();
+        if (await lbl.isVisible({ timeout: 800 }).catch(() => false)) {
+          return { kind: 'locator', target: lbl };
+        }
+      }
+      const asButton = inp
+        .locator('xpath=ancestor::button[1]')
+        .or(inp.locator('xpath=ancestor::*[@role="button"][1]'))
+        .first();
+      if (await asButton.isVisible({ timeout: 500 }).catch(() => false)) {
+        return { kind: 'locator', target: asButton };
+      }
+    }
+
+    const termsBlock = this.page
+      .locator('div')
+      .filter({
+        has: this.page.getByText(/terms\s*(and|&)\s*conditions?/i),
+      })
+      .first();
+
+    const scoped = [
+      termsBlock.getByRole('button', { name: nameRe }),
+      termsBlock.locator('button, a, [role="button"]').filter({ hasText: nameRe }),
+      termsBlock.locator('[aria-label*="attach" i]'),
+      termsBlock.locator('[aria-label*="upload" i]'),
+      termsBlock.locator('label').filter({ hasText: nameRe }),
+    ];
+    for (const loc of scoped) {
+      const el = loc.first();
+      if (await el.isVisible({ timeout: 600 }).catch(() => false)) {
+        return { kind: 'locator', target: el };
+      }
+    }
+
+    const global = [
+      this.page.getByRole('button', { name: nameRe }),
+      this.page.getByRole('link', { name: nameRe }),
+      this.page.getByLabel(nameRe),
+      this.page.locator('button, a, [role="button"]').filter({ hasText: nameRe }),
+      this.page.locator('button[aria-label*="attach" i]'),
+      this.page.locator('button[aria-label*="upload" i]'),
+      this.page.locator('[data-testid*="attach" i]'),
+      this.page.locator('[data-testid*="upload" i]'),
+    ];
+    for (const loc of global) {
+      const el = loc.first();
+      if (await el.isVisible({ timeout: 600 }).catch(() => false)) {
+        return { kind: 'locator', target: el };
+      }
+    }
+
+    return null;
+  }
+
+  async scrollRfqFormToRevealTermsSection() {
+    const terms = this.termsMarkerLocator();
+    for (let i = 0; i < 22; i += 1) {
+      if (await terms.isVisible({ timeout: 800 }).catch(() => false)) {
+        await terms.scrollIntoViewIfNeeded().catch(() => {});
+        return;
+      }
+      await this.page.evaluate(() => {
+        const main = document.querySelector('main');
+        if (main && main.scrollHeight > main.clientHeight + 16) {
+          main.scrollTop += Math.floor(main.clientHeight * 0.5);
+          return;
+        }
+        window.scrollBy(0, Math.floor(window.innerHeight * 0.5));
+      });
+      await this.page.waitForTimeout(90);
+    }
+  }
+
+  /**
+   * @returns {Promise<{ kind: 'locator', target: import('@playwright/test').Locator } | { kind: 'handle', target: import('@playwright/test').ElementHandle } | null>}
+   */
   async resolveAttachmentClickTargetWithScroll() {
+    await this.scrollRfqFormToRevealTermsSection();
+    const terms = this.termsMarkerLocator();
+    await expect(terms).toBeVisible({ timeout: 90000 }).catch(() => {});
+
     const tryPick = async () => {
       const custom = await this.locateByCustomTriggerText();
       if (custom) {
         return custom;
       }
-
-      const following = await this.locateFileInputFollowingSectionMarker();
+      const following = await this.locateFileInputFollowingTerms();
       if (following) {
         return following;
       }
-
-      const legacy = await this.locateAttachmentTriggerLegacy();
+      const legacy = await this.locateRfqAttachmentTriggerLegacy();
       if (legacy) {
         return legacy;
       }
-
       return null;
     };
 
@@ -291,140 +331,212 @@ class RfqAttachmentPage extends RFQComposePage {
       const hit = await tryPick();
       if (hit) {
         if (hit.kind === 'locator') {
-          await hit.target.scrollIntoViewIfNeeded().catch(() => {});
+          await hit.target.scrollIntoViewIfNeeded();
         }
         return hit;
       }
-
       await this.page.evaluate(() => {
-        const main = document.querySelector('main');
-        if (main && main.scrollHeight > main.clientHeight + 16) {
-          main.scrollTop += Math.floor(main.clientHeight * 0.55);
-          return;
-        }
         window.scrollBy(0, Math.floor(window.innerHeight * 0.55));
       });
-      await this.page.waitForTimeout(100);
+      const table = this.page.locator('[aria-label*="line items" i]').first();
+      if (await table.isVisible({ timeout: 400 }).catch(() => false)) {
+        await table.evaluate((tableEl) => {
+          let n = tableEl.parentElement;
+          for (let d = 0; d < 14 && n; d += 1) {
+            const st = window.getComputedStyle(n);
+            if (
+              (st.overflowY === 'auto' || st.overflowY === 'scroll') &&
+              n.scrollHeight > n.clientHeight + 16
+            ) {
+              n.scrollTop = n.scrollHeight;
+            }
+            n = n.parentElement;
+          }
+        });
+      }
+      await this.page.waitForTimeout(90);
     }
 
-    const domHandle = await this.locateAttachmentElementHandleAfterSection();
+    await this.page.evaluate(() => {
+      const se = document.scrollingElement || document.documentElement;
+      if (se) {
+        se.scrollTop = se.scrollHeight;
+      }
+    });
+    await this.page.waitForTimeout(200);
+
+    let last = await tryPick();
+    if (last) {
+      if (last.kind === 'locator') {
+        await last.target.scrollIntoViewIfNeeded();
+      }
+      return last;
+    }
+
+    const domHandle = await this.locateAttachmentElementHandleAfterTerms();
     if (domHandle) {
-      await domHandle.scrollIntoViewIfNeeded().catch(() => {});
+      await domHandle.scrollIntoViewIfNeeded();
       return { kind: 'handle', target: domHandle };
     }
 
     throw new Error(
-      'Could not find RFQ attachment control. Set RFQ_ATTACHMENT_TRIGGER_TEXT to a visible label substring if the UI text is different.'
+      'Could not find RFQ attachment below Terms & Conditions. Set RFQ_ATTACHMENT_TRIGGER_TEXT to a visible label (e.g. part of the attachment button text).'
     );
   }
 
-  async waitForAttachmentSelectionToSettle() {
-    rfqAttachmentLog('waitForAttachmentSelectionToSettle:start');
-    if (this.page.isClosed()) {
-      rfqAttachmentLog('waitForAttachmentSelectionToSettle:skip', 'page already closed');
-      return;
-    }
-    await this.waitForNetworkSettled();
+  async waitForAttachmentStepEnterOrInspector(promptText) {
+    const forceInspector =
+      /^1|true$/i.test(String(process.env.RFQ_ATTACHMENT_MANUAL_INSPECTOR || ''));
+    const forceStdin =
+      process.env.RFQ_ATTACHMENT_STDIN === '1' ||
+      /^true$/i.test(String(process.env.RFQ_ATTACHMENT_STDIN || ''));
+    const forceNoStdin =
+      process.env.RFQ_ATTACHMENT_STDIN === '0' ||
+      /^false$/i.test(String(process.env.RFQ_ATTACHMENT_STDIN || ''));
 
-    const uploadingIndicators = this.page
-      .locator('text=/uploading|processing|attaching|please wait/i')
-      .filter({ visible: true });
-    if (await uploadingIndicators.first().isVisible({ timeout: 2000 }).catch(() => false)) {
-      rfqAttachmentLog('waitForAttachmentSelectionToSettle:uploadingVisible');
-      await uploadingIndicators.first().waitFor({ state: 'hidden', timeout: 180000 }).catch(() => {});
-    }
+    const useStdin =
+      forceStdin || (!forceInspector && !forceNoStdin && process.stdin.isTTY);
 
-    await this.page.waitForTimeout(500).catch(() => {});
-    await this.waitForNetworkSettled();
-    rfqAttachmentLog('waitForAttachmentSelectionToSettle:ok');
+    // eslint-disable-next-line no-console
+    console.log(
+      `\n[RFQ attachment] ${promptText}\n` +
+        (useStdin
+          ? '            → Press ENTER in this terminal to continue (next: Action → Compose email).\n'
+          : '            → Resume in Playwright Inspector (▶), or set RFQ_ATTACHMENT_STDIN=1 from a real terminal.\n')
+    );
+
+    if (useStdin) {
+      await this.waitForEnterInTerminal(
+        'Press ENTER when you are ready to continue.'
+      );
+    } else {
+      await this.page.pause();
+    }
   }
 
+  attachmentVerificationTimeoutMs() {
+    const raw = process.env.RFQ_ATTACHMENT_VERIFY_TIMEOUT_MS;
+    const n = raw === undefined || raw === '' ? 12000 : Number(raw);
+    if (Number.isNaN(n)) {
+      return 12000;
+    }
+    return Math.max(4000, Math.min(60000, n));
+  }
+
+  async waitForAttachmentToAppear(uploadPath) {
+    const p = this.page;
+    const fileName = uploadPath ? path.basename(uploadPath) : null;
+    const fileNameRe = fileName
+      ? new RegExp(fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+      : null;
+
+    await expect
+      .poll(
+        async () => {
+          if (fileNameRe) {
+            const byText = p.getByText(fileNameRe).filter({ visible: true }).first();
+            if (await byText.isVisible({ timeout: 600 }).catch(() => false)) {
+              return true;
+            }
+          }
+
+          const statusText = p
+            .getByText(/uploaded|upload complete|attachment added|attached/i)
+            .filter({ visible: true })
+            .first();
+          if (await statusText.isVisible({ timeout: 600 }).catch(() => false)) {
+            return true;
+          }
+
+          const chips = p.locator('.MuiChip-root, [class*="chip"], [class*="attachment"]').filter({
+            visible: true,
+          });
+          const chipCount = await chips.count().catch(() => 0);
+          for (let i = 0; i < Math.min(chipCount, 8); i += 1) {
+            const text = (await chips.nth(i).textContent().catch(() => '')) || '';
+            if (
+              (fileNameRe && fileNameRe.test(text)) ||
+              /attach|upload|image|png|jpg|jpeg|pdf|file/i.test(text)
+            ) {
+              return true;
+            }
+          }
+
+          const fileInputs = p.locator('input[type="file"]');
+          const count = await fileInputs.count().catch(() => 0);
+          for (let i = 0; i < count; i += 1) {
+            const value = await fileInputs
+              .nth(i)
+              .evaluate((el) => el.value || '')
+              .catch(() => '');
+            if (value && (!fileName || value.toLowerCase().includes(fileName.toLowerCase()))) {
+              return true;
+            }
+          }
+
+          return false;
+        },
+        {
+          timeout: this.attachmentVerificationTimeoutMs(),
+          intervals: [150, 300, 600, 1000],
+        }
+      )
+      .toBe(true);
+  }
+
+  /**
+   * Same contract as PO `addPurchaseOrderAttachmentBeforeCompose`: upload only; no Action / Compose here.
+   */
   async addRfqAttachmentBeforeCompose() {
-    rfqAttachmentLog('addRfqAttachmentBeforeCompose:start');
+    await this.ensureActivePage();
     await expect(this.page).toHaveURL(/rfq\/(create|edit)/i);
-    await this.waitForNetworkSettled();
-    await this.dismissVisibleToastNotifications();
-    await this.dismissOpenMenusAndPopovers();
+    await this.page.waitForLoadState('domcontentloaded', {
+      timeout: this.defaultTimeout,
+    });
+    await this.page.waitForTimeout(600);
 
     let resolved = null;
     try {
       resolved = await this.resolveAttachmentClickTargetWithScroll();
-    } catch (error) {
+    } catch (e) {
       // eslint-disable-next-line no-console
       console.warn(
-        '\n[RFQ attachment] Could not auto-locate the attachment control. Pausing so you can click Attachment and select the file manually.\n' +
-          '                Tip: set RFQ_ATTACHMENT_TRIGGER_TEXT to a unique substring of the attachment control to auto-detect next time.\n',
-        error && error.message ? `Reason: ${error.message}\n` : ''
+        '\n[RFQ attachment] Could not auto-locate the attachment control. ' +
+          'Pausing so you can click Attachment and select the file manually.\n' +
+          '            Tip: set RFQ_ATTACHMENT_TRIGGER_TEXT to a unique substring of the attachment control to auto-detect next time.\n',
+        e && e.message ? `            Reason: ${e.message}\n` : ''
       );
-      rfqAttachmentLog('addRfqAttachmentBeforeCompose:fallbackPause');
       await this.page.pause();
-      await this.waitForAttachmentSelectionToSettle();
-      await this.dismissOpenMenusAndPopovers();
-      await this.dismissVisibleToastNotifications();
-      await this.openActionMenuAndComposeEmail();
-      rfqAttachmentLog('addRfqAttachmentBeforeCompose:ok', 'manual attachment completed after pause + compose opened');
+      const skipEnter =
+        /^1|true$/i.test(String(process.env.RFQ_ATTACHMENT_SKIP_STEP_ENTER || ''));
+      if (!skipEnter && process.stdin.isTTY) {
+        await this.waitForEnterInTerminal(
+          'Press ENTER after attachment is uploaded (next: Action → Compose email).'
+        );
+      }
+      await this.waitForNetworkSettled();
       return;
     }
-
-    rfqAttachmentLog('addRfqAttachmentBeforeCompose:triggerFound');
 
     const auto = this.isAttachmentAutomationMode();
     const uploadPath = auto ? this.resolveAttachmentFilePathForAutomation() : null;
     const explorerMs = this.explorerClickTimeoutMs();
 
     try {
-      if (auto) {
-        if (!uploadPath) {
+      if (auto && uploadPath) {
+        const [fileChooser] = await Promise.all([
+          this.page.waitForEvent('filechooser', { timeout: 25000 }),
+          resolved.kind === 'locator'
+            ? resolved.target.click({ timeout: 20000 })
+            : resolved.target.click({ timeout: 20000, force: true }),
+        ]);
+        await fileChooser.setFiles(uploadPath);
+      } else {
+        if (auto && !uploadPath) {
           throw new Error(
             'RFQ_ATTACHMENT_AUTO=1 requires RFQ_ATTACHMENT_FILE_PATH or fixtures/sample-po-import.pdf.'
           );
         }
-
-        // If the resolved target is actually the hidden <input type="file">, don't click it.
-        // setInputFiles works even when the input is not visible and avoids flaky “Element is not visible” clicks.
-        const isFileInput =
-          resolved.kind === 'locator'
-            ? await resolved.target
-                .evaluate(
-                  (el) =>
-                    el &&
-                    String(el.tagName || '').toLowerCase() === 'input' &&
-                    String(el.getAttribute('type') || '').toLowerCase() === 'file'
-                )
-                .catch(() => false)
-            : await resolved.target
-                .evaluate(
-                  (el) =>
-                    el &&
-                    String(el.tagName || '').toLowerCase() === 'input' &&
-                    String(el.getAttribute('type') || '').toLowerCase() === 'file'
-                )
-                .catch(() => false);
-
-        if (isFileInput) {
-          if (resolved.kind === 'locator') {
-            await resolved.target.setInputFiles(uploadPath);
-          } else {
-            // Best-effort locator from the page when we only have a handle.
-            const fileInput = this.page.locator('input[type="file"]').first();
-            await fileInput.waitFor({ state: 'attached', timeout: 15000 });
-            await fileInput.setInputFiles(uploadPath);
-          }
-          rfqAttachmentLog('addRfqAttachmentBeforeCompose:setInputFiles', uploadPath);
-        } else {
-          const [fileChooser] = await Promise.all([
-            this.page.waitForEvent('filechooser', { timeout: 25000 }),
-            resolved.kind === 'locator'
-              ? resolved.target.click({ timeout: 20000, force: true })
-              : resolved.target.click({ timeout: 20000, force: true }),
-          ]);
-          await fileChooser.setFiles(uploadPath);
-          rfqAttachmentLog(
-            'addRfqAttachmentBeforeCompose:fileChooserSet',
-            uploadPath
-          );
-        }
-      } else {
         // eslint-disable-next-line no-console
         console.log(
           '\n[RFQ attachment] Explorer mode: pick your file in the system dialog. This click waits until the dialog finishes.\n'
@@ -432,7 +544,10 @@ class RfqAttachmentPage extends RFQComposePage {
         if (resolved.kind === 'locator') {
           await resolved.target.click({ timeout: explorerMs, force: true });
         } else {
-          await resolved.target.click({ timeout: explorerMs, force: true });
+          await resolved.target.click({
+            timeout: explorerMs,
+            force: true,
+          });
         }
       }
     } finally {
@@ -441,27 +556,59 @@ class RfqAttachmentPage extends RFQComposePage {
       }
     }
 
-    await this.waitForAttachmentSelectionToSettle();
-    await this.dismissOpenMenusAndPopovers();
-    await this.dismissVisibleToastNotifications();
-    await this.openActionMenuAndComposeEmail();
-    rfqAttachmentLog(
-      'addRfqAttachmentBeforeCompose:composeOpened',
-      'attachment staged and compose email opened'
-    );
+    const skipEnter =
+      /^1|true$/i.test(String(process.env.RFQ_ATTACHMENT_SKIP_STEP_ENTER || ''));
+    const forceInspector =
+      /^1|true$/i.test(String(process.env.RFQ_ATTACHMENT_MANUAL_INSPECTOR || ''));
+    const forceStdin =
+      process.env.RFQ_ATTACHMENT_STDIN === '1' ||
+      /^true$/i.test(String(process.env.RFQ_ATTACHMENT_STDIN || ''));
+    const isManualUpload = !auto;
 
-    // If you want the attachment step to fully complete the flow (Action -> Compose -> Send),
-    // enable RFQ_ATTACHMENT_AUTO_SEND_AFTER_COMPOSE=1. Default keeps layer separation:
-    // the next step "I send email from RFQ compose dialog" will do the send.
-    if (this.shouldAutoSendAfterCompose()) {
-      await this.sendEmailFromRfqComposeModal();
-      rfqAttachmentLog(
-        'addRfqAttachmentBeforeCompose:sent',
-        'send email clicked from compose dialog'
-      );
+    if (isManualUpload) {
+      if (!skipEnter && (process.stdin.isTTY || forceStdin || forceInspector)) {
+        await this.waitForAttachmentStepEnterOrInspector(
+          'After the attachment upload finishes, press ENTER and continue to Action → Compose email.'
+        );
+      }
+      await this.ensureActivePage();
+      await this.page.waitForLoadState('domcontentloaded', {
+        timeout: this.defaultTimeout,
+      });
+      await this.scrollRfqPageAndMainToTop();
+      await this.dismissVisibleToastNotifications().catch(() => {});
+      return;
     }
 
-    rfqAttachmentLog('addRfqAttachmentBeforeCompose:ok');
+    await this.waitForNetworkSettled();
+
+    let attachmentVerified = false;
+    try {
+      await this.waitForAttachmentToAppear(uploadPath);
+      attachmentVerified = true;
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[RFQ attachment] Attachment verification did not complete automatically: ${
+          e && e.message ? e.message : e
+        }`
+      );
+      await this.scrollRfqPageAndMainToTop();
+      await this.dismissVisibleToastNotifications().catch(() => {});
+    }
+
+    await this.scrollRfqPageAndMainToTop();
+    await this.dismissVisibleToastNotifications().catch(() => {});
+
+    if (
+      !attachmentVerified &&
+      !skipEnter &&
+      (process.stdin.isTTY || forceStdin || forceInspector)
+    ) {
+      await this.waitForAttachmentStepEnterOrInspector(
+        'When the attachment shows on the RFQ form, continue to Action → Compose email.'
+      );
+    }
   }
 }
 

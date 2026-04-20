@@ -1,5 +1,5 @@
 const { When } = require('@cucumber/cucumber');
-const RfqNotesPage = require('../../../../../pages/admin/projects/procurement/rfq/rfq-notes.page');
+const RfqNotesPage = require('../../../../../../pages/admin/projects/procurement/rfq/create-rfq/rfq-notes.page');
 
 function getRfqNotesPage(world) {
   if (!world.rfqNotesPage) {
@@ -26,3 +26,4 @@ When(
     await rfq.fillRfqNotesFieldWithText(text);
   }
 );
+

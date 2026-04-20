@@ -1,5 +1,5 @@
 const { expect } = require('@playwright/test');
-const RFQPage = require('./RFQPage');
+const RFQPage = require('../RFQPage');
 
 /**
  * RFQ create form: Action → Compose email → Send (shared compose dialog pattern with PO).
@@ -9,6 +9,57 @@ class RFQComposePage extends RFQPage {
     super(page);
     this.composeModalTimeout =
       Number(process.env.RFQ_COMPOSE_MODAL_TIMEOUT_MS) || 180000;
+  }
+
+  /**
+   * Reads the first *@yopmail.com address from the visible RFQ compose dialog (text, chips, or inputs).
+   * Polls while APIs populate the To field (same budget as RFQ_COMPOSE_MODAL_TIMEOUT_MS).
+   */
+  async readYopmailAddressFromComposeDialog() {
+    const yopRe = /[\w.+-]+@yopmail\.com/i;
+    const deadline = Date.now() + this.composeModalTimeout;
+
+    const tryExtract = async (emailDialog) => {
+      const blob = (await emailDialog.textContent()) || '';
+      let m = blob.match(yopRe);
+      if (m) return m[0].toLowerCase();
+
+      const inputs = emailDialog.locator('input');
+      const n = await inputs.count();
+      for (let i = 0; i < n; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        const v = await inputs.nth(i).inputValue().catch(() => '');
+        m = v.match(yopRe);
+        if (m) return m[0].toLowerCase();
+      }
+
+      const combobox = emailDialog.getByRole('combobox').first();
+      if (await combobox.isVisible({ timeout: 400 }).catch(() => false)) {
+        const v = await combobox.inputValue().catch(() => '');
+        m = v.match(yopRe);
+        if (m) return m[0].toLowerCase();
+      }
+
+      return null;
+    };
+
+    while (Date.now() < deadline) {
+      const anyVisible = this.page.getByRole('dialog').filter({ visible: true });
+      const count = await anyVisible.count().catch(() => 0);
+      for (let i = 0; i < count; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        const dlg = anyVisible.nth(i);
+        // eslint-disable-next-line no-await-in-loop
+        const found = await tryExtract(dlg);
+        if (found) return found;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await this.page.waitForTimeout(450);
+    }
+
+    throw new Error(
+      'Could not find a *@yopmail.com address in the RFQ compose email To field after waiting. Ensure the first vendor uses Yopmail.'
+    );
   }
 
   visibleComposeEmailDialog() {
@@ -24,12 +75,12 @@ class RFQComposePage extends RFQPage {
         message:
           'RFQ compose email dialog did not open (no visible dialog with Send email)',
         timeout: this.composeModalTimeout,
-        intervals: [150, 300, 500, 800, 1200, 1800],
+        intervals: [80, 150, 300, 500, 800, 1200],
       })
       .toBeGreaterThan(0);
 
     await expect(this.visibleComposeEmailDialog().first()).toBeVisible({
-      timeout: 20000,
+      timeout: 15000,
     });
   }
 
@@ -69,38 +120,81 @@ class RFQComposePage extends RFQPage {
 
   /**
    * Action → Compose email, then wait until Send is visible in the modal.
+   * Hardened for post-attachment flows: scroll to top, force-click Action, extra retries, loose Compose targets.
    */
   async openActionMenuAndComposeEmail() {
+    await this.ensureActivePage();
+    if (this.page.isClosed()) {
+      throw new Error('RFQ compose: page is closed before Action → Compose email.');
+    }
+
     await this.dismissVisibleToastNotifications();
     await this.dismissOpenMenusAndPopovers();
+    await this.scrollRfqPageAndMainToTop();
     await this.page.waitForLoadState('domcontentloaded', {
       timeout: this.defaultTimeout,
     });
+    await this.waitForNetworkSettled();
 
-    const actionBtn = this.page.getByRole('button', { name: /^action$/i }).first();
-    await expect(actionBtn).toBeVisible({ timeout: this.defaultTimeout });
+    const resolveAction = async () => {
+      const btn = await this.resolveVisibleRfqFormActionButton();
+      return btn;
+    };
+
+    // Action button can be temporarily hidden/covered after attachments;
+    // cap the wait so this step doesn't balloon to 2 minutes.
+    let actionBtn = await resolveAction();
+    await expect(actionBtn).toBeVisible({ timeout: 30000 });
     await actionBtn.scrollIntoViewIfNeeded();
+
+    const composeLabelRe = /compose\s*(e-?mail|email)/i;
 
     const tryClickCompose = async () => {
       const visibleMenu = this.page.locator('[role="menu"]').filter({ visible: true }).first();
-      await visibleMenu.waitFor({ state: 'visible', timeout: 12000 }).catch(() => {});
+      await visibleMenu.waitFor({ state: 'visible', timeout: 4000 }).catch(() => {});
+
+      const byRoleName = this.page.getByRole('menuitem', { name: composeLabelRe }).first();
+      if (await byRoleName.isVisible({ timeout: 3500 }).catch(() => false)) {
+        await byRoleName.click({ timeout: 15000, force: true });
+        return true;
+      }
 
       const inMenu = visibleMenu
         .getByRole('menuitem')
-        .filter({ hasText: /compose\s*email/i })
+        .filter({ hasText: composeLabelRe })
         .first();
-      if (await inMenu.isVisible({ timeout: 4000 }).catch(() => false)) {
-        await inMenu.click({ timeout: 15000 });
+      if (await inMenu.isVisible({ timeout: 3500 }).catch(() => false)) {
+        await inMenu.click({ timeout: 15000, force: true });
         return true;
       }
 
       const loose = this.page
         .getByRole('menuitem')
         .filter({ visible: true })
-        .filter({ hasText: /compose\s*email/i })
+        .filter({ hasText: composeLabelRe })
         .first();
-      if (await loose.isVisible({ timeout: 4000 }).catch(() => false)) {
-        await loose.click({ timeout: 15000 });
+      if (await loose.isVisible({ timeout: 3500 }).catch(() => false)) {
+        await loose.click({ timeout: 15000, force: true });
+        return true;
+      }
+
+      const menuComposeBtn = visibleMenu
+        .getByRole('button', { name: composeLabelRe })
+        .first();
+      if (await menuComposeBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await menuComposeBtn.click({ timeout: 15000, force: true });
+        return true;
+      }
+
+      const byText = this.page.getByText(/^compose\s*(e-?mail|email)$/i).first();
+      if (await byText.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await byText.click({ timeout: 15000, force: true });
+        return true;
+      }
+
+      const looseText = this.page.getByText(composeLabelRe).filter({ visible: true }).first();
+      if (await looseText.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await looseText.click({ timeout: 15000, force: true });
         return true;
       }
 
@@ -108,19 +202,28 @@ class RFQComposePage extends RFQPage {
     };
 
     let opened = false;
-    for (let attempt = 0; attempt < 3 && !opened; attempt += 1) {
+    for (let attempt = 0; attempt < 4 && !opened; attempt += 1) {
+      await this.ensureActivePage();
+      if (this.page.isClosed()) {
+        throw new Error('RFQ compose: page closed while opening Action menu.');
+      }
       if (attempt > 0) {
         await this.dismissOpenMenusAndPopovers();
         await this.dismissVisibleToastNotifications();
+        await this.scrollRfqPageAndMainToTop();
+        actionBtn = await resolveAction();
+        await actionBtn.scrollIntoViewIfNeeded().catch(() => {});
       }
-      await actionBtn.click({ timeout: 15000 });
-      await this.page.waitForTimeout(250);
+      await actionBtn.click(
+        attempt === 0 ? { timeout: 15000 } : { timeout: 15000, force: true }
+      );
+      await this.page.waitForTimeout(attempt === 0 ? 280 : 400);
       opened = await tryClickCompose();
     }
 
     if (!opened) {
       throw new Error(
-        'RFQ: Action menu did not expose Compose email (check menu label).'
+        'RFQ: could not open Compose email from Action menu (label may differ from "Compose email").'
       );
     }
 
