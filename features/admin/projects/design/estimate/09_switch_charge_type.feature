@@ -12,13 +12,14 @@ Feature: Estimate create and email workflow
     And I click the "Estimate" module card
     And I wait for estimate module to load
 
-  @smoke @estimate
-  Scenario: Create estimate and send email from compose email popup
+  @edge @estimate
+  Scenario: Switch charge type between percentage and fixed
     When I click Create Estimate
     And I start estimate from scratch and proceed
-    And I fill estimate title with random 4 letters
-    And I add estimate section with random 6 letter name
-    And I add manual estimate item with random 4 letter name
-    And I click estimate action compose email and send
-    Then I should see estimate success toast "Estimation created successfully"
-
+    And I fill estimate mandatory details with title "AAA"
+    And I add estimate section "Default Section"
+    And I add manual estimate item with name "name"
+    And I add estimate charge "Switch Charge" with value "5"
+    And I switch estimate charge type to fixed and set value "100"
+    And I switch estimate charge type to percentage and set value "8"
+    Then estimate charge should be visible

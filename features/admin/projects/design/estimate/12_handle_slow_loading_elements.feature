@@ -1,4 +1,4 @@
-Feature: Estimate create workflow - add second section
+Feature: Estimate create and email workflow
 
   Background:
     Given I am on the login page
@@ -12,13 +12,9 @@ Feature: Estimate create workflow - add second section
     And I click the "Estimate" module card
     And I wait for estimate module to load
 
-  @smoke @estimate
-  Scenario: Create estimate and add second section
+  @edge @estimate
+  Scenario: Handle slow loading estimate elements
     When I click Create Estimate
     And I start estimate from scratch and proceed
-    And I fill estimate title with random 4 letters
-    And I add estimate section with random 6 letter name
-    And I add manual estimate item with random 4 letter name
-    And I click Add Section button to add another section
-    
-
+    And I wait for estimate form with slow load handling
+    Then estimate form should be visible

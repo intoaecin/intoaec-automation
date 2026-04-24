@@ -1,4 +1,4 @@
-Feature: Estimate create workflow - add second section
+Feature: Estimate create and email workflow
 
   Background:
     Given I am on the login page
@@ -12,13 +12,13 @@ Feature: Estimate create workflow - add second section
     And I click the "Estimate" module card
     And I wait for estimate module to load
 
-  @smoke @estimate
-  Scenario: Create estimate and add second section
+  @negative @estimate
+  Scenario: Compose email without required data shows validation
     When I click Create Estimate
     And I start estimate from scratch and proceed
-    And I fill estimate title with random 4 letters
-    And I add estimate section with random 6 letter name
-    And I add manual estimate item with random 4 letter name
-    And I click Add Section button to add another section
-    
-
+    And I fill estimate mandatory details with title "AAA"
+    And I add estimate section "Default Section"
+    And I add manual estimate item with name "name"
+    And I open compose email and clear recipient field
+    And I send estimate email from compose popup
+    Then I should see estimate validation message
