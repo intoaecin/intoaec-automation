@@ -14,3 +14,4 @@ Feature: RFQ - start from estimate
     And I create RFQ from the created estimate through group flow and send email
     Then I should see RFQ compose email success toast
 
+// hi
