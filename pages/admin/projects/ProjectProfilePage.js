@@ -25,16 +25,19 @@ class ProjectProfilePage extends BasePage {
     const main = this.page.locator('main, [role="main"]').first();
     const scope = (await main.isVisible({ timeout: 1500 }).catch(() => false)) ? main : this.page;
 
-    const label = scope.getByText(text).first();
-    await label.scrollIntoViewIfNeeded();
+    // IMPORTANT: there can be duplicate "Estimate" texts in the DOM; pick a VISIBLE one.
+    const label = scope.getByText(text).filter({ visible: true }).first();
     await expect(label).toBeVisible({ timeout: 60000 });
+    await label.scrollIntoViewIfNeeded().catch(() => {});
 
     // Click the closest clickable ancestor (card/button/link) rather than the text span itself.
-    const clickable = label.locator('xpath=ancestor-or-self::*[self::button or self::a or @role="button"][1]');
+    const clickable = label.locator(
+      'xpath=ancestor-or-self::*[self::button or self::a or @role="button" or contains(@class,"card")][1]'
+    );
     if (await clickable.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await clickable.click();
+      await clickable.click({ timeout: 15000, force: true });
     } else {
-      await label.click();
+      await label.click({ timeout: 15000, force: true });
     }
     await this.page.waitForLoadState('domcontentloaded');
   }

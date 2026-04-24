@@ -83,6 +83,7 @@
     "test:admin:projects:procurement:rfq:super-admin-comment": "npx cucumber-js --retry 0 features/admin/projects/procurement/rfq/10_rfq-super-admin-comment.feature",
     "test:admin:projects:procurement:rfq:send-reminder": "npx cucumber-js --retry 0 features/admin/projects/procurement/rfq/11_rfq-send-reminder.feature",
     "test:admin:projects:procurement:rfq:decline": "npx cucumber-js --retry 0 features/admin/projects/procurement/rfq/12_rfq-decline.feature",
+    "test:admin:projects:procurement:rfq:estimate-to-rfq:start-from-estimate": "npx cucumber-js --retry 0 features/admin/projects/procurement/rfq/estimate-to-rfq/start-from-estimate.feature",
     "test:admin:projects:procurement:workorder": "npx cucumber-js features/admin/projects/procurement/WorkOrder.feature",
     "test:admin:reports:assetsreport": "npx cucumber-js features/admin/reports/AssetsReport.feature",
     "test:admin:reports:clientreport": "npx cucumber-js features/admin/reports/ClientReport.feature",
