@@ -9,45 +9,44 @@ function isHeadlessRun() {
   );
 }
 
-/** One browser per process; closed in AfterAll (hooks.js). */
 let sharedSession = null;
 
 async function ensureSharedSession() {
   if (sharedSession) {
-    const browserOk = !!sharedSession.browser && sharedSession.browser.isConnected();
-    const pageOk = !!sharedSession.page && !sharedSession.page.isClosed();
-    const contextOk = !!sharedSession.context;
-    if (browserOk && contextOk && pageOk) {
-      return sharedSession;
+    const { browser, context, page } = sharedSession;
+    // Recover if a prior run closed the page/context unexpectedly.
+    if (page && !page.isClosed()) return sharedSession;
+    if (context) {
+      const newPage = await context.newPage().catch(() => null);
+      if (newPage) {
+        sharedSession = { browser, context, page: newPage };
+        return sharedSession;
+      }
     }
-    try {
-      await sharedSession.browser?.close().catch(() => {});
-    } finally {
-      sharedSession = null;
-    }
+    // If we can't recover cleanly, drop the session and recreate.
+    sharedSession = null;
   }
+
   const headless = isHeadlessRun();
   const browser = await chromium.launch({
     headless,
-    ...(headless ? {} : { args: ['--start-maximized'] }),
+    args: headless ? [] : ['--start-maximized']
   });
-  const context = await browser.newContext(
-    headless ? {} : { viewport: null }
-  );
+
+  const context = await browser.newContext({
+    viewport: headless ? { width: 1280, height: 720 } : null
+  });
+
   const page = await context.newPage();
   sharedSession = { browser, context, page };
   return sharedSession;
 }
 
 async function closeSharedSession() {
-  if (!sharedSession?.browser) {
-    return;
-  }
-  try {
-    await sharedSession.browser.close();
-  } finally {
-    sharedSession = null;
-  }
+  if (!sharedSession) return;
+  const { browser } = sharedSession;
+  sharedSession = null;
+  await browser.close().catch(() => {});
 }
 
 class CustomWorld {
