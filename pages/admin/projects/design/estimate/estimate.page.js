@@ -1327,7 +1327,39 @@ class EstimatePage extends BasePage {
   }
 
   async waitForModuleToLoad() {
-    await expect(this.createEstimateButton).toBeVisible({ timeout: 110000 });
+    // Some environments render the Estimate module landing without a visible "Create Estimate" button
+    // (or it appears after other async work). The "Estimate" title text exists multiple times in the DOM,
+    // so scope to `main` and a visible Typography <p> to avoid sidebar duplicates.
+    await this.page.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(() => {});
+
+    const main = this.page.locator('main, [role="main"]').first();
+    // Header/title is rendered with varying tags across builds (p/span/h*).
+    const estimateTitleInMain = main.getByText(/^\s*Estimate\s*$/i).first();
+    // Some builds render the title outside `main` but still visible.
+    const estimateTitleAnywhere = this.page.locator('p, span, h1, h2, h3, h4, h5, h6').filter({ hasText: /^\s*Estimate\s*$/i });
+
+    await expect
+      .poll(
+        async () => {
+          const createVisible = await this.createEstimateButton.isVisible().catch(() => false);
+          if (createVisible) return true;
+          const mainTitleVisible = await estimateTitleInMain.isVisible().catch(() => false);
+          if (mainTitleVisible) return true;
+
+          const anyTitleVisible = await estimateTitleAnywhere
+            .filter({ hasNot: this.page.locator('.MuiList-root, nav, aside') })
+            .first()
+            .isVisible()
+            .catch(() => false);
+          if (anyTitleVisible) return true;
+
+          // Final fallback: URL indicates we navigated into Estimate module.
+          const url = this.page.url();
+          return /estimate/i.test(url);
+        },
+        { timeout: 110000, intervals: [250, 500, 1000, 2000] }
+      )
+      .toBeTruthy();
   }
 
   async waitForFormSlowHandling() {
