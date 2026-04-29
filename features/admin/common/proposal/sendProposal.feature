@@ -1,24 +1,30 @@
-@proposal @sendProposal @proposal_e2e @smoke
-Feature: Send Proposal with editor actions
+@proposal @sendProposal @proposal_builder @smoke
+Feature: Build Proposal From Client Profile
 
-  # Editor requires viewport width > 1000px (see support/world.js).
-  # After "Next", the dialog uses "skip & proceed" (modal.skip&Proceed); the step text "Skip for now" maps to that control.
-  # MailSendBtn: approver users see Email in the Send menu; creators see Save / Request approval only.
-  # Palette: MUI tabpanel with "Editors" (Text, Image, Table, Divider, Check Box, Signature, Shape) + Pricing Table + My Organization tiles; drag uses exact labels so "Table" ≠ "Pricing Table".
+  # What this feature covers:
+  # - Opens a client profile and navigates to the Proposal workspace
+  # - Creates/opens a proposal template in the editor
+  # - Adds multiple block types (drag & drop) to validate the builder palette
+  # - Proceeds through the send stepper and sends via Email
+  #
+  # Implementation mapping:
+  # - Navigation + send stepper: `pages/admin/common/ProposalPage.js`
+  # - Drag/drop builder blocks: `pages/admin/common/proposal/ProposalBuilderPage.js`
+  # - Step glue: `step-definitions/admin/common/proposal/sendProposal.steps.js`
 
-  Scenario: Send Proposal with editor configuration
+  Scenario: Open a client proposal, build it with all blocks, and send by email
     Given I am logged in
-    When I navigate to the Projects page
-    And I click on the first project in the list
-    And I open the Proposal tab for the selected project
-    When I choose the default proposal template
+    And I go to Clients section
+    And I select the first client
+    When I open the Proposal tab for the selected client
+    And I open the choose proposal modal
+    And I choose the default proposal template
     Then I should land on the proposal editor page
     And the proposal editor should be ready
 
     When I add Cover Page
     And I add Blank Page
-    When I add Text element with random sample text
-    # data: URL from pages/admin/common/proposal/proposalImageDataUrl.txt (or PROPOSAL_IMAGE_DATA_URL)
+    And I add Text element with random sample text
     And I add Image element using embedded jpeg test data
     And I add Table element with sample rows
     And I add Divider element and verify it
@@ -28,14 +34,15 @@ Feature: Send Proposal with editor actions
     And I add Pricing Table element and fill sample values
     And I add Terms & Conditions element
     And I add Organization Logo element and verify it
+    And I add all visible proposal variables and macros
 
     Then I should have all elements added successfully
     And no UI errors should be shown
 
     When I click Next on the proposal editor
-    When I click Skip for now
+    And I click Skip for now
     Then the proposal send preview should be visible
     When I click Send
     And I select Email channel
-    When I send proposal
+    And I send proposal
     Then the proposal send flow should complete successfully

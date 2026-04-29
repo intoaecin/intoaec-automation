@@ -1,3 +1,15 @@
+/**
+ * Cucumber step definitions for the "send proposal" flow.
+ *
+ * What this file does:
+ * - Orchestrates the proposal workflow in business-language steps (Gherkin).
+ * - Delegates all UI interaction to Page Objects:
+ *   - `ProposalPage`: navigation + send flow (Next/Skip/Preview/Send/Email)
+ *   - `ProposalBuilderPage`: drag/drop blocks into the editor canvas and verify they appear
+ *
+ * What this file intentionally does NOT do:
+ * - Keep selectors/locators here. Locators live in the Page Object classes.
+ */
 const { When, Then } = require('@cucumber/cucumber');
 const { expect } = require('@playwright/test');
 const ProposalPage = require('../../../../pages/admin/common/ProposalPage');
@@ -25,7 +37,14 @@ async function waitBetweenSteps(page) {
   await page.waitForTimeout(200);
 }
 
+// --- Proposal workspace entry points (client/project profile → Proposal tab) ---
 When('I open the Proposal tab for the selected project', { timeout: 120000 }, async function () {
+  const proposalPage = getProposalPage(this);
+  await proposalPage.openProposalTab();
+  await waitBetweenSteps(this.page);
+});
+
+When('I open the Proposal tab for the selected client', { timeout: 120000 }, async function () {
   const proposalPage = getProposalPage(this);
   await proposalPage.openProposalTab();
   await waitBetweenSteps(this.page);
@@ -80,6 +99,7 @@ Then('the proposal editor should be ready', { timeout: 120000 }, async function 
   await waitBetweenSteps(this.page);
 });
 
+// --- Send flow (editor stepper → preview → compose email → confirm) ---
 When('I click Next on the proposal editor', { timeout: 240000 }, async function () {
   const proposalPage = getProposalPage(this);
   await proposalPage.clickNextOnProposalEditor();
@@ -123,6 +143,7 @@ Then('the proposal send flow should complete successfully', { timeout: 120000 },
 
 /* --- Editor / palette --- */
 
+// --- Builder blocks (palette → canvas via drag/drop) ---
 When('I add Cover Page', { timeout: 240000 }, async function () {
   const builderPage = getBuilderPage(this);
   await builderPage.waitForBuilderToLoad();
@@ -211,6 +232,12 @@ When('I add Terms & Conditions element', { timeout: 240000 }, async function () 
 When('I add Organization Logo element and verify it', { timeout: 240000 }, async function () {
   const builderPage = getBuilderPage(this);
   await builderPage.addOrganizationLogoElementAndVerify();
+  await waitBetweenSteps(this.page);
+});
+
+When('I add all visible proposal variables and macros', { timeout: 300000 }, async function () {
+  const builderPage = getBuilderPage(this);
+  await builderPage.addAllVisibleVariablesAndMacros();
   await waitBetweenSteps(this.page);
 });
 
