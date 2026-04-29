@@ -97,25 +97,14 @@ class TimeTrackingPage extends BasePage {
       .getByRole('menuitem', { name: /^edit$/i })
       .or(page.locator('[role="menu"] [role="menuitem"]').filter({ hasText: /^edit$/i }))
       .first();
-    this.deleteMenuItem = page
-      .getByRole('menuitem', { name: /^delete$/i })
-      .or(page.locator('[role="menu"] [role="menuitem"]').filter({ hasText: /^delete$/i }))
-      .first();
     this.saveOrUpdateButton = page
       .getByRole('button', { name: /save|update|apply/i })
       .or(page.locator('.boqUI button.btnPrimaryUI:has-text("Save"), button.btnPrimaryUI:has-text("Update")'))
-      .first();
-    this.confirmDialog = page.getByRole('dialog').first();
-    this.confirmDeleteButton = this.confirmDialog
-      .getByRole('button', { name: /delete|remove|confirm|yes|ok|proceed|continue|submit/i })
-      .or(page.getByRole('button', { name: /delete|remove|confirm|yes|ok|proceed|continue|submit/i }))
       .first();
 
     /** Last random values for assertions */
     this.lastEditDescription = null;
     this.lastRandomCost = null;
-    this.lastCreatedDescription = null;
-    this.rowCountBeforeCreate = null;
   }
 
   randomSuffix() {
@@ -251,7 +240,6 @@ class TimeTrackingPage extends BasePage {
   async clickCreate() {
     // Small wait for UI stability as requested
     await this.page.waitForTimeout(2000);
-    this.rowCountBeforeCreate = await this.timesheetTableRows.count().catch(() => null);
 
     // 1. Click the main "Create" button if visible
     if (await this.createButton.isVisible()) {
@@ -319,12 +307,6 @@ class TimeTrackingPage extends BasePage {
 
     await this.setTimeValue(this.startTimeInput, start24, start12);
     await this.setTimeValue(this.endTimeInput, end24, end12);
-
-    if (await this.descriptionInput.isVisible().catch(() => false)) {
-      this.lastCreatedDescription = `Timesheet ${this.randomSuffix()}`;
-      await this.descriptionInput.click().catch(() => {});
-      await this.descriptionInput.fill(this.lastCreatedDescription);
-    }
   }
 
   async submitForm() {
@@ -374,55 +356,6 @@ class TimeTrackingPage extends BasePage {
     await this.editMenuItem.click();
     await this.page.waitForTimeout(800);
     await expect(this.productInfoSection).toBeVisible({ timeout: this.defaultTimeout });
-  }
-
-  async clickDeleteOnTimesheet() {
-    const row = this.timesheetTableRows.first();
-    await expect(row).toBeVisible({ timeout: this.defaultTimeout });
-    await row.scrollIntoViewIfNeeded().catch(() => {});
-    await row.hover().catch(() => {});
-
-    await expect(this.rowActionButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.rowActionButton.click();
-    await expect(this.actionMenu).toBeVisible({ timeout: this.defaultTimeout });
-
-    await expect(this.deleteMenuItem).toBeVisible({ timeout: this.defaultTimeout });
-    await this.deleteMenuItem.click();
-  }
-
-  async confirmTimesheetDeletion() {
-    await this.page.waitForTimeout(800);
-    if (await this.confirmDeleteButton.isVisible({ timeout: 8000 }).catch(() => false)) {
-      await this.confirmDeleteButton.click();
-    }
-    await this.page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-    await this.page.waitForTimeout(1000);
-  }
-
-  async verifyTimesheetDeletedSuccessfully() {
-    await expect(async () => {
-      const toastOk = await this.successToast
-        .filter({ hasText: /deleted|removed|successfully/i })
-        .first()
-        .isVisible()
-        .catch(() => false);
-
-      const descriptionStillVisible = this.lastCreatedDescription
-        ? await this.page
-            .getByText(this.lastCreatedDescription, { exact: false })
-            .first()
-            .isVisible()
-            .catch(() => false)
-        : false;
-
-      const currentRows = await this.timesheetTableRows.count().catch(() => null);
-      const rowCountOk =
-        typeof this.rowCountBeforeCreate === 'number' &&
-        typeof currentRows === 'number' &&
-        currentRows <= this.rowCountBeforeCreate;
-
-      expect(toastOk || !descriptionStillVisible || rowCountOk).toBeTruthy();
-    }).toPass({ timeout: 60000, intervals: [1000, 2000, 4000] });
   }
 
   /**

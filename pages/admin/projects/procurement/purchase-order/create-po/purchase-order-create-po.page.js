@@ -133,215 +133,6 @@ class PurchaseOrderCreatePoPage extends BasePage {
   }
 
   /**
-   * Scroll the window and the PO form’s scrollable panes so the lower part of the page (Terms) is reachable.
-   */
-  async scrollPurchaseOrderPageToRevealTermsSection(headingLocator) {
-    const scrollTableAncestorsToBottom = async () => {
-      const table = this.page.locator('[aria-label="PO line items table"]');
-      if (!(await table.isVisible({ timeout: 3000 }).catch(() => false))) {
-        return;
-      }
-      await table.evaluate((tableEl) => {
-        let n = tableEl.parentElement;
-        for (let d = 0; d < 14 && n; d += 1) {
-          const st = window.getComputedStyle(n);
-          if (
-            (st.overflowY === 'auto' || st.overflowY === 'scroll') &&
-            n.scrollHeight > n.clientHeight + 20
-          ) {
-            n.scrollTop = n.scrollHeight;
-          }
-          n = n.parentElement;
-        }
-      });
-    };
-
-    const headingInViewport = async () => {
-      const h = headingLocator.first();
-      if ((await h.count()) === 0) {
-        return false;
-      }
-      return h
-        .evaluate((el) => {
-          const st = window.getComputedStyle(el);
-          if (st.visibility === 'hidden' || st.display === 'none') {
-            return false;
-          }
-          const r = el.getBoundingClientRect();
-          return (
-            r.width > 0 &&
-            r.height > 0 &&
-            r.top < window.innerHeight - 24 &&
-            r.bottom > 48
-          );
-        })
-        .catch(() => false);
-    };
-
-    for (let step = 0; step < 36; step += 1) {
-      if (await headingInViewport()) {
-        break;
-      }
-      await this.page.evaluate(() => {
-        window.scrollBy(0, Math.floor(window.innerHeight * 0.92));
-      });
-      await scrollTableAncestorsToBottom();
-      await this.page.waitForTimeout(60);
-    }
-
-    await scrollTableAncestorsToBottom();
-    await this.page.evaluate(() => {
-      const se = document.scrollingElement || document.documentElement;
-      if (se && se.scrollHeight > se.clientHeight) {
-        se.scrollTop = se.scrollHeight;
-      }
-    });
-    await this.page.waitForTimeout(80);
-
-    await headingLocator.first().scrollIntoViewIfNeeded();
-    await this.page.waitForTimeout(120);
-  }
-
-  /**
-   * Terms field: first textarea after the PO line items table (matches typical layout: lines → totals → T&C).
-   */
-  locatorPurchaseOrderTermsField() {
-    const termsHeadingRe = /terms\s*(and|&)\s*conditions?/i;
-    const table = this.page.locator('[aria-label="PO line items table"]');
-    const afterTableTa = table.locator('xpath=./following::textarea[1]');
-    const afterHeadingTa = this.page
-      .getByText(termsHeadingRe)
-      .filter({ visible: true })
-      .first()
-      .locator('xpath=./following::textarea[1]');
-    const byLabel = this.page
-      .getByLabel(/terms\s*(and|&)?\s*conditions?/i)
-      .first();
-    const afterTableEditable = table.locator(
-      'xpath=./following::*[@contenteditable="true"][1]'
-    );
-    return {
-      primary: afterTableTa,
-      afterHeading: afterHeadingTa,
-      byLabel,
-      editable: afterTableEditable,
-      fallbackTa: this.page.locator('textarea').filter({ visible: true }).last(),
-    };
-  }
-
-  /**
-   * PO create/edit: scroll page to Terms, then click and fill (before Action → Compose email).
-   */
-  async fillPurchaseOrderTermsAndConditions(text) {
-    const value = String(text || '').trim();
-    if (!value) {
-      throw new Error('Terms and conditions text must be non-empty');
-    }
-    await expect(this.page).toHaveURL(/purchase-order\/(create|edit)/);
-    await this.waitForNetworkSettled();
-
-    const termsHeadingRe = /terms\s*(and|&)\s*conditions?/i;
-    const heading = this.page
-      .getByText(termsHeadingRe)
-      .filter({ visible: true })
-      .first();
-
-    await this.scrollPurchaseOrderPageToRevealTermsSection(heading);
-    await expect(heading).toBeVisible({ timeout: 90000 });
-
-    const {
-      primary,
-      afterHeading,
-      byLabel,
-      editable,
-      fallbackTa,
-    } = this.locatorPurchaseOrderTermsField();
-
-    let field = primary;
-    if (!(await primary.isVisible({ timeout: 8000 }).catch(() => false))) {
-      field = afterHeading;
-    }
-    if (!(await field.isVisible({ timeout: 4000 }).catch(() => false))) {
-      field = byLabel;
-    }
-    if (!(await field.isVisible({ timeout: 4000 }).catch(() => false))) {
-      field = editable;
-    }
-    if (!(await field.isVisible({ timeout: 4000 }).catch(() => false))) {
-      field = fallbackTa;
-    }
-
-    await expect(field).toBeVisible({ timeout: 45000 });
-    await field.scrollIntoViewIfNeeded();
-    await this.page.waitForTimeout(100);
-
-    const isSlateLike = await field
-      .evaluate((el) => {
-        return (
-          el.getAttribute('contenteditable') === 'true' ||
-          el.hasAttribute('data-slate-editor')
-        );
-      })
-      .catch(() => false);
-
-    const fillTimeoutMs = Math.min(
-      300000,
-      Math.max(45000, Number(process.env.PO_TERMS_FILL_TIMEOUT_MS) || 90000)
-    );
-
-    await field.click({ timeout: 20000 });
-    if (isSlateLike) {
-      await this.page.keyboard.press('ControlOrMeta+a');
-      await this.page.keyboard.press('Backspace');
-    } else {
-      await field.fill('');
-    }
-
-    const useSlowTyping =
-      /^1|true|yes$/i.test(String(process.env.PO_TERMS_SLOW_TYPING || ''));
-    const keystrokeDelayMs = Math.min(
-      80,
-      Math.max(5, Number(process.env.PO_TERMS_KEYSTROKE_DELAY_MS) || 12)
-    );
-
-    if (useSlowTyping) {
-      await field.pressSequentially(value, {
-        delay: keystrokeDelayMs,
-        timeout: Math.min(
-          600000,
-          Math.max(
-            120000,
-            value.length * (keystrokeDelayMs + (isSlateLike ? 20 : 8)) + 60000
-          )
-        ),
-      });
-    } else {
-      await field.fill(value, { timeout: fillTimeoutMs });
-    }
-
-    const head = value.slice(0, Math.min(80, value.length));
-    const tail = value.slice(-Math.min(60, value.length));
-    await expect
-      .poll(
-        async () => {
-          const raw = await field
-            .evaluate((el) => {
-              if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
-                return (el.value || '').trim();
-              }
-              return (el.textContent || el.innerText || '').trim();
-            })
-            .catch(() => '');
-          return raw.includes(head) && (tail.length < 5 || raw.includes(tail));
-        },
-        { timeout: 45000, intervals: [200, 400, 800] }
-      )
-      .toBe(true);
-
-    await this.waitForNetworkSettled();
-  }
-
-  /**
    * @returns {string | null} *@yopmail.com from the first vendor row if present (avoids reading compose To later).
    */
   async tryReadYopmailFromVendorModalFirstRow(vendorModal) {
@@ -648,42 +439,30 @@ class PurchaseOrderCreatePoPage extends BasePage {
 
   /**
    * Waits for you to finish units in the browser, then continues to Action → Compose email.
-   * - Default: **Press ENTER in this terminal** when `stdin` is a TTY (typical PowerShell/cmd run).
-   * - `PO_IMPORT_MANUAL_UNITS_INSPECTOR=1`: use Playwright Inspector ▶ instead of ENTER.
-   * - `PO_IMPORT_MANUAL_UNITS_STDIN=1` / `=0`: force ENTER / force Inspector regardless of TTY.
+   * - Default: `page.pause()` — use Playwright Inspector ▶ to resume after units are set (headed).
+   * - `PO_IMPORT_MANUAL_UNITS_STDIN=1`: press ENTER in the terminal instead of Inspector.
    * After resume, asserts every line row with a unit control has a real unit selected.
-   * @param {string} [userHint] — extra line(s) printed before ENTER / Inspector instructions.
    */
-  async waitForManualPoLineUnitCompletionBeforeCompose(userHint) {
+  async waitForManualPoLineUnitCompletionBeforeCompose() {
     await this.ensurePoLineItemsTableVisible();
     await this.page.waitForLoadState('domcontentloaded');
     await this.waitForNetworkSettled();
 
-    const forceInspector =
-      process.env.PO_IMPORT_MANUAL_UNITS_INSPECTOR === '1' ||
-      /^true$/i.test(String(process.env.PO_IMPORT_MANUAL_UNITS_INSPECTOR || ''));
-    const stdinRaw = process.env.PO_IMPORT_MANUAL_UNITS_STDIN;
-    const forceStdin =
-      stdinRaw === '1' || /^true$/i.test(String(stdinRaw || ''));
-    const forceNoStdin =
-      stdinRaw === '0' || /^false$/i.test(String(stdinRaw || ''));
-
     const useStdin =
-      forceStdin || (!forceInspector && !forceNoStdin && process.stdin.isTTY);
+      process.env.PO_IMPORT_MANUAL_UNITS_STDIN === '1' ||
+      /^true$/i.test(String(process.env.PO_IMPORT_MANUAL_UNITS_STDIN || ''));
 
     // eslint-disable-next-line no-console
     console.log(
-      '\n[PO import] Do not click **Action** yet — the test opens it after you continue.\n' +
-        (userHint ? `            ${userHint}\n` : '') +
-        '            Fix any empty or placeholder **Unit** cells on imported line items in the browser.\n' +
+      '\n[PO import] Fill any missing line-item units in the browser, then continue the test.\n' +
         (useStdin
-          ? '            → Press ENTER in this terminal when units are correct.\n'
-          : '            → Resume in the Playwright Inspector (▶), or set PO_IMPORT_MANUAL_UNITS_STDIN=1 from a real terminal.\n')
+          ? '            → Press ENTER in this terminal when done.\n'
+          : '            → Resume in the Playwright Inspector (▶) when done.\n')
     );
 
     if (useStdin) {
       await this.waitForEnterInTerminal(
-        'Press ENTER after units are set (next: Action → Compose email → Send).'
+        'Press ENTER here after all units are filled (then Action → Compose email → Send).'
       );
     } else {
       await this.page.pause();
@@ -708,55 +487,17 @@ class PurchaseOrderCreatePoPage extends BasePage {
   }
 
   /**
-   * Import flow before **Action → Compose**:
-   * - Optionally auto-fills placeholder units (skipped if `PO_IMPORT_MANUAL_UNITS_BEFORE_COMPOSE=1`).
-   * - **By default** always stops for you to review/fix units, then ENTER (TTY) or Inspector — so we never
-   *   hit Action while units are still wrong (automation often misses real UI state after PDF import).
-   * - `PO_IMPORT_SKIP_UNITS_MANUAL_GATE=1`: skip that pause; only assert all units filled (CI / fully trusted PDFs).
+   * Import flow before compose: auto-fills units after vendor, unless `PO_IMPORT_MANUAL_UNITS_BEFORE_COMPOSE=1`.
    */
   async preparePoLineUnitsBeforeComposeEmailImportFlow() {
-    const skipAutoFill =
+    const manual =
       process.env.PO_IMPORT_MANUAL_UNITS_BEFORE_COMPOSE === '1' ||
       /^true$/i.test(String(process.env.PO_IMPORT_MANUAL_UNITS_BEFORE_COMPOSE || ''));
-
-    const skipManualGate =
-      process.env.PO_IMPORT_SKIP_UNITS_MANUAL_GATE === '1' ||
-      /^true$/i.test(String(process.env.PO_IMPORT_SKIP_UNITS_MANUAL_GATE || ''));
-
-    await this.ensurePoLineItemsTableVisible();
-    await this.page.waitForLoadState('domcontentloaded');
-    await this.waitForNetworkSettled();
-
-    if (!skipAutoFill) {
-      try {
-        await this.ensureAllPoLineItemUnitsFilled({ settleFirst: false });
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          '[PO import] Automatic unit fill did not complete:',
-          e && e.message ? e.message : e
-        );
-      }
+    if (manual) {
+      await this.waitForManualPoLineUnitCompletionBeforeCompose();
+    } else {
+      await this.ensureAllPoLineItemUnitsFilled({ settleFirst: true });
     }
-
-    const table = await this.ensurePoLineItemsTableVisible();
-
-    if (skipManualGate) {
-      await this.assertEveryPoLineItemUnitFilled(table);
-      return;
-    }
-
-    const missing = await this.countPoLineRowsWithMissingUnit(table);
-    if (missing > 0) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        `[PO import] Detected ${missing} row(s) with placeholder/empty unit — set real units in the UI.`
-      );
-    }
-
-    await this.waitForManualPoLineUnitCompletionBeforeCompose(
-      '(Automation may have pre-filled some units — verify every line before continuing.)'
-    );
   }
 
   async fillLastPoLineItemRow({

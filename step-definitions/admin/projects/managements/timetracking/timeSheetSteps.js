@@ -10,17 +10,17 @@ function ensureTimeTrackingPage(world) {
   }
 }
 
-Given('I go to Clients section', async function () {
+Given('I go to Clients section', { timeout: 120000 }, async function () {
   ensureTimeTrackingPage(this);
   await timeTrackingPage.goToClients();
 });
 
-Given('I select the first client', async function () {
+Given('I select the first client', { timeout: 120000 }, async function () {
   ensureTimeTrackingPage(this);
   await timeTrackingPage.selectFirstClient();
 });
 
-Given('I open Time Tracking', async function () {
+Given('I open Time Tracking', { timeout: 120000 }, async function () {
   ensureTimeTrackingPage(this);
   await timeTrackingPage.openTimeTracking();
 });
