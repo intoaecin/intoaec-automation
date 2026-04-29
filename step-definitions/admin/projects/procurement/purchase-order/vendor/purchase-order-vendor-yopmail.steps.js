@@ -39,11 +39,7 @@ When(
       throw new Error('Yopmail tab missing: run “open Yopmail for the vendor in a new browser tab” first.');
     }
     const yp = new PurchaseOrderVendorYopmailPage(this.yopmailPage);
-    const subjectHint =
-      this.poYopmailSubjectHint || this.importPoTitle || undefined;
-    this.vendorPortalPage = await yp.waitOpenPoMessageAndClickViewPo({
-      subjectContains: subjectHint,
-    });
+    this.vendorPortalPage = await yp.waitOpenPoMessageAndClickViewPo();
   }
 );
 
