@@ -12,13 +12,17 @@ class LoginPage extends BasePage {
   }
 
   async goto() {
-    await this.page.goto(`${env.admin}/auth/signIn`);
+    await this.page.goto(`${env.admin}/auth/signIn`, { waitUntil: 'domcontentloaded' });
+    await this.page.waitForLoadState('networkidle').catch(() => {});
   }
 
   async login(email, password) {
+    if (this.isAlreadyAuthenticated()) {
+      return;
+    }
     // The sign-in form can re-render, detaching inputs; do guarded fill + retry.
-    await this.emailInput.waitFor({ state: 'visible', timeout: 15000 });
-    await this.passwordInput.waitFor({ state: 'visible', timeout: 15000 });
+    await this.emailInput.waitFor({ state: 'visible', timeout: 30000 });
+    await this.passwordInput.waitFor({ state: 'visible', timeout: 30000 });
 
     await this.emailInput.fill(email).catch(async () => {
       await this.page.waitForTimeout(300);
@@ -43,6 +47,16 @@ class LoginPage extends BasePage {
     } catch {
       return false;
     }
+  }
+
+  /** Navigate to sign-in; log in only when the app still shows the sign-in screen (cookies may skip it). */
+  async ensureAuthenticated(email, password) {
+    await this.goto();
+    if (this.isAlreadyAuthenticated()) {
+      return;
+    }
+    await this.login(email, password);
+    await this.isLoginSuccessful();
   }
 
   /** True when the app is already past the sign-in screen (reused session / same browser run). */

@@ -12,11 +12,15 @@ class ProjectNavigationPage extends BasePage {
   }
 
   async navigateToProjects() {
+    const rowCount = await this.projectRows.count().catch(() => 0);
+    if (rowCount > 0) {
+      return;
+    }
     await expect(this.projectsLink).toBeVisible({ timeout: this.defaultTimeout });
     await this.projectsLink.click();
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
     await expect(async () => {
-      const rowCount = await this.projectRows.count();
-      expect(rowCount).toBeGreaterThan(0);
+      expect(await this.projectRows.count()).toBeGreaterThan(0);
     }).toPass({ timeout: this.defaultTimeout, intervals: [1000, 2000, 3000] });
   }
 

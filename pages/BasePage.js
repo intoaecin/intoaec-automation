@@ -1,4 +1,7 @@
 // pages/BasePage.js
+const path = require('path');
+const { captureScreenshot, getScreenshotDir } = require('../support/screenshots');
+
 class BasePage {
   constructor(page) {
     this.page = page;
@@ -13,7 +16,7 @@ class BasePage {
   }
 
   async takeScreenshot(name) {
-    await this.page.screenshot({ path: `screenshots/${name}.png` });
+    await captureScreenshot(this.page, path.join(getScreenshotDir(), `${name}.png`));
   }
 
   async getCurrentURL() {

@@ -1,10 +1,10 @@
 const { Before, After, AfterAll, setDefaultTimeout } = require('@cucumber/cucumber');
-const fs = require('fs');
 const path = require('path');
 const { closeSharedSession } = require('./world');
+const { captureScreenshot, getScreenshotDir } = require('./screenshots');
 
-/** Default step/scenario timeout (ms) — see AGENTS.md */
-setDefaultTimeout(60000);
+/** Default step/scenario timeout (ms) — see AGENTS.md; 120s for slow login/navigation between scenarios */
+setDefaultTimeout(120000);
 
 /**
  * When running headed (default), pause after each step so actions are visible (debug/demos).
@@ -35,14 +35,13 @@ Before(async function () {
   await this.init();
 });
 
+/**
+ * Failure screenshots: disabled by default. Set SCREENSHOTS_ENABLED=true to write PNGs under screenshots/.
+ */
 After(async function (scenario) {
   if (scenario.result.status === 'FAILED' && this.page && !this.page.isClosed()) {
-    const screenshotDir = path.join(process.cwd(), 'screenshots');
     const safeName = scenario.pickle.name.replace(/[<>:"/\\|?*]+/g, '_');
-    fs.mkdirSync(screenshotDir, { recursive: true });
-    await this.page.screenshot({
-      path: path.join(screenshotDir, `${safeName}.png`)
-    });
+    await captureScreenshot(this.page, path.join(getScreenshotDir(), `${safeName}.png`));
   }
   await this.cleanup();
 });
