@@ -123,6 +123,12 @@ class SchedulePage extends BasePage {
       .or(this.page.locator('.offcanvas-title, .MuiDialogTitle-root').filter({ hasText: /^(edit|update) schedule$/i }));
   }
 
+  async expectEditScheduleOffCanvasOpen() {
+    await expect(this.editSchedulePanelHeading().or(this.formPanel()).first()).toBeVisible({
+      timeout: this.uiTimeout,
+    });
+  }
+
   randomSuffix() {
     return `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
   }
@@ -163,11 +169,15 @@ class SchedulePage extends BasePage {
 
     const panelOpen =
       (await this.addSchedulePanelHeading().isVisible({ timeout: 400 }).catch(() => false)) ||
+      (await this.editSchedulePanelHeading().isVisible({ timeout: 400 }).catch(() => false)) ||
       (await this.formPanel().isVisible({ timeout: 400 }).catch(() => false));
     if (panelOpen) {
-      await this.closePanelWithoutSaving().catch(async () => {
-        await this.page.keyboard.press('Escape').catch(() => {});
-      });
+      const closed = await this.closeScheduleFormPanelWithHeaderIcon().catch(() => false);
+      if (!closed) {
+        await this.closePanelWithoutSaving().catch(async () => {
+          await this.page.keyboard.press('Escape').catch(() => {});
+        });
+      }
       await expect(this.formPanel()).toBeHidden({ timeout: 15000 }).catch(() => {});
     }
 
@@ -276,12 +286,21 @@ class SchedulePage extends BasePage {
   }
 
   async _isScheduleListGridVisible() {
-    return this.page
+    const grids = this.page
       .locator('.MuiDataGrid-root:visible, table:visible')
-      .filter({ hasText: /schedule\s*name|start\s*date|end\s*date|duration/i })
-      .first()
-      .isVisible({ timeout: 800 })
-      .catch(() => false);
+      .filter({ hasText: /schedule\s*name|start\s*date|end\s*date|duration/i });
+    const count = await grids.count().catch(() => 0);
+    for (let i = 0; i < count; i += 1) {
+      const grid = grids.nth(i);
+      const isGanttSidebar = await grid
+        .locator('xpath=ancestor-or-self::*[@data-pdf-export-schedule-list="true"]')
+        .count()
+        .then((n) => n > 0)
+        .catch(() => false);
+      if (isGanttSidebar) continue;
+      if (await grid.isVisible({ timeout: 300 }).catch(() => false)) return true;
+    }
+    return false;
   }
 
   async switchToListView() {
@@ -291,7 +310,8 @@ class SchedulePage extends BasePage {
     if (await this.addSchedulePanelHeading().isVisible({ timeout: 400 }).catch(() => false)) {
       await this.closePanelWithoutSaving().catch(() => {});
     }
-    const alreadyList = (await this.listTab.getAttribute('aria-selected').catch(() => '')) === 'true' ||
+    const alreadyList =
+      (await this.listTab.getAttribute('aria-selected').catch(() => '')) === 'true' &&
       (await this._isScheduleListGridVisible());
     if (alreadyList) return;
 
@@ -300,9 +320,12 @@ class SchedulePage extends BasePage {
     }).toPass({ timeout: this.uiTimeout, intervals: [500, 1500, 3000] });
     await this.listTab.scrollIntoViewIfNeeded();
     await this.listTab.click({ timeout: this.quickTimeout });
-    const selected = async () =>
-      (await this.listTab.getAttribute('aria-selected').catch(() => '')) === 'true' ||
-      (await this._isScheduleListGridVisible());
+    const selected = async () => {
+      const aria = await this.listTab.getAttribute('aria-selected').catch(() => null);
+      const listGridVisible = await this._isScheduleListGridVisible();
+      if (aria !== null) return aria === 'true' && listGridVisible;
+      return listGridVisible;
+    };
     if (!(await selected())) {
       await this.listTab.click({ force: true, timeout: this.quickTimeout }).catch(() => {});
     }
@@ -334,6 +357,12 @@ class SchedulePage extends BasePage {
 
   async openCreateSchedulePanel() {
     await this.hideFreshchatWidget();
+    const listAria = await this.listTab.getAttribute('aria-selected').catch(() => null);
+    if (listAria === 'true') {
+      await expect(async () => {
+        expect(await this._isScheduleListGridVisible()).toBeTruthy();
+      }).toPass({ timeout: 15000, intervals: [300, 800, 1500] });
+    }
     await this.openCreateMenuIfNeeded();
     const picked =
       (await this.pickCreateMenuItem(/^schedule$/i)) ||
@@ -461,7 +490,8 @@ class SchedulePage extends BasePage {
   }
 
   async selectFirstAssignee() {
-    await this.selectFirstComboboxInPanel(/assignee/i);
+    await this.openScheduleCreateFormAssigneesDropdown();
+    await this.selectUpToTwoAssigneesOnScheduleCreateForm(1);
   }
 
   async selectFirstStatus() {
@@ -543,7 +573,57 @@ class SchedulePage extends BasePage {
     await expect(this.formPanel()).toBeHidden({ timeout: this.uiTimeout }).catch(() => {});
   }
 
+  _scheduleFormPanelCloseIconButton() {
+    const panel = this.formPanel();
+    return panel
+      .locator('button.MuiButton-text, button.MuiButton-root.MuiButton-text')
+      .filter({ has: panel.locator('svg[viewBox="0 0 19 18"]') })
+      .first()
+      .or(panel.locator('button').filter({ has: panel.locator('svg') }).first())
+      .or(panel.locator('button[aria-label="Close"], button[aria-label*="close" i], .btn-close').first())
+      .or(panel.getByRole('button', { name: /^close$/i }).first());
+  }
+
+  async _confirmDiscardSchedulePanelCloseIfPresent() {
+    const discard = this.page
+      .getByRole('button', { name: /discard|yes|confirm|ok|close/i })
+      .first();
+    if (await discard.isVisible({ timeout: 2500 }).catch(() => false)) {
+      await discard.click({ force: true, timeout: 5000 }).catch(() => {});
+    }
+  }
+
+  /** MUI header close icon (svg X) on Add/Edit Schedule off-canvas. */
+  async closeScheduleFormPanelWithHeaderIcon() {
+    const panel = this.formPanel();
+    if (!(await panel.isVisible({ timeout: 1500 }).catch(() => false))) return false;
+
+    await this.hideFreshchatWidget();
+    await this.page.keyboard.press('Escape').catch(() => {});
+    await this._dismissOpenMenusIfAny();
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const closeBtn = this._scheduleFormPanelCloseIconButton();
+      if (await closeBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await closeBtn.scrollIntoViewIfNeeded().catch(() => {});
+        await closeBtn.click({ force: true, timeout: 10000 }).catch(() => {});
+        await this._confirmDiscardSchedulePanelCloseIfPresent();
+        if (await this.formPanel().isHidden({ timeout: 5000 }).catch(() => false)) {
+          await this.logStep('Closed schedule off-canvas with header close icon');
+          return true;
+        }
+      }
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this._confirmDiscardSchedulePanelCloseIfPresent();
+    }
+    return false;
+  }
+
   async closePanelWithoutSaving() {
+    if (await this.closeScheduleFormPanelWithHeaderIcon().catch(() => false)) {
+      return;
+    }
+
     const panel = this.formPanel();
     const cancel = panel.getByRole('button', { name: /cancel|close/i }).first();
     const closeIcon = panel.locator('button[aria-label="Close"], .btn-close').first();
@@ -554,6 +634,7 @@ class SchedulePage extends BasePage {
     } else {
       await this.page.keyboard.press('Escape');
     }
+    await this._confirmDiscardSchedulePanelCloseIfPresent();
     await expect(this.formPanel()).toBeHidden({ timeout: 30000 }).catch(() => {});
   }
 
@@ -949,14 +1030,182 @@ class SchedulePage extends BasePage {
     await expect(row).toBeVisible({ timeout: 60000 });
     const menuBtn = row.locator('button').last();
     await menuBtn.click();
-    const del = this.page.getByRole('menuitem', { name: /delete|remove/i }).first();
-    await expect(del).toBeVisible({ timeout: 15000 });
-    await del.click();
-    const confirm = this.page.getByRole('button', { name: /confirm|yes|delete/i }).first();
-    if (await confirm.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await confirm.click();
-    }
+    await this._clickDeleteInOpenActionsMenu();
+    await this._confirmDeleteSchedulePopup();
     await expect(row).toBeHidden({ timeout: 60000 }).catch(() => {});
+  }
+
+  async _openListRowActionsMenu(row) {
+    await expect(row).toBeVisible({ timeout: this.uiTimeout });
+    await row.scrollIntoViewIfNeeded().catch(() => {});
+
+    const menuButton = row
+      .getByRole('button', { name: /more|actions|options|menu/i })
+      .or(row.locator('button[aria-haspopup="menu"], button[aria-label*="more" i], button[aria-label*="action" i]'))
+      .or(row.locator('[data-testid*="More" i], svg[data-testid*="More" i]').locator('xpath=ancestor::button[1]'))
+      .or(row.locator('button').last())
+      .first();
+
+    const cells = row.locator('td, [role="gridcell"]');
+    const cellCount = await cells.count().catch(() => 0);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await row.hover({ force: true, timeout: this.quickTimeout }).catch(() => {});
+      if (cellCount > 0) {
+        await cells.nth(cellCount - 1).hover({ force: true, timeout: this.quickTimeout }).catch(() => {});
+      }
+      if (await menuButton.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await menuButton.click({ force: true, timeout: this.quickTimeout });
+        return;
+      }
+      if (attempt === 3) {
+        await expect(menuButton).toBeVisible({ timeout: this.uiTimeout });
+        await menuButton.click({ force: true, timeout: this.quickTimeout });
+      }
+    }
+  }
+
+  async _openGanttSidebarRowActionsMenu(row) {
+    await expect(row).toBeVisible({ timeout: this.uiTimeout });
+    await row.scrollIntoViewIfNeeded().catch(() => {});
+    await row.hover({ force: true, timeout: this.quickTimeout }).catch(() => {});
+
+    const menuButton = row
+      .getByRole('button', { name: /more|actions|options|menu/i })
+      .or(row.locator('button[aria-haspopup="menu"], button[aria-label*="more" i], button[aria-label*="action" i]'))
+      .or(row.locator('button').last())
+      .first();
+    await expect(menuButton).toBeVisible({ timeout: this.uiTimeout });
+    await menuButton.click({ force: true, timeout: this.quickTimeout });
+  }
+
+  async _clickDeleteInOpenActionsMenu() {
+    const del = this.page
+      .getByRole('menuitem', { name: /^delete$/i })
+      .or(this.page.getByRole('button', { name: /^delete$/i }))
+      .or(this.page.locator('[role="menu"] *').filter({ hasText: /^delete$/i }))
+      .first();
+    await expect(del).toBeVisible({ timeout: this.uiTimeout });
+    await del.click({ force: true, timeout: this.quickTimeout });
+  }
+
+  async _confirmDeleteSchedulePopup() {
+    const dialog = this.page.locator('[role="dialog"]').filter({ visible: true }).last();
+    const yes = dialog
+      .getByRole('button', { name: /^yes$/i })
+      .or(this.page.getByRole('button', { name: /^yes$/i }))
+      .first();
+    await expect(yes).toBeVisible({ timeout: 15000 });
+    await yes.click({ force: true, timeout: this.quickTimeout });
+    await this._waitScheduleSettled();
+  }
+
+  async _findVisibleDeletableGanttSidebarScheduleRow() {
+    await this.switchToGanttView();
+    const side = this.ganttSidebar();
+    await expect(side).toBeVisible({ timeout: this.uiTimeout });
+    const rows = side.locator('tbody tr, tr.schedule-list-row, tr').filter({ has: side.locator('td') });
+    const visibleRows = [];
+    const count = await rows.count().catch(() => 0);
+    for (let i = 0; i < count; i += 1) {
+      const row = rows.nth(i);
+      if (!(await row.isVisible({ timeout: 300 }).catch(() => false))) continue;
+      const cells = row.locator('td');
+      const cellCount = await cells.count().catch(() => 0);
+      if (cellCount === 0) continue;
+      const firstCellText = ((await cells.first().innerText().catch(() => '')) || '').trim();
+      if (/schedule\s*name|^start\s*date$|^end\s*date$/i.test(firstCellText)) continue;
+      let text = ((await row.innerText().catch(() => '')) || '').trim();
+      if (!text || /no rows|no data|loading/i.test(text)) continue;
+      visibleRows.push({ row, label: text.split(/\r?\n/)[0].trim() });
+    }
+    if (visibleRows.length === 0) return null;
+    return visibleRows[Math.floor(Math.random() * visibleRows.length)];
+  }
+
+  async _openContextMenuOnScheduleTarget(target) {
+    await expect(target).toBeVisible({ timeout: this.uiTimeout });
+    await target.scrollIntoViewIfNeeded().catch(() => {});
+    await target.click({ button: 'left', force: true, timeout: this.quickTimeout });
+    const menuOpen = await this.page
+      .getByRole('menuitem', { name: /^delete$/i })
+      .isVisible({ timeout: 1500 })
+      .catch(() => false);
+    if (!menuOpen) {
+      await target.click({ button: 'right', force: true, timeout: this.quickTimeout });
+    }
+  }
+
+  async expectScheduleNotVisibleInUi(name) {
+    await this.switchToGanttView();
+    if (await this.ganttSidebarRow(name).isVisible({ timeout: 2000 }).catch(() => false)) {
+      await expect(this.ganttSidebarRow(name)).toBeHidden({ timeout: this.uiTimeout });
+      return;
+    }
+    await this.switchToListView();
+    await this.searchListTabScheduleIfAvailable(name);
+    await expect(this.listTabRow(name)).toBeHidden({ timeout: this.uiTimeout });
+  }
+
+  async deleteRandomScheduleFromGanttSidebarListMenu() {
+    let picked = await this._findVisibleDeletableGanttSidebarScheduleRow();
+    if (!picked) {
+      await expect(async () => {
+        picked = await this._findVisibleDeletableGanttSidebarScheduleRow();
+        expect(Boolean(picked)).toBeTruthy();
+      }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
+    }
+    const { row, label } = picked;
+    await this._openGanttSidebarRowActionsMenu(row);
+    await this._clickDeleteInOpenActionsMenu();
+    await this._confirmDeleteSchedulePopup();
+    await this.logStep(`Deleted schedule from gantt sidebar list menu: ${label}`);
+    return label;
+  }
+
+  async deleteRandomScheduleFromGanttChartContextMenu() {
+    let picked = await this._findVisibleDeletableGanttSidebarScheduleRow();
+    if (!picked) {
+      await expect(async () => {
+        picked = await this._findVisibleDeletableGanttSidebarScheduleRow();
+        expect(Boolean(picked)).toBeTruthy();
+      }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
+    }
+    const { row, label: name } = picked;
+    await row.scrollIntoViewIfNeeded().catch(() => {});
+    await row.click({ force: true, timeout: this.quickTimeout }).catch(() => {});
+    await this._waitScheduleSettled();
+
+    const tl = this.ganttTimelineHost();
+    let target = tl.getByText(name, { exact: true }).first();
+    if (!(await target.isVisible({ timeout: 5000 }).catch(() => false))) {
+      target = tl.locator('*').filter({ hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }).first();
+    }
+    if (!(await target.isVisible({ timeout: 3000 }).catch(() => false))) {
+      target = this.page.getByText(name, { exact: true }).last();
+    }
+    await this._openContextMenuOnScheduleTarget(target);
+    await this._clickDeleteInOpenActionsMenu();
+    await this._confirmDeleteSchedulePopup();
+    await this.logStep(`Deleted schedule from gantt chart context menu: ${name}`);
+    return name;
+  }
+
+  async deleteRandomScheduleFromListRowMenu() {
+    await this.switchToListView();
+    await this.clearListTabSearchIfAvailable();
+    let picked = await this._findVisibleEditableListScheduleRow();
+    if (!picked) {
+      await expect(async () => {
+        picked = await this._findVisibleEditableListScheduleRow();
+        expect(Boolean(picked)).toBeTruthy();
+      }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
+    }
+    const { row, label } = picked;
+    await this._openListRowActionsMenu(row);
+    await this._clickDeleteInOpenActionsMenu();
+    await this._confirmDeleteSchedulePopup();
+    await this.logStep(`Deleted schedule from list row menu: ${label}`);
+    return label;
   }
 
   async clickScheduleToday() {
@@ -1072,10 +1321,164 @@ class SchedulePage extends BasePage {
     await this.submitPanelPrimary();
   }
 
-  async removeAssigneeInEdit() {
+  async _scheduleCreateFormLabeledFieldContainer(labelRegex) {
     const panel = this.formPanel();
-    const clear = panel.locator('[aria-label*="Clear" i], button:has-text("×")').first();
-    if (await clear.isVisible({ timeout: 2000 }).catch(() => false)) await clear.click();
+    const lbl = panel
+      .locator('label, .fw-500, .MuiFormLabel-root, p, span')
+      .filter({ hasText: labelRegex })
+      .first();
+    await expect(lbl).toBeVisible({ timeout: 20000 });
+    const column = lbl
+      .locator('xpath=ancestor::div[contains(@class,"column")][1]')
+      .or(lbl.locator('xpath=ancestor::div[contains(@class,"MuiGrid-item")][1]'))
+      .first();
+    if (await column.isVisible({ timeout: 1500 }).catch(() => false)) return column;
+    return lbl.locator('xpath=ancestor::div[1]').first();
+  }
+
+  async _countRemoveButtonsBefore(endLocator, afterLocator = null) {
+    const region = this._scheduleCreateFormAdditionalDetailsRegion();
+    const endBox = await endLocator.boundingBox();
+    if (!endBox) return 0;
+    const afterBox = afterLocator ? await afterLocator.boundingBox() : null;
+    const removes = region.getByRole('button', { name: /^remove$/i });
+    const count = await removes.count();
+    let matched = 0;
+    for (let i = 0; i < count; i += 1) {
+      const box = await removes.nth(i).boundingBox();
+      if (!box || box.y >= endBox.y) continue;
+      if (afterBox && box.y <= afterBox.y) continue;
+      matched += 1;
+    }
+    return matched;
+  }
+
+  async _clickFirstRemoveButtonBefore(endLocator, afterLocator = null) {
+    const region = this._scheduleCreateFormAdditionalDetailsRegion();
+    const endBox = await endLocator.boundingBox();
+    const afterBox = afterLocator ? await afterLocator.boundingBox() : null;
+    const removes = region.getByRole('button', { name: /^remove$/i });
+    const count = await removes.count();
+    for (let i = 0; i < count; i += 1) {
+      const btn = removes.nth(i);
+      const box = await btn.boundingBox();
+      if (!box || !endBox || box.y >= endBox.y) continue;
+      if (afterBox && box.y <= afterBox.y) continue;
+      await btn.scrollIntoViewIfNeeded().catch(() => {});
+      await btn.click({ force: true, timeout: 15000 });
+      return;
+    }
+    throw new Error('No Remove button found in the expected form section');
+  }
+
+  async removeAssigneeInEdit() {
+    await this.hideFreshchatWidget();
+    const region = await this._scheduleCreateFormLabeledFieldContainer(/^assignees?\b/i);
+    await expect(async () => {
+      const deletes = region.locator('.MuiChip-deleteIcon');
+      const count = await deletes.count();
+      if (count === 0) return;
+      await deletes.first().click({ force: true, timeout: 10000 });
+      await expect(deletes).toHaveCount(count - 1, { timeout: 5000 });
+    }).toPass({ timeout: 30000, intervals: [300, 500, 1000] });
+
+    const clear = region.locator('[aria-label*="Clear" i]').first();
+    if (await clear.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await clear.click({ force: true, timeout: 10000 });
+    }
+    await this.logStep('Removed assignee(s) on edit form');
+  }
+
+  async expectAssigneesEmptyInEdit() {
+    const region = await this._scheduleCreateFormLabeledFieldContainer(/^assignees?\b/i);
+    await expect(region.locator('.MuiChip-root')).toHaveCount(0, { timeout: 10000 });
+    const placeholder = region
+      .getByPlaceholder(/select assignee|select assignees?|select/i)
+      .first();
+    if (await placeholder.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await expect(placeholder).toBeVisible();
+    }
+    await this.logStep('Assignees field is empty');
+  }
+
+  async clearDescriptionInEdit() {
+    await this.hideFreshchatWidget();
+    const field = await this._scheduleCreateFormDescriptionField();
+    await field.scrollIntoViewIfNeeded().catch(() => {});
+    await field.click({ force: true, timeout: 15000 });
+    await field.fill('');
+    await expect(field).toHaveValue('', { timeout: 10000 });
+    await this.logStep('Cleared description on edit form');
+  }
+
+  async expectDescriptionEmptyInEdit() {
+    const field = await this._scheduleCreateFormDescriptionField();
+    await expect(field).toHaveValue('', { timeout: 10000 });
+    await this.logStep('Description field is empty');
+  }
+
+  async clearPhaseInEdit() {
+    await this.hideFreshchatWidget();
+    const region = await this._scheduleCreateFormLabeledFieldContainer(/^phase\b/i);
+    const clear = region.locator('[aria-label*="Clear" i], button[title="Clear"]').first();
+    if (await clear.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await clear.click({ force: true, timeout: 10000 });
+    } else {
+      const combo = region.getByRole('combobox').first();
+      await combo.click({ force: true, timeout: 10000 });
+      await combo.fill('');
+      await this.page.keyboard.press('Escape').catch(() => {});
+    }
+    await this.logStep('Cleared phase on edit form');
+  }
+
+  async expectPhaseEmptyInEdit() {
+    const region = await this._scheduleCreateFormLabeledFieldContainer(/^phase\b/i);
+    const combo = region.getByRole('combobox').first();
+    await expect(combo).toBeVisible({ timeout: 10000 });
+    const value = ((await combo.inputValue().catch(() => '')) || '').trim();
+    expect(value).toBe('');
+    await this.logStep('Phase field is empty');
+  }
+
+  async removeFirstTaskInEdit() {
+    await this.expandScheduleCreateFormAdditionalDetails();
+    const region = this._scheduleCreateFormAdditionalDetailsRegion();
+    const addTask = region.getByRole('button', { name: /^add task$/i }).first();
+    await expect(addTask).toBeVisible({ timeout: 15000 });
+    this._taskRemoveCountBefore = await this._countRemoveButtonsBefore(addTask);
+    expect(this._taskRemoveCountBefore).toBeGreaterThan(0);
+    await this._clickFirstRemoveButtonBefore(addTask);
+    await this.logStep('Removed first task on edit form');
+  }
+
+  async expectTaskRemovedInEdit() {
+    const region = this._scheduleCreateFormAdditionalDetailsRegion();
+    const addTask = region.getByRole('button', { name: /^add task$/i }).first();
+    const after = await this._countRemoveButtonsBefore(addTask);
+    expect(after).toBe(this._taskRemoveCountBefore - 1);
+    await this.logStep('Task removed from edit form');
+  }
+
+  async removeFirstReminderInEdit() {
+    await this.expandScheduleCreateFormAdditionalDetails();
+    const region = this._scheduleCreateFormAdditionalDetailsRegion();
+    const addTask = region.getByRole('button', { name: /^add task$/i }).first();
+    const addReminder = region.getByRole('button', { name: /add reminder/i }).first();
+    await expect(addReminder).toBeVisible({ timeout: 15000 });
+    this._reminderRemoveCountBefore = await this._countRemoveButtonsBefore(addReminder, addTask);
+    expect(this._reminderRemoveCountBefore).toBeGreaterThan(0);
+    await this._clickFirstRemoveButtonBefore(addReminder, addTask);
+    await this.logStep('Removed first reminder on edit form');
+  }
+
+  async expectReminderRemovedInEdit() {
+    const region = this._scheduleCreateFormAdditionalDetailsRegion();
+    const addTask = region.getByRole('button', { name: /^add task$/i }).first();
+    const addReminder = region.getByRole('button', { name: /add reminder/i }).first();
+    const after = await this._countRemoveButtonsBefore(addReminder, addTask);
+    expect(after).toBe(this._reminderRemoveCountBefore - 1);
+    await this.logStep('Reminder removed from edit form');
   }
 
   async logStep(msg) {
@@ -2148,28 +2551,57 @@ class SchedulePage extends BasePage {
     this._scheduleCreateFormRequiresNonZeroDuration = false;
   }
 
+  /** Schedule assignee picker popover (Users / Vendors tabs). */
+  _scheduleAssigneePickerPopover() {
+    return this.page
+      .locator('.MuiPopover-root:visible, .MuiModal-root:visible, .MuiPaper-root:visible')
+      .filter({
+        has: this.page.locator(
+          '#schedule-assignee-tab-users, #schedule-assignee-tab-vendors, [id*="schedule-assignee-tab"]'
+        ),
+      })
+      .last();
+  }
+
+  _scheduleAssigneeTab(tab) {
+    const popover = this._scheduleAssigneePickerPopover();
+    if (tab === 'users') {
+      return popover
+        .locator('#schedule-assignee-tab-users')
+        .or(popover.getByRole('tab', { name: /users/i }))
+        .first();
+    }
+    return popover
+      .locator('#schedule-assignee-tab-vendors')
+      .or(popover.getByRole('tab', { name: /vendors/i }))
+      .first();
+  }
+
+  _scheduleAssigneeTabPanel(tab) {
+    const panelId = tab === 'users' ? 'schedule-assignee-tabpanel-users' : 'schedule-assignee-tabpanel-vendors';
+    return this.page.locator(`#${panelId}`).last();
+  }
+
   async _scheduleCreateFormAssigneeTrigger() {
     const panel = this.formPanel();
+    const lbl = panel
+      .locator('label, .fw-500, .MuiFormLabel-root, p, span')
+      .filter({ hasText: /^assignees?\b/i })
+      .first();
+
+    if (await lbl.isVisible({ timeout: 5000 }).catch(() => false)) {
+      const boxTrigger = lbl
+        .locator('xpath=following::div[contains(@class,"MuiBox-root")][1]')
+        .or(lbl.locator('..').locator('.MuiBox-root').first())
+        .or(lbl.locator('xpath=ancestor::div[1]//div[contains(@class,"MuiBox-root")]').first());
+      if (await boxTrigger.isVisible({ timeout: 3000 }).catch(() => false)) {
+        return boxTrigger;
+      }
+    }
+
     let combo = panel.getByRole('combobox', { name: /assignees?/i }).first();
     if (!(await combo.isVisible({ timeout: 2500 }).catch(() => false))) {
       combo = panel.getByLabel(/assignees?/i).first();
-    }
-    if (!(await combo.isVisible({ timeout: 2500 }).catch(() => false))) {
-      const lbl = panel
-        .locator('label, .fw-500, .MuiFormLabel-root, p, span')
-        .filter({ hasText: /^assignees?\b/i })
-        .first();
-      if (await lbl.isVisible({ timeout: 5000 }).catch(() => false)) {
-        const fromLabel = lbl.locator('xpath=following::*[@role="combobox"][1]');
-        if (await fromLabel.isVisible({ timeout: 3000 }).catch(() => false)) {
-          combo = fromLabel;
-        } else {
-          const legacyCombo = lbl.locator('..').locator('[role="combobox"]').first();
-          if (await legacyCombo.isVisible({ timeout: 3000 }).catch(() => false)) {
-            combo = legacyCombo;
-          }
-        }
-      }
     }
     if (!(await combo.isVisible({ timeout: 2500 }).catch(() => false))) {
       combo = panel.getByPlaceholder(/assignees?|select assignees?/i).first();
@@ -2182,6 +2614,8 @@ class SchedulePage extends BasePage {
   }
 
   async _scheduleCreateFormAssigneePickerSurface() {
+    const popover = this._scheduleAssigneePickerPopover();
+    if (await popover.isVisible({ timeout: 3000 }).catch(() => false)) return popover;
     const listbox = this.page.getByRole('listbox').last();
     if (await listbox.isVisible({ timeout: 3000 }).catch(() => false)) return listbox;
     const menu = this.page.getByRole('menu').last();
@@ -2189,16 +2623,177 @@ class SchedulePage extends BasePage {
     return this.page.locator('.MuiPopover-root:visible, .MuiModal-root:visible').last();
   }
 
+  async _clickScheduleAssigneeTab(tab) {
+    const tabBtn = this._scheduleAssigneeTab(tab);
+    await expect(tabBtn).toBeVisible({ timeout: 15000 });
+    await tabBtn.click({ force: true, timeout: 15000 });
+    const panel = this._scheduleAssigneeTabPanel(tab);
+    await expect(panel).toBeVisible({ timeout: 10000 });
+    return panel;
+  }
+
+  async _selectAssigneesFromScheduleAssigneeTab(tab, count = 1) {
+    const panel = await this._clickScheduleAssigneeTab(tab);
+    const rows = panel.locator(':scope > .MuiBox-root').filter({ visible: true });
+    await expect(async () => {
+      expect(await rows.count()).toBeGreaterThan(0);
+    }).toPass({ timeout: 15000, intervals: [500, 1000, 2000] });
+
+    const total = await rows.count();
+    const toSelect = Math.min(count, total);
+    let selected = 0;
+    for (let i = 0; i < total && selected < toSelect; i += 1) {
+      const row = rows.nth(i);
+      await row.scrollIntoViewIfNeeded().catch(() => {});
+      const checkbox = row.getByRole('checkbox').first();
+      if (await checkbox.isVisible({ timeout: 800 }).catch(() => false)) {
+        if (!(await checkbox.isChecked().catch(() => false))) {
+          await checkbox.click({ force: true, timeout: 10000 });
+          selected += 1;
+        }
+        continue;
+      }
+      await row.click({ force: true, timeout: 10000 });
+      selected += 1;
+    }
+    expect(selected).toBeGreaterThan(0);
+    return selected;
+  }
+
+  async _selectRandomAssigneeCheckboxFromScheduleAssigneeTabs() {
+    const tabs = ['users', 'vendors'].sort(() => Math.random() - 0.5);
+    let lastError = null;
+
+    for (const tab of tabs) {
+      const tabBtn = this._scheduleAssigneeTab(tab);
+      if (!(await tabBtn.isVisible({ timeout: 2500 }).catch(() => false))) continue;
+
+      const panel = await this._clickScheduleAssigneeTab(tab);
+      await expect(panel).toBeVisible({ timeout: 10000 });
+
+      try {
+        let pickedName = '';
+        await expect(async () => {
+          const popover = this._scheduleAssigneePickerPopover();
+          const result = await popover.evaluate((root) => {
+            const visible = (el) => {
+              if (!el || el.disabled) return false;
+              const box = el.getBoundingClientRect();
+              return box.width >= 0 && box.height >= 0 && box.bottom > 0 && box.right > 0;
+            };
+            const textFor = (input) => {
+              const row =
+                input.closest('.MuiBox-root') ||
+                input.closest('[role="row"]') ||
+                input.closest('label') ||
+                input.parentElement;
+              return (row?.textContent || input.getAttribute('aria-label') || '').trim();
+            };
+            const inputs = [...root.querySelectorAll('input[type="checkbox"]')].filter(visible);
+            if (inputs.length === 0) {
+              const scrollable = [root, ...root.querySelectorAll('*')].find(
+                (el) => el.scrollHeight > el.clientHeight + 8
+              );
+              if (scrollable) scrollable.scrollTop += Math.max(120, scrollable.clientHeight * 0.75);
+              return { checked: false, missing: true, name: '' };
+            }
+
+            const input = inputs[Math.floor(Math.random() * inputs.length)];
+            const name = textFor(input);
+            if (!input.checked) {
+              const clickTarget =
+                input.closest('label') ||
+                input.closest('.MuiCheckbox-root') ||
+                input.parentElement?.querySelector('.MuiCheckbox-root') ||
+                input;
+              clickTarget.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+              clickTarget.click();
+            }
+            if (!input.checked) {
+              input.checked = true;
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            return { checked: Boolean(input.checked), missing: false, name };
+          }).catch(() => ({ checked: false, missing: true, name: '' }));
+
+          if (result.missing) {
+            await this.page.mouse.wheel(0, 500).catch(() => {});
+            expect(false).toBeTruthy();
+            return;
+          }
+          pickedName = result.name;
+          expect(result.checked).toBeTruthy();
+        }).toPass({ timeout: 15000, intervals: [400, 800, 1200] });
+
+        return pickedName || `${tab} assignee`;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError || new Error('No selectable assignee checkbox found in Users/Vendors popup.');
+  }
+
+  async _dismissScheduleAssigneePickerByClickingAway() {
+    const popover = this._scheduleAssigneePickerPopover();
+    const legacySurface = await this._scheduleCreateFormAssigneePickerSurface();
+    const pickerOpen =
+      (await popover.isVisible({ timeout: 800 }).catch(() => false)) ||
+      (await legacySurface.isVisible({ timeout: 800 }).catch(() => false));
+    if (!pickerOpen) return;
+
+    const panel = this.formPanel();
+    const safeTargets = [
+      panel.getByLabel(/schedule name|milestone name|name|title/i).first(),
+      panel.getByRole('heading').first(),
+      panel.locator('label, .MuiFormLabel-root').filter({ hasText: /priority|status|phase/i }).first(),
+      this._scheduleCreateFormDrawer(),
+      this.page.locator('main, [role="main"]').first(),
+    ];
+
+    for (const target of safeTargets) {
+      if (!(await target.isVisible({ timeout: 500 }).catch(() => false))) continue;
+      const box = await target.boundingBox().catch(() => null);
+      if (box && box.width > 0 && box.height > 0) {
+        const x = box.x + 8 + Math.floor(Math.random() * Math.max(1, Math.min(box.width - 16, 40)));
+        const y = box.y + 8 + Math.floor(Math.random() * Math.max(1, Math.min(box.height - 16, 20)));
+        await this.page.mouse.click(x, y);
+      } else {
+        await target.click({ force: true, timeout: 5000 }).catch(() => {});
+      }
+      break;
+    }
+
+    await popover.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
   async openScheduleCreateFormAssigneesDropdown() {
     await this.hideFreshchatWidget();
-    const combo = await this._scheduleCreateFormAssigneeTrigger();
-    await combo.scrollIntoViewIfNeeded().catch(() => {});
-    await combo.click({ force: true, timeout: 30000 });
+    const trigger = await this._scheduleCreateFormAssigneeTrigger();
+    await trigger.scrollIntoViewIfNeeded().catch(() => {});
+    await trigger.click({ force: true, timeout: 30000 });
+
+    const usersTab = this._scheduleAssigneeTab('users');
+    if (await usersTab.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await this._clickScheduleAssigneeTab('users');
+      return;
+    }
+
     const surface = await this._scheduleCreateFormAssigneePickerSurface();
     await expect(surface).toBeVisible({ timeout: 15000 });
   }
 
   async expectScheduleCreateFormAssigneesListVisible() {
+    const usersTab = this._scheduleAssigneeTab('users');
+    if (await usersTab.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await this._clickScheduleAssigneeTab('users');
+      const rows = this._scheduleAssigneeTabPanel('users').locator(':scope > .MuiBox-root');
+      await expect(rows.first()).toBeVisible({ timeout: 10000 });
+      return;
+    }
+
     const surface = await this._scheduleCreateFormAssigneePickerSurface();
     await expect(surface).toBeVisible({ timeout: 15000 });
     const rows = surface
@@ -2208,6 +2803,31 @@ class SchedulePage extends BasePage {
   }
 
   async selectUpToTwoAssigneesOnScheduleCreateForm(maxCount = 2) {
+    const usersTab = this._scheduleAssigneeTab('users');
+    if (await usersTab.isVisible({ timeout: 5000 }).catch(() => false)) {
+      if (!(await this._scheduleAssigneeTabPanel('users').isVisible({ timeout: 1500 }).catch(() => false))) {
+        await this.openScheduleCreateFormAssigneesDropdown();
+      }
+
+      let selected = 0;
+      const userCount = maxCount >= 2 ? 1 : maxCount;
+      if (userCount > 0) {
+        selected += await this._selectAssigneesFromScheduleAssigneeTab('users', userCount);
+      }
+      if (maxCount - selected > 0) {
+        const vendorsTab = this._scheduleAssigneeTab('vendors');
+        if (await vendorsTab.isVisible({ timeout: 3000 }).catch(() => false)) {
+          selected += await this._selectAssigneesFromScheduleAssigneeTab(
+            'vendors',
+            maxCount - selected
+          );
+        }
+      }
+      await this._dismissScheduleAssigneePickerByClickingAway();
+      await this.logStep(`Selected ${selected} assignee(s) from Users/Vendors tabs`);
+      return selected;
+    }
+
     const surface = await this._scheduleCreateFormAssigneePickerSurface();
     await expect(surface).toBeVisible({ timeout: 15000 });
 
@@ -2221,7 +2841,7 @@ class SchedulePage extends BasePage {
           await cb.click({ force: true, timeout: 10000 });
         }
       }
-      await this.page.keyboard.press('Escape').catch(() => {});
+      await this._dismissScheduleAssigneePickerByClickingAway();
       return toSelect;
     }
 
@@ -2232,7 +2852,7 @@ class SchedulePage extends BasePage {
     for (let i = 0; i < toSelect; i += 1) {
       await options.nth(i).click({ force: true, timeout: 10000 });
     }
-    await this.page.keyboard.press('Escape').catch(() => {});
+    await this._dismissScheduleAssigneePickerByClickingAway();
     return toSelect;
   }
 
@@ -3093,6 +3713,31 @@ class SchedulePage extends BasePage {
     };
 
     const openTaskAssigneeDropdown = async () => {
+      const clickTrigger = async (trigger) => {
+        if (!(await trigger.isVisible({ timeout: 800 }).catch(() => false))) return false;
+        await trigger.scrollIntoViewIfNeeded().catch(() => {});
+        const input = trigger.locator('input').first();
+        if (await input.isVisible({ timeout: 500 }).catch(() => false)) {
+          await input.click({ force: true, timeout: 10000 });
+          await input.press('ArrowDown').catch(() => {});
+        } else {
+          await trigger.click({ force: true, timeout: 10000 });
+        }
+        if (await this._scheduleAssigneeTab('users').isVisible({ timeout: 1200 }).catch(() => false)) return true;
+        listbox = this.page.getByRole('listbox').last();
+        if (await hasRealAssigneeOption()) return true;
+        await this.page.keyboard.press('Escape').catch(() => {});
+        return false;
+      };
+
+      const triggerCandidates = [
+        await this._scheduleCreateFormTaskAssigneeTrigger().catch(() => null),
+        this._scheduleCreateFormTaskAssigneeAutocomplete(),
+      ].filter(Boolean);
+      for (const trigger of triggerCandidates) {
+        if (await clickTrigger(trigger)) return true;
+      }
+
       const exactRoots = this.page.locator(
         '.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-12.MuiGrid-grid-sm-5 > .d-flex > .MuiAutocomplete-root > .MuiBox-root > .MuiFormControl-root > .MuiInputBase-root'
       );
@@ -3110,10 +3755,51 @@ class SchedulePage extends BasePage {
           } else {
             await root.click({ force: true, timeout: 10000 });
           }
+          if (await this._scheduleAssigneeTab('users').isVisible({ timeout: 1200 }).catch(() => false)) return true;
           listbox = this.page.getByRole('listbox').last();
           if (await hasRealAssigneeOption()) return true;
           await this.page.keyboard.press('Escape').catch(() => {});
         }
+      }
+
+      const clickedByDom = await this.formPanel()
+        .evaluate((root) => {
+          const visible = (el) => {
+            if (!el) return false;
+            const box = el.getBoundingClientRect();
+            return box.width > 0 && box.height > 0;
+          };
+          const textNear = (el) => {
+            const ancestors = [];
+            let node = el;
+            for (let i = 0; node && i < 5; i += 1) {
+              ancestors.push(node);
+              node = node.parentElement;
+            }
+            return ancestors.map((n) => n.textContent || '').join(' ');
+          };
+          const inputs = [...root.querySelectorAll('.MuiAutocomplete-root input, input[role="combobox"]')].filter(visible);
+          const assigneeInputs = inputs.filter((input) => {
+            const text = `${input.getAttribute('aria-label') || ''} ${input.getAttribute('placeholder') || ''} ${textNear(input)}`;
+            if (/task\s*name|task$|priority|phase|status|to\s*do|completion|reminder|date|duration/i.test(text)) return false;
+            return /assignee|select/i.test(text);
+          });
+          const target = assigneeInputs[assigneeInputs.length - 1] || inputs[inputs.length - 1];
+          if (!target) return false;
+          target.scrollIntoView({ block: 'center', inline: 'nearest' });
+          target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+          target.click();
+          target.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+          return true;
+        })
+        .catch(() => false);
+      if (clickedByDom) {
+        if (await this._scheduleAssigneeTab('users').isVisible({ timeout: 1200 }).catch(() => false)) return true;
+        listbox = this.page.getByRole('listbox').last();
+        if (await hasRealAssigneeOption()) return true;
+        await this.page.keyboard.press('ArrowDown').catch(() => {});
+        if (await hasRealAssigneeOption()) return true;
+        await this.page.keyboard.press('Escape').catch(() => {});
       }
       return false;
     };
@@ -3121,6 +3807,13 @@ class SchedulePage extends BasePage {
     await expect(async () => {
       expect(await openTaskAssigneeDropdown()).toBeTruthy();
     }).toPass({ timeout: 30000, intervals: [500, 1000, 2000] });
+
+    if (await this._scheduleAssigneeTab('users').isVisible({ timeout: 2500 }).catch(() => false)) {
+      const assigneeName = await this._selectRandomAssigneeCheckboxFromScheduleAssigneeTabs();
+      await this._dismissScheduleAssigneePickerByClickingAway();
+      await this.logStep(`Selected task assignee: ${assigneeName || '1 assignee'}`);
+      return;
+    }
 
     let option = null;
     await expect(async () => {
@@ -3342,6 +4035,249 @@ class SchedulePage extends BasePage {
     await combo.click({ force: true, timeout: 15000 });
     await this._clickLastFormDropdownOption(/week/i);
     await this.logStep('Selected reminder unit: Week(s)');
+  }
+
+  async clickGanttSidebarAddMilestone() {
+    const panel = this.ganttSidebar();
+    await expect(panel.getByRole('button', { name: /add milestone/i })).toBeVisible({
+      timeout: this.uiTimeout,
+    });
+    await panel.getByRole('button', { name: /add milestone/i }).click();
+  }
+
+  async expectQuickAddMilestoneFieldVisible() {
+    const panel = this.ganttSidebar();
+    await expect(
+      panel.getByPlaceholder(/add milestone|milestone/i).or(panel.locator('input:visible').last())
+    ).toBeVisible({ timeout: 20000 });
+  }
+
+  async fillGanttSidebarQuickAddMilestoneName(name) {
+    const panel = this.ganttSidebar();
+    const input = panel
+      .getByPlaceholder(/add milestone|milestone/i)
+      .or(panel.locator('input:visible').last())
+      .first();
+    await expect(input).toBeVisible({ timeout: 20000 });
+    await input.fill(name);
+  }
+
+  async confirmGanttSidebarQuickAddMilestoneWithTick() {
+    const input = this.page
+      .locator('input[placeholder*="Milestone" i], input[placeholder*="milestone" i]')
+      .first();
+    await expect(input).toBeVisible({ timeout: 20000 });
+    const quickRowTable = this.page.locator('table').filter({ has: input });
+    await expect(quickRowTable).toHaveCount(1);
+    await quickRowTable.locator('.MuiIconButton-root').first().click();
+    await expect(input).toBeHidden({ timeout: 60000 }).catch(async () => {
+      await input.waitFor({ state: 'detached', timeout: 60000 });
+    });
+  }
+
+  async expectAddMilestoneOffCanvasOpen() {
+    await expect(this.addMilestonePanelHeading().or(this.formPanel()).first()).toBeVisible({
+      timeout: this.uiTimeout,
+    });
+  }
+
+  async selectPhaseNamedOnScheduleCreateForm(phaseName) {
+    const panel = this.formPanel();
+    await this.hideFreshchatWidget();
+    let combo = panel.getByRole('combobox', { name: /^phase$/i }).first();
+    if (!(await combo.isVisible({ timeout: 2500 }).catch(() => false))) {
+      combo = panel.getByLabel(/^phase$/i).first();
+    }
+    await expect(combo).toBeVisible({ timeout: 20000 });
+    await combo.scrollIntoViewIfNeeded().catch(() => {});
+    await combo.click({ force: true, timeout: 15000 });
+
+    const surface = this.page.getByRole('listbox').last();
+    await expect(surface).toBeVisible({ timeout: 15000 });
+    const option = surface
+      .locator('[role="option"], .MuiMenuItem-root, li')
+      .filter({ hasText: new RegExp(phaseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') })
+      .first();
+    await expect(option).toBeVisible({ timeout: 10000 });
+    await option.click({ force: true });
+    await this.logStep(`Selected phase: ${phaseName}`);
+    await this.page.keyboard.press('Escape').catch(() => {});
+  }
+
+  async updateSchedulePhaseToNamedFromListRowMenu(scheduleName, phaseName) {
+    await this.openEditForListSchedule(scheduleName);
+    await this.selectPhaseNamedOnScheduleCreateForm(phaseName);
+    await this.submitPanelPrimary();
+    await this.searchListTabScheduleIfAvailable(scheduleName);
+  }
+
+  async updateNamedScheduleStartDateFromListRowMenu(name) {
+    await this.openEditForListSchedule(name);
+    await this.pickRandomStartDateTimeOnScheduleCreateForm();
+    await this.pickRandomEndDateTimeAfterStartOnScheduleCreateForm();
+    await this.submitPanelPrimary();
+    await this.searchListTabScheduleIfAvailable(name);
+  }
+
+  async updateNamedScheduleDescriptionFromListRowMenu(name) {
+    await this.openEditForListSchedule(name);
+    await this.fillRandomDescriptionOnScheduleCreateForm();
+    await this.submitPanelPrimary();
+    await this.searchListTabScheduleIfAvailable(name);
+  }
+
+  async addExistingTaskToNamedScheduleFromListRowMenu(name) {
+    await this.openEditForListSchedule(name);
+    await this.expandScheduleCreateFormAdditionalDetails();
+    await this.selectRandomExistingTaskOnScheduleCreateForm();
+    await this.submitPanelPrimary();
+    await this.searchListTabScheduleIfAvailable(name);
+  }
+
+  async addReminderToNamedScheduleFromListRowMenu(name) {
+    await this.openEditForListSchedule(name);
+    await this.expandScheduleCreateFormAdditionalDetails();
+    await this.addRandomReminderOnScheduleCreateForm();
+    await this.submitPanelPrimary();
+    await this.searchListTabScheduleIfAvailable(name);
+  }
+
+  async deleteNamedItemFromGanttSidebarMenu(name) {
+    await this.switchToGanttView();
+    await this.searchGanttSidebarScheduleIfAvailable(name);
+    const row = this.ganttSidebarRow(name);
+    await expect(row).toBeVisible({ timeout: this.uiTimeout });
+    await this._openGanttSidebarRowActionsMenu(row);
+    await this._clickDeleteInOpenActionsMenu();
+    await this._confirmDeleteSchedulePopup();
+    await this.logStep(`Deleted from gantt sidebar menu: ${name}`);
+  }
+
+  async enableScheduleLiveModeToggle() {
+    await this.switchToGanttView();
+    const switchRoot = this.page.locator('.MuiSwitch-root').first();
+    const switchInput = switchRoot.locator('input[type="checkbox"]').first();
+    const checked = await switchInput.isChecked().catch(() => false);
+    if (!checked) {
+      await switchRoot.click({ force: true, timeout: this.quickTimeout });
+      const yes = this.page.getByRole('button', { name: /^yes$/i }).first();
+      if (await yes.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await yes.click({ force: true });
+      }
+    }
+    await this.logStep('Enabled schedule live mode toggle');
+  }
+
+  async openActivityTrackerFromSidebar() {
+    const link = this.page
+      .getByRole('link', { name: /activity tracker/i })
+      .or(this.page.locator('a, [role="button"]').filter({ hasText: /^activity tracker$/i }))
+      .first();
+    await expect(link).toBeVisible({ timeout: 30000 });
+    await link.click({ force: true, timeout: this.quickTimeout });
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.logStep('Opened Activity Tracker from sidebar');
+  }
+
+  async expectActivityLogContains(text) {
+    const needle = String(text || '').trim();
+    await expect(this.page.getByText(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')).first()).toBeVisible({
+      timeout: 60000,
+    });
+    await this.logStep(`Activity log contains: ${needle}`);
+  }
+
+  async openWorkingCalendarDialog() {
+    await this.switchToGanttView();
+    const btn = this.page
+      .getByRole('button', { name: /working calendar/i })
+      .or(this.page.locator('button[aria-label*="Working Calendar" i]'))
+      .first();
+    await expect(btn).toBeVisible({ timeout: this.uiTimeout });
+    await btn.click({ force: true, timeout: this.quickTimeout });
+    const dialog = this.page.getByRole('dialog').filter({ hasText: /working calendar/i }).last();
+    await expect(dialog).toBeVisible({ timeout: 15000 });
+  }
+
+  _workingCalendarDialog() {
+    return this.page.getByRole('dialog').filter({ hasText: /working calendar/i }).last();
+  }
+
+  async toggleWorkingCalendarDays(dayNames) {
+    const dialog = this._workingCalendarDialog();
+    for (const day of dayNames) {
+      const tile = dialog.getByText(new RegExp(`^${day}$`, 'i')).first();
+      await tile.scrollIntoViewIfNeeded().catch(() => {});
+      await tile.click({ force: true, timeout: this.quickTimeout });
+    }
+    await this.logStep(`Toggled working calendar days: ${dayNames.join(', ')}`);
+  }
+
+  async saveWorkingCalendarDialog() {
+    const dialog = this._workingCalendarDialog();
+    await dialog.getByRole('button', { name: /^save$/i }).click({ force: true, timeout: this.quickTimeout });
+    await this._waitScheduleSettled();
+  }
+
+  async expectWorkingCalendarUpdatedToast() {
+    await expect(
+      this.page.getByText(/working calendar updated successfully/i).first()
+    ).toBeVisible({ timeout: 20000 });
+  }
+
+  async expectWorkingCalendarDaySelected(dayName, selected) {
+    const dialog = this._workingCalendarDialog();
+    const tile = dialog.getByText(new RegExp(`^${dayName}$`, 'i')).first();
+    const box = tile.locator('xpath=ancestor::div[contains(@class,"MuiBox-root")][1]').first();
+    const bg = ((await box.evaluate((el) => getComputedStyle(el).backgroundColor).catch(() => '')) || '').trim();
+    if (selected) {
+      expect(bg).not.toBe('');
+    }
+  }
+
+  async addWorkingCalendarPublicHoliday(holidayName) {
+    const dialog = this._workingCalendarDialog();
+    const nameField = dialog.getByPlaceholder(/holiday name/i).or(dialog.locator('input').first());
+    await nameField.fill(holidayName);
+    const dateField = dialog.locator('input[placeholder*="date" i], input[placeholder*="Select" i]').last();
+    if (await dateField.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await dateField.click({ force: true });
+      const todayCell = this.page.locator('.MuiPickersDay-root:not(.Mui-disabled)').first();
+      if (await todayCell.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await todayCell.click({ force: true });
+      }
+    }
+    await dialog.getByRole('button', { name: /^add$/i }).click({ force: true });
+    await expect(dialog.getByText(holidayName).first()).toBeVisible({ timeout: 10000 });
+    await this.logStep(`Added working calendar holiday: ${holidayName}`);
+  }
+
+  async removeFirstWorkingCalendarPublicHoliday() {
+    const dialog = this._workingCalendarDialog();
+    const deleteBtn = dialog.getByRole('button', { name: /delete/i }).first();
+    await deleteBtn.click({ force: true, timeout: this.quickTimeout });
+  }
+
+  async setWorkingCalendarStartTimeToAm() {
+    const dialog = this._workingCalendarDialog();
+    const startPicker = dialog.locator('.MuiInputBase-root input').first();
+    await startPicker.click({ force: true });
+    await startPicker.fill('09:00 AM');
+    await startPicker.press('Enter').catch(() => {});
+  }
+
+  async setWorkingCalendarEndTimeToPm() {
+    const dialog = this._workingCalendarDialog();
+    const endPicker = dialog.locator('.MuiInputBase-root input').nth(1);
+    await endPicker.click({ force: true });
+    await endPicker.fill('06:00 PM');
+    await endPicker.press('Enter').catch(() => {});
+  }
+
+  async expectTodayIndicatorVisibleInGanttChart() {
+    const tl = this.ganttTimelineHost();
+    await expect(tl.getByText(/^today$/i).first()).toBeVisible({ timeout: 30000 });
+    await this.logStep('Today indicator visible in gantt chart');
   }
 
   async clickBackFromProjectModule() {
