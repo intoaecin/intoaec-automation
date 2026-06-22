@@ -185,6 +185,36 @@ When('I update schedule {string} phase from the list row menu', async function (
   await schedulePage.updateSchedulePhaseFromListRowMenu(name);
 });
 
+When('I search for schedule {string} in the schedule list', async function (name) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.logStep(`Search schedule in list: ${name}`);
+  await schedulePage.searchListTabScheduleIfAvailable(name);
+});
+
+When('I open the edit option for schedule {string} from the list row menu', async function (name) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.logStep(`Open edit option from list row menu: ${name}`);
+  await schedulePage.openEditForListSchedule(name);
+});
+
+Then('the edit schedule off canvas should be open', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.logStep('Edit schedule off canvas is open');
+  await schedulePage.expectEditScheduleOffCanvasOpen();
+});
+
+When('I replace the open schedule name with {string}', async function (newName) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.logStep(`Replace open schedule name with: ${newName}`);
+  await schedulePage.fillScheduleNameInOpenPanel(newName);
+});
+
+When('I select another phase on the schedule form', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.logStep('Selected another phase on schedule form');
+  await schedulePage.selectRandomPhaseOnScheduleCreateForm();
+});
+
 When('I add or change schedule {string} phase from the list row menu', async function (name) {
   const schedulePage = getSchedulePage(this);
   await schedulePage.logStep(`Add/change phase from list row menu: ${name}`);
@@ -259,6 +289,34 @@ When('I delete schedule or milestone named {string} from list row menu', async f
   await schedulePage.logStep(`deleteNamedItemViaRowMenu ${name}`);
   await schedulePage.switchToListView();
   await schedulePage.deleteNamedItemViaRowMenu(name);
+});
+
+When('I delete a random schedule from the gantt sidebar list row menu', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.logStep('Delete random schedule from gantt sidebar list row menu');
+  this.lastDeletedScheduleName = await schedulePage.deleteRandomScheduleFromGanttSidebarListMenu();
+});
+
+When('I delete a random schedule from the gantt chart context menu', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.logStep('Delete random schedule from gantt chart context menu');
+  this.lastDeletedScheduleName = await schedulePage.deleteRandomScheduleFromGanttChartContextMenu();
+});
+
+When('I delete a random schedule from the list row menu', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.logStep('Delete random schedule from list row menu');
+  this.lastDeletedScheduleName = await schedulePage.deleteRandomScheduleFromListRowMenu();
+});
+
+Then('the last deleted schedule should no longer be visible in the schedule UI', async function () {
+  const schedulePage = getSchedulePage(this);
+  const name = this.lastDeletedScheduleName;
+  if (!name) {
+    throw new Error('No schedule was deleted in this scenario.');
+  }
+  await schedulePage.logStep(`Expect schedule removed from UI: ${name}`);
+  await schedulePage.expectScheduleNotVisibleInUi(name);
 });
 
 When('I click the schedule today button', async function () {
@@ -346,6 +404,57 @@ When('I remove assignee on open schedule edit form', async function () {
   const schedulePage = getSchedulePage(this);
   await schedulePage.logStep('removeAssigneeInEdit');
   await schedulePage.removeAssigneeInEdit();
+});
+
+Then('the schedule create form assignees field should be empty', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.expectAssigneesEmptyInEdit();
+});
+
+When('I open the edit option for a random schedule from the list row menu', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.logStep('Open edit option for random list schedule');
+  await schedulePage.openEditForRandomListSchedule();
+});
+
+When('I clear the description on the open schedule edit form', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.clearDescriptionInEdit();
+});
+
+Then('the schedule create form description field should be empty', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.expectDescriptionEmptyInEdit();
+});
+
+When('I remove the first task on the open schedule edit form', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.removeFirstTaskInEdit();
+});
+
+Then('the first task should be removed on the open schedule edit form', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.expectTaskRemovedInEdit();
+});
+
+When('I remove the first reminder on the open schedule edit form', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.removeFirstReminderInEdit();
+});
+
+Then('the first reminder should be removed on the open schedule edit form', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.expectReminderRemovedInEdit();
+});
+
+When('I clear the phase on the open schedule edit form', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.clearPhaseInEdit();
+});
+
+Then('the schedule create form phase field should be empty', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.expectPhaseEmptyInEdit();
 });
 
 When('I save the open schedule edit form', async function () {
@@ -503,6 +612,12 @@ When('I choose status In Progress in the schedule create form', async function (
   await schedulePage.selectScheduleFormStatus(/in\s*progress/i);
 });
 
+When('I choose status Completed in the schedule create form', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.logStep('Selected status: Completed');
+  await schedulePage.selectScheduleFormStatus(/completed/i);
+});
+
 Then('the schedule create form completion should display {int}%', async function (pct) {
   const schedulePage = getSchedulePage(this);
   await schedulePage.logStep(`Completion displays ${pct}%`);
@@ -530,6 +645,11 @@ When('I enter a random hex color code on the schedule create form', async functi
 When('I enter a random description on the schedule create form', async function () {
   const schedulePage = getSchedulePage(this);
   await schedulePage.fillRandomDescriptionOnScheduleCreateForm();
+});
+
+When('I enter a random duration on the schedule create form', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.fillRandomDurationOnScheduleForm();
 });
 
 When('I pick a random weekday start datetime in the schedule create form', async function () {
@@ -641,3 +761,136 @@ Then(
     await taskPage.expectScheduleLinkedOnTaskKanbanCard(taskName, scheduleName);
   }
 );
+
+When('I open quick add milestone from the gantt sidebar', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.clickGanttSidebarAddMilestone();
+});
+
+Then('the gantt sidebar quick add milestone field should be visible', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.expectQuickAddMilestoneFieldVisible();
+});
+
+When('I enter milestone name quick add field with {string}', async function (name) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.fillGanttSidebarQuickAddMilestoneName(name);
+});
+
+When('I confirm quick add milestone with tick in gantt sidebar', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.confirmGanttSidebarQuickAddMilestoneWithTick();
+});
+
+Then('the add milestone off canvas should be open', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.expectAddMilestoneOffCanvasOpen();
+});
+
+When('I select phase {string} on the schedule create form', async function (phaseName) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.selectPhaseNamedOnScheduleCreateForm(phaseName);
+});
+
+When(
+  'I update schedule {string} phase to {string} from the list row menu',
+  async function (scheduleName, phaseName) {
+    const schedulePage = getSchedulePage(this);
+    await schedulePage.updateSchedulePhaseToNamedFromListRowMenu(scheduleName, phaseName);
+  }
+);
+
+When('I update schedule {string} start date from the list row menu', async function (name) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.updateNamedScheduleStartDateFromListRowMenu(name);
+});
+
+When('I update schedule {string} description from the list row menu', async function (name) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.updateNamedScheduleDescriptionFromListRowMenu(name);
+});
+
+When('I add an existing task to schedule {string} from the list row menu', async function (name) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.addExistingTaskToNamedScheduleFromListRowMenu(name);
+});
+
+When('I add a reminder to schedule {string} from the list row menu', async function (name) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.addReminderToNamedScheduleFromListRowMenu(name);
+});
+
+When('I delete schedule or milestone named {string} from the gantt sidebar row menu', async function (name) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.deleteNamedItemFromGanttSidebarMenu(name);
+});
+
+Then('schedule or milestone {string} should not be visible in the schedule UI', async function (name) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.expectScheduleNotVisibleInUi(name);
+});
+
+When('I enable the schedule live mode toggle', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.enableScheduleLiveModeToggle();
+});
+
+When('I open Activity Tracker from the sidebar', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.openActivityTrackerFromSidebar();
+});
+
+Then('the activity log should contain {string}', async function (text) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.expectActivityLogContains(text);
+});
+
+When('I open the working calendar dialog', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.openWorkingCalendarDialog();
+});
+
+When('I toggle working calendar days {string} and {string}', async function (day1, day2) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.toggleWorkingCalendarDays([day1, day2]);
+});
+
+When('I toggle working calendar day {string}', async function (day) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.toggleWorkingCalendarDays([day]);
+});
+
+When('I save the working calendar dialog', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.saveWorkingCalendarDialog();
+});
+
+Then('the working calendar updated toast should appear', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.expectWorkingCalendarUpdatedToast();
+});
+
+When('I add a public holiday named {string} in the working calendar dialog', async function (name) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.addWorkingCalendarPublicHoliday(name);
+});
+
+When('I remove the first public holiday in the working calendar dialog', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.removeFirstWorkingCalendarPublicHoliday();
+});
+
+When('I set working calendar start time to AM hours', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.setWorkingCalendarStartTimeToAm();
+});
+
+When('I set working calendar end time to PM hours', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.setWorkingCalendarEndTimeToPm();
+});
+
+Then('the today indicator should be visible in the gantt chart', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.expectTodayIndicatorVisibleInGanttChart();
+});
