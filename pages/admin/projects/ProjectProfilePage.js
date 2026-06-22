@@ -17,6 +17,15 @@ class ProjectProfilePage extends BasePage {
     await this.page.getByRole('button', { name }).click();
   }
 
+  /** True when project profile module headings are visible (already inside a project). */
+  async isInsideProjectProfile() {
+    const main = this.page.locator('main, [role="main"]').first();
+    return main
+      .getByRole('button', { name: 'Project Management' })
+      .isVisible({ timeout: 2000 })
+      .catch(() => false);
+  }
+
   async clickModuleCard(name) {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const text = new RegExp(`^\\s*${escaped}\\s*$`, 'i');
@@ -36,6 +45,53 @@ class ProjectProfilePage extends BasePage {
         await this.page.waitForLoadState('domcontentloaded');
         return;
       }
+    }
+
+    // Schedule card: lives in a MUI grid on Project Management; generic card matching often misses it.
+    // Prefer the grid cell from the app (plus stable fallback if the emotion class hash changes, or by label).
+    if ((name || '').trim().toLowerCase() === 'schedule') {
+      const scheduleTimeout = 40000;
+      const exactGridCell = scope.locator(
+        "div[class='MuiGrid-root MuiGrid-container MuiGrid-spacing-xs-2 css-isbt42'] div:nth-child(2) div:nth-child(1)"
+      );
+      const stableGridCell = scope
+        .locator('div.MuiGrid-root.MuiGrid-container.MuiGrid-spacing-xs-2')
+        .first()
+        .locator('div:nth-child(2) div:nth-child(1)')
+        .first();
+      // Avoid matching both a wrapper and inner <p>Schedule</p> (strict mode); prefer card-like targets.
+      const scheduleByLabel = scope
+        .locator('div.MuiGrid-root.MuiGrid-container.MuiGrid-spacing-xs-2')
+        .locator('.MuiCard-root, .MuiPaper-root, [role="button"], a')
+        .filter({ hasText: text })
+        .first();
+
+      // .or() can match multiple visible nodes; .first() picks one target for strict assertions/clicks.
+      const scheduleCard = exactGridCell.or(stableGridCell).or(scheduleByLabel).first();
+      await expect(scheduleCard).toBeVisible({ timeout: scheduleTimeout });
+      await scheduleCard.scrollIntoViewIfNeeded().catch(() => {});
+      await scheduleCard.click({ timeout: scheduleTimeout });
+      await this.page.waitForLoadState('domcontentloaded');
+      return;
+    }
+
+    // Task card: same Project Management grid as Schedule; generic card matching often misses it.
+    if ((name || '').trim().toLowerCase() === 'task') {
+      const taskTimeout = 40000;
+      const grid = scope
+        .locator('div.MuiGrid-root.MuiGrid-container.MuiGrid-spacing-xs-2, motion.div.MuiGrid-root.MuiGrid-container.MuiGrid-spacing-xs-2')
+        .first();
+      const taskByLabel = grid
+        .locator('.MuiCard-root, .MuiPaper-root, [role="button"], a, div')
+        .filter({ hasText: text })
+        .first();
+      const taskCell = grid.locator('div').filter({ has: scope.getByText(text) }).first();
+      const taskCard = taskByLabel.or(taskCell).first();
+      await expect(taskCard).toBeVisible({ timeout: taskTimeout });
+      await taskCard.scrollIntoViewIfNeeded().catch(() => {});
+      await taskCard.click({ timeout: taskTimeout });
+      await this.page.waitForLoadState('domcontentloaded');
+      return;
     }
 
     // PROBLEM: the module label can exist in the DOM but be CSS-hidden (sidebar duplicates).
