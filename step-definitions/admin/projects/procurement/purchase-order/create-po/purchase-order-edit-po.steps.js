@@ -49,7 +49,7 @@ When(
   { timeout: 120000 },
   async function (name, description, quantity, unit, rate) {
     const po = getPurchaseOrderEditPoPage(this);
-    await po.fillLastPoLineItemRow({
+    await po.fillNewPoLineItemOnEditForm({
       itemName: name,
       description,
       quantity,
@@ -60,28 +60,10 @@ When(
 );
 
 When(
-  'I open the purchase order action menu and choose update',
+  'I compose and send the purchase order email from the edit form',
   { timeout: 120000 },
   async function () {
     const po = getPurchaseOrderEditPoPage(this);
-    await po.openActionMenuAndChooseUpdate();
-  }
-);
-
-Then(
-  'I should see the purchase order updated success toast',
-  { timeout: 180000 },
-  async function () {
-    const po = getPurchaseOrderEditPoPage(this);
-    await po.expectPurchaseOrderUpdatedSuccessToast();
-  }
-);
-
-When(
-  'I wait for the purchase order list after update redirect',
-  { timeout: 180000 },
-  async function () {
-    const po = getPurchaseOrderEditPoPage(this);
-    await po.waitForPurchaseOrderListAfterUpdateRedirect();
+    await po.composeAndSendEmailFromEditForm();
   }
 );

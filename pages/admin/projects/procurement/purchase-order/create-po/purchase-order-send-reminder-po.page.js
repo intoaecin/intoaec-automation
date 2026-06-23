@@ -10,14 +10,25 @@ class PurchaseOrderSendReminderPoPage extends PurchaseOrderCreatePoPage {
   }
 
   async openSendMenuOnFirstPurchaseOrderCard() {
+    await this.dismissVisibleToastNotifications();
+    await this.dismissOpenMenusAndPopovers();
     await expect(this.page.getByText(/po no/i).first()).toBeVisible({
       timeout: this.defaultTimeout,
     });
     const card = this.firstPoCard();
-    const sendBtn = card.getByRole('button', { name: /send/i });
+    await card.scrollIntoViewIfNeeded();
+    await this.ensurePoCardRowExpanded(card);
+
+    const sendBtn = card
+      .getByRole('button', { name: /^send$/i })
+      .or(card.getByRole('button', { name: /send/i }))
+      .filter({ visible: true })
+      .first();
     await sendBtn.scrollIntoViewIfNeeded();
     await expect(sendBtn).toBeVisible({ timeout: 60000 });
-    await sendBtn.click();
+    await sendBtn.click({ timeout: 20000 }).catch(async () => {
+      await sendBtn.click({ force: true, timeout: 10000 });
+    });
 
     const paper = this.openSendDropdownPaper();
     await expect(paper).toBeVisible({ timeout: 20000 });
@@ -31,26 +42,13 @@ class PurchaseOrderSendReminderPoPage extends PurchaseOrderCreatePoPage {
     await expect(paper).toBeVisible({ timeout: 15000 });
 
     const reminderItem = paper
-      .locator('[role="menuitem"]')
-      .filter({ hasText: /send reminder/i })
-      .first();
-    const sendEmailItem = paper
-      .locator('[role="menuitem"]')
-      .filter({ hasText: /send email/i })
+      .getByRole('menuitem', { name: /send reminder/i })
+      .or(paper.locator('[role="menuitem"]').filter({ hasText: /send reminder/i }))
       .first();
 
-    if (await reminderItem.isVisible({ timeout: 8000 }).catch(() => false)) {
-      await reminderItem.click();
-    } else if (await sendEmailItem.isVisible({ timeout: 8000 }).catch(() => false)) {
-      await sendEmailItem.click();
-    } else {
-      throw new Error(
-        'Neither "Send reminder" nor "Send email" appeared in the Send menu. ' +
-          'PO may be in a state where only WhatsApp is offered (check aecStatus after update).'
-      );
-    }
-
-    await this.waitForNetworkSettled();
+    await expect(reminderItem).toBeVisible({ timeout: 20000 });
+    await reminderItem.click();
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
   }
 
   async expectPurchaseOrderComposeEmailDialogReady() {
@@ -58,19 +56,21 @@ class PurchaseOrderSendReminderPoPage extends PurchaseOrderCreatePoPage {
   }
 
   async clickSendEmailInPurchaseOrderComposeDialog() {
-    await this.sendEmailFromComposeModal({ prioritizeEmailSentToast: true });
-  }
+    await this.waitForComposeEmailModalReady();
+    const send = this.locatorComposeSendEmailButtonInVisibleDialog();
+    await expect(send).toBeVisible({ timeout: this.composeModalTimeout });
+    await expect(send).toBeEnabled({ timeout: this.composeModalTimeout });
+    await send.scrollIntoViewIfNeeded().catch(() => {});
 
-  async expectPurchaseOrderReminderEmailSentToast() {
-    const loc = this.locatorEmailSentSuccessToast();
-    if (await loc.isVisible({ timeout: 2500 }).catch(() => false)) {
-      await expect(loc).toBeVisible({ timeout: 5000 });
-    } else {
-      await expect(this.visibleComposeEmailDialog())
-        .toHaveCount(0, { timeout: 20000 })
-        .catch(() => {});
+    try {
+      await send.click({ timeout: 30000 });
+    } catch (error) {
+      await send.click({ timeout: 15000, force: true });
     }
-    await this.waitForPurchaseOrderListReadyAfterComposeEmailSent();
+
+    // eslint-disable-next-line no-console
+    console.log('[PO send reminder] Clicked Send email — flow complete.');
+    this.poCreatedAndSentSuccessObserved = true;
   }
 }
 

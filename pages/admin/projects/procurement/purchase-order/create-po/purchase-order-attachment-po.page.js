@@ -63,6 +63,155 @@ class PurchaseOrderAttachmentPoPage extends PurchaseOrderDefaultTermsTemplatePoP
       .first();
   }
 
+  attachmentNamePattern() {
+    return /\b(attach|attachments?|upload|browse|choose\s*file|add\s*files?|select\s*file|add\s*document|supporting\s+doc)\b/i;
+  }
+
+  /**
+   * Hidden file inputs cannot use Playwright scrollIntoViewIfNeeded (long retries / page closed).
+   */
+  async safeScrollAttachmentTarget(hit) {
+    if (!hit) {
+      return;
+    }
+    if (hit.kind === 'handle') {
+      await hit.target
+        .evaluate((el) => {
+          el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+        })
+        .catch(() => {});
+      return;
+    }
+
+    const loc = hit.target;
+    const meta = await loc
+      .evaluate((el) => ({
+        tag: el.tagName,
+        type: el.getAttribute('type') || '',
+        visible: !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length),
+      }))
+      .catch(() => ({ tag: '', type: '', visible: false }));
+
+    if (meta.tag === 'INPUT' && meta.type === 'file' && !meta.visible) {
+      await this.scrollPurchaseOrderPageToRevealTermsSection(this.termsHeading());
+      return;
+    }
+
+    if (meta.visible) {
+      await loc.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+      return;
+    }
+
+    await loc
+      .evaluate((el) => {
+        el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+      })
+      .catch(() => {});
+  }
+
+  async locateAttachmentControlNearTerms() {
+    const terms = this.termsMarkerLocator();
+    if (!(await terms.isVisible({ timeout: 2000 }).catch(() => false))) {
+      return null;
+    }
+
+    const nameRe = this.attachmentNamePattern();
+    const scoped = [
+      terms.locator('xpath=following::button[1]'),
+      terms.locator('xpath=following::*[@role="button"][1]'),
+      terms.locator('xpath=following::label[1]'),
+      this.page
+        .locator('div, section')
+        .filter({ has: this.page.getByText(/^attachments?$/i) })
+        .filter({ visible: true })
+        .first()
+        .getByRole('button')
+        .first(),
+      this.page.getByRole('button', { name: nameRe }).filter({ visible: true }).first(),
+      this.page.locator('label').filter({ hasText: nameRe }).filter({ visible: true }).first(),
+    ];
+
+    for (const loc of scoped) {
+      const el = loc.first();
+      if (await el.isVisible({ timeout: 500 }).catch(() => false)) {
+        return { kind: 'locator', target: el };
+      }
+    }
+    return null;
+  }
+
+  attachmentVerificationTimeoutMs() {
+    const raw = process.env.PO_ATTACHMENT_VERIFY_TIMEOUT_MS;
+    const n = raw === undefined || raw === '' ? 12000 : Number(raw);
+    if (Number.isNaN(n)) {
+      return 12000;
+    }
+    return Math.max(3000, Math.min(60000, n));
+  }
+
+  async waitForPoAttachmentUploaded(uploadPath) {
+    const fileName = uploadPath ? path.basename(uploadPath) : null;
+    const fileNameRe = fileName
+      ? new RegExp(fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+      : null;
+
+    await expect
+      .poll(
+        async () => {
+          if (fileNameRe) {
+            const byText = this.page
+              .getByText(fileNameRe)
+              .filter({ visible: true })
+              .first();
+            if (await byText.isVisible({ timeout: 400 }).catch(() => false)) {
+              return true;
+            }
+          }
+
+          const statusText = this.page
+            .getByText(/uploaded|upload complete|attachment added|attached/i)
+            .filter({ visible: true })
+            .first();
+          if (await statusText.isVisible({ timeout: 400 }).catch(() => false)) {
+            return true;
+          }
+
+          const chips = this.page
+            .locator('.MuiChip-root, [class*="chip"], [class*="attachment"]')
+            .filter({ visible: true });
+          const chipCount = await chips.count().catch(() => 0);
+          for (let i = 0; i < Math.min(chipCount, 8); i += 1) {
+            const text = (await chips.nth(i).textContent().catch(() => '')) || '';
+            if (
+              (fileNameRe && fileNameRe.test(text)) ||
+              /attach|upload|image|png|jpg|jpeg|pdf|file/i.test(text)
+            ) {
+              return true;
+            }
+          }
+
+          const fileInputs = this.page.locator('input[type="file"]');
+          const count = await fileInputs.count().catch(() => 0);
+          for (let i = 0; i < count; i += 1) {
+            const value = await fileInputs
+              .nth(i)
+              .evaluate((el) => el.value || '')
+              .catch(() => '');
+            if (value && (!fileName || value.toLowerCase().includes(fileName.toLowerCase()))) {
+              return true;
+            }
+          }
+
+          return false;
+        },
+        {
+          timeout: this.attachmentVerificationTimeoutMs(),
+          intervals: [150, 300, 600, 1000],
+        }
+      )
+      .toBe(true);
+  }
+
   /**
    * First file input in document order after the visible Terms heading (usually Attachments).
    */
@@ -221,8 +370,7 @@ class PurchaseOrderAttachmentPoPage extends PurchaseOrderDefaultTermsTemplatePoP
   }
 
   async locatePurchaseOrderAttachmentTriggerLegacy() {
-    const nameRe =
-      /attach|attachment|upload|browse|choose\s+file|add\s+files?|select\s+file|add\s+document|supporting\s+doc/i;
+    const nameRe = this.attachmentNamePattern();
 
     const fileInputs = this.page.locator('input[type="file"]');
     const n = await fileInputs.count();
@@ -312,6 +460,10 @@ class PurchaseOrderAttachmentPoPage extends PurchaseOrderDefaultTermsTemplatePoP
       if (custom) {
         return custom;
       }
+      const nearTerms = await this.locateAttachmentControlNearTerms();
+      if (nearTerms) {
+        return nearTerms;
+      }
       const following = await this.locateFileInputFollowingTerms();
       if (following) {
         return following;
@@ -323,19 +475,18 @@ class PurchaseOrderAttachmentPoPage extends PurchaseOrderDefaultTermsTemplatePoP
       return null;
     };
 
-    for (let i = 0; i < 24; i += 1) {
-      const hit = await tryPick();
-      if (hit) {
-        if (hit.kind === 'locator') {
-          await hit.target.scrollIntoViewIfNeeded();
-        }
-        return hit;
-      }
+    let hit = await tryPick();
+    if (hit) {
+      await this.safeScrollAttachmentTarget(hit);
+      return hit;
+    }
+
+    for (let i = 0; i < 10; i += 1) {
       await this.page.evaluate(() => {
         window.scrollBy(0, Math.floor(window.innerHeight * 0.55));
       });
       const table = this.page.locator('[aria-label="PO line items table"]');
-      if (await table.isVisible({ timeout: 400 }).catch(() => false)) {
+      if (await table.isVisible({ timeout: 300 }).catch(() => false)) {
         await table.evaluate((tableEl) => {
           let n = tableEl.parentElement;
           for (let d = 0; d < 14 && n; d += 1) {
@@ -350,7 +501,13 @@ class PurchaseOrderAttachmentPoPage extends PurchaseOrderDefaultTermsTemplatePoP
           }
         });
       }
-      await this.page.waitForTimeout(90);
+      await this.page.waitForTimeout(60);
+
+      hit = await tryPick();
+      if (hit) {
+        await this.safeScrollAttachmentTarget(hit);
+        return hit;
+      }
     }
 
     await this.page.evaluate(() => {
@@ -359,19 +516,16 @@ class PurchaseOrderAttachmentPoPage extends PurchaseOrderDefaultTermsTemplatePoP
         se.scrollTop = se.scrollHeight;
       }
     });
-    await this.page.waitForTimeout(200);
 
-    let last = await tryPick();
-    if (last) {
-      if (last.kind === 'locator') {
-        await last.target.scrollIntoViewIfNeeded();
-      }
-      return last;
+    hit = await tryPick();
+    if (hit) {
+      await this.safeScrollAttachmentTarget(hit);
+      return hit;
     }
 
     const domHandle = await this.locateAttachmentElementHandleAfterTerms();
     if (domHandle) {
-      await domHandle.scrollIntoViewIfNeeded();
+      await this.safeScrollAttachmentTarget({ kind: 'handle', target: domHandle });
       return { kind: 'handle', target: domHandle };
     }
 
@@ -438,7 +592,6 @@ class PurchaseOrderAttachmentPoPage extends PurchaseOrderDefaultTermsTemplatePoP
       await this.waitForNetworkSettled();
       return;
     }
-    await this.pauseTermsTemplateDemo();
 
     const auto = this.isAttachmentAutomationMode();
     const uploadPath = auto ? this.resolveAttachmentFilePathForAutomation() : null;
@@ -449,7 +602,7 @@ class PurchaseOrderAttachmentPoPage extends PurchaseOrderDefaultTermsTemplatePoP
         const [fileChooser] = await Promise.all([
           this.page.waitForEvent('filechooser', { timeout: 25000 }),
           resolved.kind === 'locator'
-            ? resolved.target.click({ timeout: 20000 })
+            ? resolved.target.click({ timeout: 20000, force: true })
             : resolved.target.click({ timeout: 20000, force: true }),
         ]);
         await fileChooser.setFiles(uploadPath);
@@ -464,7 +617,6 @@ class PurchaseOrderAttachmentPoPage extends PurchaseOrderDefaultTermsTemplatePoP
           '\n[PO attachment] Explorer mode: pick your file in the system dialog. This click waits until the dialog finishes.\n'
         );
         if (resolved.kind === 'locator') {
-          // For file inputs, visibility is often false (hidden input). Force click still opens Explorer.
           await resolved.target.click({ timeout: explorerMs, force: true });
         } else {
           await resolved.target.click({
@@ -479,9 +631,19 @@ class PurchaseOrderAttachmentPoPage extends PurchaseOrderDefaultTermsTemplatePoP
       }
     }
 
+    const attachmentReady = await this.waitForPoAttachmentUploaded(uploadPath).then(
+      () => true,
+      () => false
+    );
+    if (attachmentReady) {
+      // eslint-disable-next-line no-console
+      console.log('[PO attachment] Upload detected — continuing to Action → Compose email.');
+    }
+
     await this.waitForNetworkSettled();
 
     const skipEnter =
+      attachmentReady ||
       /^1|true$/i.test(String(process.env.PO_ATTACHMENT_SKIP_STEP_ENTER || ''));
     const forceInspector =
       /^1|true$/i.test(String(process.env.PO_ATTACHMENT_MANUAL_INSPECTOR || ''));

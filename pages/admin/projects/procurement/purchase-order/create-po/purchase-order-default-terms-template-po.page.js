@@ -36,6 +36,59 @@ class PurchaseOrderDefaultTermsTemplatePoPage extends PurchaseOrderCreatePoPage 
   }
 
   /**
+   * PO create/edit forms are long; Terms & Conditions sits below line items.
+   * Scroll the window and nested overflow panes until the section is reachable.
+   * @param {import('@playwright/test').Locator} [headingLocator]
+   */
+  async scrollPurchaseOrderPageToRevealTermsSection(headingLocator) {
+    const heading = headingLocator || this.termsHeading();
+
+    await this.ensurePoLineItemsTableVisible().catch(() => {});
+    await this.dismissOpenMenusAndPopovers().catch(() => {});
+
+    for (let i = 0; i < 20; i += 1) {
+      if (await heading.isVisible({ timeout: 800 }).catch(() => false)) {
+        await heading.scrollIntoViewIfNeeded().catch(() => {});
+        return;
+      }
+
+      await this.page.evaluate(() => {
+        window.scrollBy(0, Math.floor(window.innerHeight * 0.5));
+      });
+
+      const table = this.page.locator('[aria-label="PO line items table"]');
+      if (await table.isVisible({ timeout: 400 }).catch(() => false)) {
+        await table.evaluate((tableEl) => {
+          let node = tableEl.parentElement;
+          for (let depth = 0; depth < 14 && node; depth += 1) {
+            const style = window.getComputedStyle(node);
+            if (
+              (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+              node.scrollHeight > node.clientHeight + 16
+            ) {
+              node.scrollTop = Math.min(
+                node.scrollTop + Math.floor(node.clientHeight * 0.6),
+                node.scrollHeight
+              );
+            }
+            node = node.parentElement;
+          }
+        });
+      }
+
+      await this.page.waitForTimeout(80);
+    }
+
+    await this.page.evaluate(() => {
+      const root = document.scrollingElement || document.documentElement;
+      if (root) {
+        root.scrollTop = root.scrollHeight;
+      }
+    });
+    await heading.scrollIntoViewIfNeeded().catch(() => {});
+  }
+
+  /**
    * No text is typed into the T&C editor — only Choose from template → first row → Add.
    */
   async addPurchaseOrderTermsFromFirstTemplate() {

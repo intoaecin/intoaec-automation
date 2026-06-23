@@ -2,7 +2,7 @@
 Feature: Purchase Order — add from library after edit
 
   After opening the PO edit screen: open the library slide-over, select two rows, Add,
-  confirm line items on the form, then Action → Compose email (dialog only; no send).
+  confirm line items on the form, then Action → Compose email → Send email.
 
   Requires My Items or Library Items with at least two rows in the org.
 
@@ -14,7 +14,7 @@ Feature: Purchase Order — add from library after edit
     And I click the "Purchase Order" module card
     And I ensure the Purchase Order list has finished loading
 
-  Scenario: Edit PO add from library then open compose email from Action
+  Scenario: Edit PO add from library then compose and send email from Action
     When I start creating a purchase order from scratch
     And I fill purchase order title with "Add from library PO flow"
     And I add the first vendor from the vendor modal
@@ -33,3 +33,4 @@ Feature: Purchase Order — add from library after edit
     Then the purchase order line item row count should exceed the baseline
     When I open the purchase order action menu and choose compose email
     Then I should see the purchase order compose email dialog from action menu
+    When I click send email in the purchase order compose dialog after add from library

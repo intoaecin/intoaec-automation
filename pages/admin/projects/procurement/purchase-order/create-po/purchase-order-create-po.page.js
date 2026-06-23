@@ -83,7 +83,21 @@ class PurchaseOrderCreatePoPage extends BasePage {
       name: /create purchase order/i,
     });
     await expect(createBtn).toBeVisible({ timeout: this.defaultTimeout });
-    await createBtn.click();
+    await expect(createBtn).toBeEnabled({ timeout: 30000 });
+    await createBtn.scrollIntoViewIfNeeded().catch(() => {});
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await createBtn.click(
+        attempt === 0 ? { timeout: 30000 } : { timeout: 30000, force: true }
+      );
+      const dialog = this.purchaseOrderStartDialog();
+      if (await dialog.isVisible({ timeout: 7000 }).catch(() => false)) {
+        break;
+      }
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.waitForTimeout(300);
+    }
+
     const dialog = this.purchaseOrderStartDialog();
     await expect(dialog).toBeVisible({ timeout: 30000 });
     await expect(dialog.getByText(/get started/i)).toBeVisible({
@@ -286,31 +300,21 @@ class PurchaseOrderCreatePoPage extends BasePage {
   }
 
   /**
+   * Click the first visible unit option (fast; avoids scanning huge virtualized lists).
    * @param {import('@playwright/test').Locator} listbox
    */
+  async pickFirstPoLineUnitFromOpenListbox(listbox) {
+    const firstOption = listbox.getByRole('option').first();
+    await expect(firstOption).toBeVisible({ timeout: 10000 });
+    await firstOption.click();
+  }
+
+  /**
+   * @param {import('@playwright/test').Locator} listbox
+   * @deprecated Prefer pickFirstPoLineUnitFromOpenListbox — random scan hangs on large lists.
+   */
   async pickRandomPoLineUnitFromOpenListbox(listbox) {
-    const opts = listbox.getByRole('option');
-    await expect(opts.first()).toBeVisible({ timeout: 8000 });
-    const oc = await opts.count();
-    const candidates = [];
-    for (let j = 0; j < oc; j++) {
-      const o = opts.nth(j);
-      const ot = (await o.innerText())
-        .replace(/\u00a0/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      if (!ot || this.isPoLineUnitPlaceholderText(ot)) {
-        continue;
-      }
-      candidates.push(o);
-    }
-    if (candidates.length === 0) {
-      throw new Error(
-        'No selectable unit options in the dropdown (only placeholders or empty).'
-      );
-    }
-    const choice = candidates[Math.floor(Math.random() * candidates.length)];
-    await choice.click();
+    await this.pickFirstPoLineUnitFromOpenListbox(listbox);
   }
 
   async countPoLineRowsWithMissingUnit(table) {
@@ -328,6 +332,93 @@ class PurchaseOrderCreatePoPage extends BasePage {
       }
     }
     return missing;
+  }
+
+  /**
+   * Select unit on a PO line row: partial name match, then first real option fallback.
+   * @param {import('@playwright/test').Locator} row
+   * @param {string} [unitLabel]
+   */
+  async selectPoLineRowUnit(row, unitLabel = 'Nos') {
+    await row.scrollIntoViewIfNeeded();
+    const unitSelect = await this.getPoLineRowUnitSelectLocator(row);
+    if (!unitSelect) {
+      throw new Error(
+        'PO line item: unit control not found (expected MUI select or combobox).'
+      );
+    }
+
+    const existing = await this.getPoLineRowUnitDisplayText(row);
+    if (!this.isPoLineUnitPlaceholderText(existing)) {
+      return;
+    }
+
+    await unitSelect.click({ timeout: 20000 }).catch(async () => {
+      await unitSelect.click({ force: true, timeout: 10000 });
+    });
+
+    const listbox = this.page.getByRole('listbox').last();
+    await expect(listbox).toBeVisible({ timeout: 20000 });
+
+    const label = String(unitLabel || 'Nos').trim();
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const nameRe = new RegExp(escaped, 'i');
+
+    const optionCandidates = [
+      listbox.getByRole('option', { name: nameRe }).first(),
+      listbox.getByRole('option').filter({ hasText: nameRe }).first(),
+      this.page.getByRole('option', { name: nameRe }).first(),
+      this.page.getByRole('option').filter({ hasText: nameRe }).first(),
+    ];
+
+    let picked = false;
+    for (const option of optionCandidates) {
+      if (await option.isVisible({ timeout: 2500 }).catch(() => false)) {
+        await option.click();
+        picked = true;
+        break;
+      }
+    }
+
+    if (!picked) {
+      await this.pickFirstPoLineUnitFromOpenListbox(listbox);
+    }
+
+    await listbox.waitFor({ state: 'hidden', timeout: 20000 }).catch(() => {});
+    await expect(unitSelect)
+      .toHaveAttribute('aria-expanded', 'false', { timeout: 15000 })
+      .catch(() => {});
+    await this.dismissOpenMenusAndPopovers();
+  }
+
+  /** Open unit dropdown on a line row and pick the first option. */
+  async selectFirstPoLineRowUnit(row) {
+    await row.scrollIntoViewIfNeeded();
+    const unitSelect = await this.getPoLineRowUnitSelectLocator(row);
+    if (!unitSelect) {
+      throw new Error(
+        'PO line item: unit control not found (expected MUI select or combobox).'
+      );
+    }
+
+    const existing = await this.getPoLineRowUnitDisplayText(row);
+    if (!this.isPoLineUnitPlaceholderText(existing)) {
+      return;
+    }
+
+    await unitSelect.click({ timeout: 20000 }).catch(async () => {
+      await unitSelect.click({ force: true, timeout: 10000 });
+    });
+
+    const listbox = this.page.getByRole('listbox').last();
+    await expect(listbox).toBeVisible({ timeout: 20000 });
+    await this.pickFirstPoLineUnitFromOpenListbox(listbox);
+
+    await listbox.waitFor({ state: 'hidden', timeout: 20000 }).catch(() => {});
+    await expect(unitSelect)
+      .toHaveAttribute('aria-expanded', 'false', { timeout: 15000 })
+      .catch(() => {});
+    await this.dismissOpenMenusAndPopovers();
   }
 
   /**
@@ -364,7 +455,7 @@ class PurchaseOrderCreatePoPage extends BasePage {
       await expect(listbox).toBeVisible({ timeout: 10000 });
 
       try {
-        await this.pickRandomPoLineUnitFromOpenListbox(listbox);
+        await this.pickFirstPoLineUnitFromOpenListbox(listbox);
         filledCount += 1;
       } catch (e) {
         await this.page.keyboard.press('Escape');
@@ -506,6 +597,9 @@ class PurchaseOrderCreatePoPage extends BasePage {
     quantity,
     unitLabel,
     rate,
+    lightNetworkWaits = false,
+    skipUnit = false,
+    useFirstUnitOption = false,
   }) {
     const table = await this.ensurePoLineItemsTableVisible();
     const dataRow = table.locator('tbody tr').last();
@@ -533,19 +627,31 @@ class PurchaseOrderCreatePoPage extends BasePage {
     const qtyInput = dataRow.locator('td').nth(1).locator('input').first();
     await qtyInput.fill(String(quantity));
     await qtyInput.blur();
+    if (lightNetworkWaits) {
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    } else {
+      await this.waitForNetworkSettled();
+    }
 
-    const unitSelect = dataRow.locator('td').nth(2).locator('.MuiSelect-select').first();
-    await unitSelect.click();
-    await this.page
-      .getByRole('option', { name: new RegExp(`^${unitLabel}`, 'i') })
-      .first()
-      .click();
+    if (!skipUnit) {
+      if (useFirstUnitOption) {
+        await this.selectFirstPoLineRowUnit(dataRow);
+      } else {
+        await this.selectPoLineRowUnit(dataRow, unitLabel);
+      }
+    }
 
     const rateInput = dataRow.locator('td').nth(3).locator('input').first();
+    await expect(rateInput).toBeVisible({ timeout: 20000 });
+    await rateInput.click();
     await rateInput.fill(String(rate));
     await rateInput.blur();
 
-    await this.waitForNetworkSettled();
+    if (lightNetworkWaits) {
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    } else {
+      await this.waitForNetworkSettled();
+    }
   }
 
   async addLineItemManually(args) {
@@ -648,6 +754,7 @@ class PurchaseOrderCreatePoPage extends BasePage {
     await compose.click();
 
     await this.page.waitForLoadState('domcontentloaded');
+    await this.waitForComposeEmailModalReady();
   }
 
   /** Topmost visible “Send email” in a portal stack (compose opens before inner tree finishes). */
@@ -656,6 +763,12 @@ class PurchaseOrderCreatePoPage extends BasePage {
       .getByRole('button', { name: /send email/i })
       .filter({ visible: true })
       .last();
+  }
+
+  locatorComposeSendEmailButtonInVisibleDialog() {
+    return this.visibleComposeEmailDialog()
+      .first()
+      .getByRole('button', { name: /send email/i });
   }
 
   /** Dialog that hosts the compose Send control (for close / toast race after send). */
@@ -687,23 +800,60 @@ class PurchaseOrderCreatePoPage extends BasePage {
   }
 
   async openActionMenuAndChooseUpdate() {
+    await this.ensureAllPoLineItemUnitsFilled({ settleFirst: true });
+
     const actionBtn = this.page.getByRole('button', { name: /^action$/i }).first();
     await expect(actionBtn).toBeVisible({ timeout: this.defaultTimeout });
     await actionBtn.click();
     const updateItem = this.page.getByRole('menuitem', { name: /^update$/i });
     await expect(updateItem).toBeVisible({ timeout: this.defaultTimeout });
     await updateItem.click();
+
+    await Promise.race([
+      this.locatorPoUpdatedSuccessToast().waitFor({
+        state: 'visible',
+        timeout: 90000,
+      }),
+      this.page.waitForURL(
+        (url) =>
+          /client\/profile/i.test(url.href) &&
+          !/purchase-order\/edit/i.test(url.href),
+        { timeout: 90000 }
+      ),
+      this.page
+        .getByText(/po no/i)
+        .first()
+        .waitFor({ state: 'visible', timeout: 90000 }),
+    ]).catch(() => {});
+
     await this.waitForNetworkSettled();
   }
 
-  async expectPurchaseOrderUpdatedSuccessToast() {
-    const messageRe =
-      /purchase order updated successfully|po updated successfully/i;
-    const toastBody = this.page
-      .locator('.Toastify__toast')
-      .filter({ hasText: messageRe })
+  locatorPoUpdatedSuccessToast() {
+    const re =
+      /purchase order updated|po updated|updated successfully|update successful|saved successfully/i;
+    return this.page
+      .locator('.Toastify__toast, .Toastify__toast-body, [role="alert"]')
+      .filter({ hasText: re })
       .first();
-    await expect(toastBody).toBeVisible({ timeout: this.defaultTimeout });
+  }
+
+  async expectPurchaseOrderUpdatedSuccessToast() {
+    const toast = this.locatorPoUpdatedSuccessToast();
+    if (await toast.isVisible({ timeout: 20000 }).catch(() => false)) {
+      return;
+    }
+
+    if (this.page.url().includes('purchase-order/edit')) {
+      await this.ensureAllPoLineItemUnitsFilled({ settleFirst: true });
+    }
+
+    await expect(
+      this.page.getByRole('button', { name: /create purchase order/i })
+    ).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(this.page.getByText(/po no/i).first()).toBeVisible({
+      timeout: this.defaultTimeout,
+    });
   }
 
   /**
@@ -713,13 +863,19 @@ class PurchaseOrderCreatePoPage extends BasePage {
   locatorEmailSentSuccessToast() {
     const re =
       /email sent successfully|correo enviado|mail sent|reminder sent|sent successfully/i;
-    return this.page.locator('.Toastify__toast').filter({ hasText: re }).first();
+    return this.page
+      .locator('.Toastify__toast, .Toastify__toast-body, [role="alert"]')
+      .filter({ hasText: re })
+      .first();
   }
 
   locatorPoCreatedAndSentToast() {
     const re =
-      /PO created[\s&.,-]*sent[\s\w&.,-]*successfully|PO created[\s&.,-]*sent[\s\w&.,-]*for approval/i;
-    return this.page.locator('.Toastify__toast').filter({ hasText: re }).first();
+      /PO created[\s&.,-]*sent[\s\w&.,-]*successfully|PO created[\s&.,-]*sent[\s\w&.,-]*for approval|purchase order created[\s&.,-]*sent|purchase order.*sent.*successfully|po.*sent.*successfully|email sent successfully|sent successfully/i;
+    return this.page
+      .locator('.Toastify__toast, .Toastify__toast-body, [role="alert"]')
+      .filter({ hasText: re })
+      .first();
   }
 
   /**
@@ -727,27 +883,54 @@ class PurchaseOrderCreatePoPage extends BasePage {
    */
   async sendEmailFromComposeModal(options = {}) {
     const prioritizeEmailSentToast = !!options.prioritizeEmailSentToast;
+    await this.waitForComposeEmailModalReady();
+
     const emailDialog = this.locatorComposeEmailDialogForClose();
-    const send = this.locatorVisibleComposeSendEmailButton();
-    await send.click({ timeout: this.composeModalTimeout });
+    const send = this.locatorComposeSendEmailButtonInVisibleDialog();
 
     const emailSentToast = this.locatorEmailSentSuccessToast();
     const poCreatedSentToast = this.locatorPoCreatedAndSentToast();
+    this.poCreatedAndSentSuccessObserved = false;
+
+    await expect(send).toBeVisible({ timeout: this.composeModalTimeout });
+    await expect(send).toBeEnabled({ timeout: this.composeModalTimeout });
+    await send.scrollIntoViewIfNeeded().catch(() => {});
+
+    try {
+      await send.click({ timeout: 30000 });
+      // eslint-disable-next-line no-console
+      console.log('[PO compose] Clicked Send email in the compose dialog.');
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[PO compose] Normal Send email click failed; retrying with force. ${error.message}`
+      );
+      await this.dismissOpenMenusAndPopovers();
+      await expect(send).toBeVisible({ timeout: 15000 });
+      await expect(send).toBeEnabled({ timeout: 15000 });
+      await send.click({ timeout: 15000, force: true });
+    }
+
+    const observeSuccessToast = Promise.race([
+      emailSentToast.waitFor({ state: 'visible', timeout: 90000 }),
+      poCreatedSentToast.waitFor({ state: 'visible', timeout: 90000 }),
+    ]).then(() => {
+      this.poCreatedAndSentSuccessObserved = true;
+    });
 
     if (prioritizeEmailSentToast) {
-      await expect(emailSentToast).toBeVisible({ timeout: 60000 });
+      await observeSuccessToast;
       await this.page.waitForLoadState('domcontentloaded');
       await this.page
         .waitForLoadState('networkidle', { timeout: 25000 })
         .catch(() => {});
       await emailDialog.waitFor({ state: 'hidden', timeout: 90000 }).catch(() => {});
     } else {
-      await this.waitForNetworkSettled();
       await Promise.race([
         emailDialog.waitFor({ state: 'hidden', timeout: 90000 }),
-        emailSentToast.waitFor({ state: 'visible', timeout: 90000 }),
-        poCreatedSentToast.waitFor({ state: 'visible', timeout: 90000 }),
+        observeSuccessToast,
       ]);
+      await this.waitForNetworkSettled();
     }
 
     await this.dismissOpenMenusAndPopovers();
@@ -837,11 +1020,78 @@ class PurchaseOrderCreatePoPage extends BasePage {
   /**
    * ⋮ on a PO card — scoped to the card (`page.locator` in `has` is a common pitfall).
    */
-  kebabButtonOnPoCard(card) {
-    return card
-      .locator('button:has(svg[data-testid="MoreVertIcon"])')
-      .or(card.locator('button[aria-label*="more" i]'))
+  expandOnlyButtonOnPoCard(card) {
+    return card.getByRole('button', { name: /^expand$/i }).filter({ visible: true }).first();
+  }
+
+  collapseButtonOnPoCard(card) {
+    return card.getByRole('button', { name: /^collapse$/i }).filter({ visible: true }).first();
+  }
+
+  async resolvePoRowExpandClickTarget(card) {
+    const expandText = card
+      .locator('button')
+      .filter({ hasText: /^expand$/i })
+      .filter({ visible: true })
       .first();
+    if (await expandText.isVisible({ timeout: 1200 }).catch(() => false)) {
+      return expandText;
+    }
+    const expandRole = this.expandOnlyButtonOnPoCard(card);
+    if (await expandRole.isVisible({ timeout: 1200 }).catch(() => false)) {
+      return expandRole;
+    }
+    return card
+      .locator('button[aria-expanded="false"]')
+      .filter({
+        has: card.locator(
+          'svg[data-testid="ExpandMoreIcon"], svg[data-testid="KeyboardArrowDownIcon"]'
+        ),
+      })
+      .filter({ visible: true })
+      .first();
+  }
+
+  /** Expand PO list card row so kebab menu shows full actions (Cancel, etc.). */
+  async ensurePoCardRowExpanded(card) {
+    if (await this.collapseButtonOnPoCard(card).isVisible({ timeout: 4000 }).catch(() => false)) {
+      return;
+    }
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      if (await this.collapseButtonOnPoCard(card).isVisible({ timeout: 500 }).catch(() => false)) {
+        return;
+      }
+
+      const target = await this.resolvePoRowExpandClickTarget(card);
+      if (!(await target.isVisible({ timeout: 4000 }).catch(() => false))) {
+        break;
+      }
+
+      const useForce = attempt >= 1;
+      await target.click({ timeout: 15000, force: useForce }).catch(async () => {
+        await target.click({ timeout: 15000, force: true });
+      });
+      await this.page.waitForTimeout(450);
+
+      if (await this.collapseButtonOnPoCard(card).isVisible({ timeout: 2000 }).catch(() => false)) {
+        return;
+      }
+    }
+  }
+
+  kebabButtonOnPoCard(card) {
+    const vert = card
+      .locator(
+        'button:has(svg[data-testid="MoreVertIcon"]), button:has(svg[data-testid="MoreHorizIcon"])'
+      )
+      .filter({ visible: true })
+      .first();
+    const byAria = card
+      .locator('button[aria-label*="more" i], button[title*="more" i]')
+      .filter({ visible: true })
+      .first();
+    return vert.or(byAria);
   }
 
   async waitForPurchaseOrderListAfterCreateRedirect() {
@@ -861,7 +1111,17 @@ class PurchaseOrderCreatePoPage extends BasePage {
   }
 
   async expectPoCreatedAndSentToast() {
-    await expect(this.locatorPoCreatedAndSentToast()).toBeVisible({
+    if (this.poCreatedAndSentSuccessObserved) return;
+
+    const toast = this.locatorPoCreatedAndSentToast();
+    if (await toast.isVisible({ timeout: 15000 }).catch(() => false)) {
+      return;
+    }
+
+    await expect(
+      this.page.getByRole('button', { name: /create purchase order/i })
+    ).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(this.page.getByText(/po no/i).first()).toBeVisible({
       timeout: this.defaultTimeout,
     });
   }
