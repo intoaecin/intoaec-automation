@@ -18,19 +18,55 @@ class ProjectNavigationPage extends BasePage {
     this.projectRows = page.locator("tbody tr");
   }
 
+  async tryClick(locator, timeout = 5000) {
+    if (!(await locator.isVisible({ timeout }).catch(() => false))) {
+      return false;
+    }
+    await locator.scrollIntoViewIfNeeded().catch(() => {});
+    await locator.click({ timeout: 15000, force: true });
+    return true;
+  }
+
   async navigateToProjects() {
     const rowCount = await this.projectRows.count().catch(() => 0);
     if (rowCount > 0) {
       return;
     }
-    await expect(this.projectsLink).toBeVisible({
-      timeout: this.defaultTimeout,
-    });
-    await this.projectsLink.click();
+
+    const candidates = [
+      this.projectsLink,
+      this.page.getByRole("link", { name: /clients\/projects|clients|projects/i }).first(),
+      this.page.getByRole("button", { name: /clients\/projects|clients|projects/i }).first(),
+      this.page
+        .locator('aside, nav, [role="navigation"]')
+        .locator('a, button, [role="link"], [role="button"]')
+        .filter({ hasText: /clients\/projects|clients|projects/i })
+        .first(),
+      this.page
+        .locator('a[href*="client" i], a[href*="project" i]')
+        .filter({ visible: true })
+        .first(),
+    ];
+
+    let clicked = false;
+    for (const candidate of candidates) {
+      if (await this.tryClick(candidate)) {
+        clicked = true;
+        break;
+      }
+    }
+
+    if (!clicked) {
+      await expect(this.projectsLink).toBeVisible({
+        timeout: this.defaultTimeout,
+      });
+      await this.projectsLink.click();
+    }
+
     await this.page.waitForLoadState("domcontentloaded").catch(() => {});
     await expect(async () => {
       expect(await this.projectRows.count()).toBeGreaterThan(0);
-    }).toPass({ timeout: this.defaultTimeout, intervals: [1000, 2000, 3000] });
+    }).toPass({ timeout: this.defaultTimeout, intervals: [500, 1000, 2000, 3000] });
   }
 
   async clickFirstProject() {

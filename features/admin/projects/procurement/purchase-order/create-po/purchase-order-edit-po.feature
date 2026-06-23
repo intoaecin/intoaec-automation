@@ -1,7 +1,7 @@
 @smoke @po @procurement @create-po @po-edit
-Feature: Purchase Order — edit PO and update
+Feature: Purchase Order — edit PO and compose send
 
-  Create and send a PO, then edit from the card menu, add a line, and Action → Update.
+  Create and send a PO, then edit from the card menu, add a second line, and Action → Compose email → Send.
 
   Background:
     Given I am logged in
@@ -11,7 +11,7 @@ Feature: Purchase Order — edit PO and update
     And I click the "Purchase Order" module card
     And I ensure the Purchase Order list has finished loading
 
-  Scenario: Edit purchase order from list and update successfully
+  Scenario: Edit purchase order from list add line and compose send email
     When I start creating a purchase order from scratch
     And I fill purchase order title with "Edit PO flow"
     And I add the first vendor from the vendor modal
@@ -24,6 +24,4 @@ Feature: Purchase Order — edit PO and update
     Then I should see the purchase order edit form loaded
     When I click add manually on the purchase order form
     And I fill the new PO line item with name "copper wire" description "bulk line" quantity "20" unit "Nos" rate "30000"
-    When I open the purchase order action menu and choose update
-    Then I should see the purchase order updated success toast
-    When I wait for the purchase order list after update redirect
+    When I compose and send the purchase order email from the edit form

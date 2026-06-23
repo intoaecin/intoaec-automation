@@ -34,6 +34,11 @@ class ProjectProfilePage extends BasePage {
     const main = this.page.locator('main, [role="main"]').first();
     const scope = (await main.isVisible({ timeout: 1500 }).catch(() => false)) ? main : this.page;
 
+    if ((name || '').trim().toLowerCase() === 'purchase order') {
+      await this.clickPurchaseOrderModuleCard(scope, text);
+      return;
+    }
+
     // Targeted fallback for Estimate card: the UI has multiple "Estimate" text nodes
     // and generic card/container matching can sometimes click the wrong module.
     // This mirrors the stable selector observed in Playwright inspector for this app.
@@ -97,7 +102,7 @@ class ProjectProfilePage extends BasePage {
     // PROBLEM: the module label can exist in the DOM but be CSS-hidden (sidebar duplicates).
     // SOLUTION: click a *visible* module card/container within `main` that contains the label text.
     const candidates = scope
-      .locator('.MuiCard-root, .MuiPaper-root, [role="button"], button, a, [role="link"]')
+      .locator('.MuiCard-root, .MuiPaper-root, [role="tab"], [role="button"], button, a, [role="link"]')
       .filter({ has: scope.getByText(text) });
 
     const count = await candidates.count();
@@ -117,6 +122,51 @@ class ProjectProfilePage extends BasePage {
     await fallback.scrollIntoViewIfNeeded().catch(() => {});
     await fallback.click({ timeout: 60000, force: true });
     await this.page.waitForLoadState('domcontentloaded');
+  }
+
+  async clickPurchaseOrderModuleCard(scope, text) {
+    const createPurchaseOrder = this.page.getByRole('button', {
+      name: /create purchase order/i,
+    });
+
+    if (await createPurchaseOrder.isVisible({ timeout: 1500 }).catch(() => false)) {
+      return;
+    }
+
+    const candidates = [
+      scope.getByRole('tab', { name: text }).first(),
+      scope.getByRole('button', { name: text }).first(),
+      scope
+        .locator('[role="tab"], .MuiTab-root, .MuiCard-root, .MuiPaper-root, [role="button"], button, a, [role="link"]')
+        .filter({ hasText: text })
+        .first(),
+      scope
+        .locator('div, span, p')
+        .filter({ hasText: text })
+        .filter({ visible: true })
+        .first(),
+    ];
+
+    for (const candidate of candidates) {
+      if (!(await candidate.isVisible({ timeout: 3000 }).catch(() => false))) {
+        continue;
+      }
+
+      await candidate.scrollIntoViewIfNeeded().catch(() => {});
+      await candidate.click({ timeout: 30000 }).catch(async () => {
+        await candidate.click({ timeout: 30000, force: true });
+      });
+      await this.page.waitForLoadState('domcontentloaded');
+      await this.page
+        .waitForLoadState('networkidle', { timeout: 20000 })
+        .catch(() => {});
+
+      if (await createPurchaseOrder.isVisible({ timeout: 15000 }).catch(() => false)) {
+        return;
+      }
+    }
+
+    await expect(createPurchaseOrder).toBeVisible({ timeout: 60000 });
   }
 }
 
