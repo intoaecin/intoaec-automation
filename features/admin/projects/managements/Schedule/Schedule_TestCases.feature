@@ -3,7 +3,7 @@
 #
 # TS-01 Add Schedule     — @TS01 @TC01 … @TS01 @TC16  (complete)
 # TS-02 Update Schedule    — @TS02 @TC17 … @TS02 @TC29  (complete)
-# TS-03 Remove in edit     — @TS03 @TC30 … @TS03 @TC34  (depends on TC-29 → "3RD SCENARIO")
+# TS-03 Remove in edit     — @TS03 @TC30 … @TS03 @TC35  (TC-35 depends on TC-15 → "phase 15")
 # TS-04 Delete Schedule    — @TS04 @TC36 … @TS04 @TC38
 # TS-06 Add Milestone      — @TS06 @TC40 … @TS06 @TC50
 # TS-07 Update Milestone   — @TS07 @TC51 … @TS07 @TC61
@@ -331,6 +331,7 @@ Feature: Schedule — incremental test cases
     And I open the create schedule panel
     Then the add schedule off canvas should be open
     When I fill the schedule create form with name "phase 15"
+    And I select a random phase on the schedule create form
     And I open the assignees dropdown on the schedule create form
     Then the schedule create form assignees list should be visible
     When I select up to 2 assignees on the schedule create form
@@ -520,9 +521,10 @@ Feature: Schedule — incremental test cases
   @TS03 @TC32 @regression @positive
   Scenario: TC-32 — Edit schedule by removing task
     When I switch schedule to list view
-    And I open the edit option for a random schedule from the list row menu
+    And I open the edit option for schedule "phase 10" from the list row menu
     Then the edit schedule off canvas should be open
     When I expand additional details on the schedule create form
+    And I scroll down on the schedule create form
     And I remove the first task on the open schedule edit form
     Then the first task should be removed on the open schedule edit form
     When I save the open schedule edit form
@@ -532,7 +534,7 @@ Feature: Schedule — incremental test cases
   @TS03 @TC33 @regression @positive
   Scenario: TC-33 — Edit schedule by removing reminder
     When I switch schedule to list view
-    And I open the edit option for a random schedule from the list row menu
+    And I open the edit option for schedule "phase 14" from the list row menu
     Then the edit schedule off canvas should be open
     When I expand additional details on the schedule create form
     And I remove the first reminder on the open schedule edit form
@@ -549,6 +551,29 @@ Feature: Schedule — incremental test cases
     Then the edit schedule off canvas should be open
     When I clear the phase on the open schedule edit form
     Then the schedule create form phase field should be empty
+    When I save the open schedule edit form
+    Then the schedule form panel should be closed
+
+  # --- TC-35 (edit schedule — remove all added fields at once) ---------------
+  # Depends on TS-01 TC-15 creating "phase 15" with phase, assignees, description, task, reminder.
+  @TS03 @TC35 @regression @positive
+  Scenario: TC-35 — Edit schedule remove all added fields at once
+    When I switch schedule to list view
+    And I search for schedule "phase 15" in the schedule list
+    And I open the edit option for schedule "phase 15" from the list row menu
+    Then the edit schedule off canvas should be open
+    When I clear the phase on the open schedule edit form
+    Then the schedule create form phase field should be empty
+    When I remove assignee on open schedule edit form
+    Then the schedule create form assignees field should be empty
+    When I clear the description on the open schedule edit form
+    Then the schedule create form description field should be empty
+    When I expand additional details on the schedule create form
+    And I scroll down on the schedule create form
+    And I remove the first task on the open schedule edit form
+    Then the first task should be removed on the open schedule edit form
+    And I remove the first reminder on the open schedule edit form
+    Then the first reminder should be removed on the open schedule edit form
     When I save the open schedule edit form
     Then the schedule form panel should be closed
 

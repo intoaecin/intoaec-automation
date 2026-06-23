@@ -693,6 +693,11 @@ When('I expand additional details on the schedule create form', async function (
   await schedulePage.expandScheduleCreateFormAdditionalDetails();
 });
 
+When('I scroll down on the schedule create form', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.scrollScheduleCreateFormDown();
+});
+
 When('I add a new task named {string} on the schedule create form', async function (taskName) {
   const schedulePage = getSchedulePage(this);
   await schedulePage.logStep(`Adding new task: ${taskName}`);

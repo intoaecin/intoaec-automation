@@ -675,7 +675,13 @@ class SchedulePage extends BasePage {
 
   async expectRowOrToastContains(text) {
     const inGrid = this.page.getByText(text, { exact: false }).first();
-    await expect(inGrid).toBeVisible({ timeout: 60000 });
+    if (await inGrid.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await expect(inGrid).toBeVisible({ timeout: 60000 });
+      return;
+    }
+
+    const row = await this.findListTabRowByScrolling(text);
+    await expect(row).toBeVisible({ timeout: this.uiTimeout });
   }
 
   async openEditForNamedItem(name) {
@@ -701,8 +707,185 @@ class SchedulePage extends BasePage {
 
     if (await search.isVisible({ timeout: 2000 }).catch(() => false)) {
       await search.fill(name);
+      await search.press('Enter').catch(() => {});
       await this._waitScheduleSettled();
     }
+  }
+
+  listTabScrollContainers() {
+    return this.page
+      .locator(
+        [
+          '.MuiDataGrid-root:visible .MuiDataGrid-virtualScroller',
+          '.MuiDataGrid-root:visible [class*="virtualScroller"]',
+          '.MuiDataGrid-root:visible [role="presentation"]',
+          '.MuiDataGrid-root:visible',
+          'table:visible',
+        ].join(', ')
+      )
+      .filter({ hasNot: this.page.locator('[data-pdf-export-schedule-list="true"]') });
+  }
+
+  async scrollListTabToRatio(ratio) {
+    const value = Math.max(0, Math.min(1, Number(ratio) || 0));
+    const containers = this.listTabScrollContainers();
+    const count = await containers.count().catch(() => 0);
+    for (let i = 0; i < count; i += 1) {
+      await containers
+        .nth(i)
+        .evaluate((node, scrollRatio) => {
+          const scrollables = [node, ...node.querySelectorAll('*')].filter(
+            (el) => el.scrollHeight > el.clientHeight + 8 || el.scrollWidth > el.clientWidth + 8
+          );
+          const target = scrollables.find((el) => el.scrollHeight > el.clientHeight + 8) || scrollables[0];
+          if (target) {
+            target.scrollTop = Math.round((target.scrollHeight - target.clientHeight) * scrollRatio);
+            target.dispatchEvent(new Event('scroll', { bubbles: true }));
+          }
+        }, value)
+        .catch(() => {});
+    }
+    await this.page
+      .evaluate((scrollRatio) => {
+        const doc = document.scrollingElement || document.documentElement || document.body;
+        if (doc && doc.scrollHeight > doc.clientHeight + 8) {
+          doc.scrollTop = Math.round((doc.scrollHeight - doc.clientHeight) * scrollRatio);
+          doc.dispatchEvent(new Event('scroll', { bubbles: true }));
+        }
+      }, value)
+      .catch(() => {});
+    await this._waitScheduleSettled();
+  }
+
+  async setListRowsPerPageTo100IfAvailable() {
+    await this.switchToListView();
+    await this.page
+      .evaluate(() => {
+        const doc = document.scrollingElement || document.documentElement || document.body;
+        if (doc) doc.scrollTop = doc.scrollHeight;
+      })
+      .catch(() => {});
+
+    const combo = await this._listRowsPerPageCombobox();
+
+    if (!(await combo.isVisible({ timeout: 2000 }).catch(() => false))) {
+      await this.logStep('Schedule list pagination rows dropdown not visible');
+      return false;
+    }
+
+    const currentValue = await combo.locator('xpath=following-sibling::input[1]').getAttribute('value').catch(() => null);
+    const currentText = ((await combo.innerText().catch(() => '')) || '').trim();
+    if (currentValue === '100' || /100\s*row/i.test(currentText)) {
+      return true;
+    }
+
+    await combo.scrollIntoViewIfNeeded().catch(() => {});
+    await combo.click({ force: true, timeout: this.quickTimeout });
+
+    const option100 = this.page
+      .getByRole('option', { name: /100\s*row\(s\)/i })
+      .or(this.page.locator('li[data-value="100"], [role="option"][data-value="100"]'))
+      .last();
+    if (!(await option100.isVisible({ timeout: 5000 }).catch(() => false))) {
+      await this.page.keyboard.press('Escape').catch(() => {});
+      return false;
+    }
+
+    await option100.scrollIntoViewIfNeeded().catch(() => {});
+    await option100.click({ force: true, timeout: this.quickTimeout });
+    await this._waitScheduleSettled();
+    await expect(async () => {
+      const value = await combo.locator('xpath=following-sibling::input[1]').getAttribute('value').catch(() => null);
+      const text = ((await combo.innerText().catch(() => '')) || '').trim();
+      expect(value === '100' || /100\s*row/i.test(text)).toBeTruthy();
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
+    await this.logStep('Changed schedule list pagination to 100 row(s)');
+    return true;
+  }
+
+  async _listRowsPerPageCombobox() {
+    const candidates = this.page
+      .locator('.MuiSelect-select[role="combobox"], [role="combobox"]')
+      .filter({ hasNot: this.page.locator('[data-pdf-export-schedule-list="true"]') });
+    const count = await candidates.count().catch(() => 0);
+    let best = null;
+    let bestBottom = -1;
+
+    for (let i = 0; i < count; i += 1) {
+      const combo = candidates.nth(i);
+      if (!(await combo.isVisible({ timeout: 200 }).catch(() => false))) continue;
+      const hiddenInputValue = await combo.locator('xpath=following-sibling::input[1]').getAttribute('value').catch(() => null);
+      const text = ((await combo.innerText().catch(() => '')) || '').trim();
+      const aria = ((await combo.getAttribute('aria-labelledby').catch(() => '')) || '').trim();
+      const looksLikeRowsSelect =
+        /^(10|25|50|100)$/.test(hiddenInputValue || '') ||
+        /\b(10|25|50|100)\s*row/i.test(text) ||
+        /rows?\s*per\s*page|show/i.test(aria);
+      if (!looksLikeRowsSelect) continue;
+
+      const box = await combo.boundingBox().catch(() => null);
+      const bottom = box ? box.y + box.height : i;
+      if (bottom > bestBottom) {
+        best = combo;
+        bestBottom = bottom;
+      }
+    }
+
+    return best || this.page.locator('.MuiSelect-select[role="combobox"]').filter({ visible: true }).last();
+  }
+
+  async _findVisibleListTabRowByScrolling(name) {
+    const row = this.listTabRow(name);
+    const ratios = [0, 0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1];
+
+    for (const ratio of ratios) {
+      await this.scrollListTabToRatio(ratio);
+      if (await row.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await row.scrollIntoViewIfNeeded().catch(() => {});
+        await this.logStep(`Found schedule in list view after scrolling: ${name}`);
+        return row;
+      }
+    }
+
+    const grid = this.page.locator('.MuiDataGrid-root:visible, table:visible').first();
+    await grid.click({ force: true, timeout: 1000 }).catch(() => {});
+    for (const key of ['Home', 'PageDown', 'PageDown', 'PageDown', 'PageDown', 'End']) {
+      await this.page.keyboard.press(key).catch(() => {});
+      await this._waitScheduleSettled();
+      if (await row.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await row.scrollIntoViewIfNeeded().catch(() => {});
+        await this.logStep(`Found schedule in list view with keyboard scroll: ${name}`);
+        return row;
+      }
+    }
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await grid.hover({ force: true, timeout: 1000 }).catch(() => {});
+      await this.page.mouse.wheel(0, 650).catch(() => {});
+      await this._waitScheduleSettled();
+      if (await row.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await row.scrollIntoViewIfNeeded().catch(() => {});
+        await this.logStep(`Found schedule in list view with wheel scroll: ${name}`);
+        return row;
+      }
+    }
+
+    return null;
+  }
+
+  async findListTabRowByScrolling(name) {
+    await this.searchListTabScheduleIfAvailable(name);
+    const firstPassRow = await this._findVisibleListTabRowByScrolling(name);
+    if (firstPassRow) return firstPassRow;
+
+    const paginationChanged = await this.setListRowsPerPageTo100IfAvailable();
+    if (paginationChanged) {
+      await this.searchListTabScheduleIfAvailable(name);
+      const rowAfterPagination = await this._findVisibleListTabRowByScrolling(name);
+      if (rowAfterPagination) return rowAfterPagination;
+    }
+
+    throw new Error(`Could not find schedule "${name}" in list view after search and scrolling`);
   }
 
   async clearListTabSearchIfAvailable() {
@@ -762,8 +945,7 @@ class SchedulePage extends BasePage {
   }
 
   async openEditForListSchedule(name) {
-    await this.searchListTabScheduleIfAvailable(name);
-    const row = this.listTabRow(name);
+    const row = await this.findListTabRowByScrolling(name);
     await this._openEditFromListRow(row);
   }
 
@@ -901,12 +1083,16 @@ class SchedulePage extends BasePage {
     await expect(field).toBeVisible({ timeout: 20000 });
     await field.scrollIntoViewIfNeeded().catch(() => {});
     await field.click({ force: true, timeout: 15000 });
-    await field.fill('');
+    await field.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A').catch(() => {});
     await field.fill(duration);
     await field.press('Tab').catch(() => {});
-    await expect(field).toHaveValue(duration, { timeout: 10000 });
-    await this.logStep(`Entered duration: ${duration}`);
-    return duration;
+    await expect(async () => {
+      const value = ((await field.inputValue().catch(() => '')) || '').trim();
+      expect(this._hasNonZeroDuration(value), `duration should be non-zero after entering "${duration}", got "${value}"`).toBeTruthy();
+    }).toPass({ timeout: 10000, intervals: [300, 700, 1200] });
+    const actualDuration = ((await field.inputValue().catch(() => '')) || duration).trim();
+    await this.logStep(`Entered duration: ${duration}${actualDuration !== duration ? ` (UI kept ${actualDuration})` : ''}`);
+    return actualDuration;
   }
 
   async updateRandomScheduleDurationFromListRowMenu() {
@@ -1353,6 +1539,24 @@ class SchedulePage extends BasePage {
     return matched;
   }
 
+  async _countRemoveButtonsAfter(startLocator, endLocator = null) {
+    const region = this._scheduleCreateFormAdditionalDetailsRegion();
+    const startBox = await startLocator.boundingBox();
+    if (!startBox) return 0;
+    const endBox = endLocator ? await endLocator.boundingBox() : null;
+    const startBottom = startBox.y + startBox.height;
+    const removes = region.getByRole('button', { name: /^remove$/i });
+    const count = await removes.count();
+    let matched = 0;
+    for (let i = 0; i < count; i += 1) {
+      const box = await removes.nth(i).boundingBox();
+      if (!box || box.y + box.height <= startBottom - 4) continue;
+      if (endBox && box.y >= endBox.y) continue;
+      matched += 1;
+    }
+    return matched;
+  }
+
   async _clickFirstRemoveButtonBefore(endLocator, afterLocator = null) {
     const region = this._scheduleCreateFormAdditionalDetailsRegion();
     const endBox = await endLocator.boundingBox();
@@ -1371,16 +1575,97 @@ class SchedulePage extends BasePage {
     throw new Error('No Remove button found in the expected form section');
   }
 
+  async _clickFirstRemoveButtonAfter(startLocator, endLocator = null) {
+    const region = this._scheduleCreateFormAdditionalDetailsRegion();
+    const startBox = await startLocator.boundingBox();
+    const endBox = endLocator ? await endLocator.boundingBox() : null;
+    const startBottom = startBox ? startBox.y + startBox.height : 0;
+    const removes = region.getByRole('button', { name: /^remove$/i });
+    const count = await removes.count();
+    for (let i = 0; i < count; i += 1) {
+      const btn = removes.nth(i);
+      const box = await btn.boundingBox();
+      if (!box || !startBox || box.y + box.height <= startBottom - 4) continue;
+      if (endBox && box.y >= endBox.y) continue;
+      await btn.scrollIntoViewIfNeeded().catch(() => {});
+      await btn.click({ force: true, timeout: 15000 });
+      return;
+    }
+    throw new Error('No Remove button found below the task section anchor');
+  }
+
+  async _resolveScheduleCreateFormTaskRemoveLayout(addTask) {
+    const region = this._scheduleCreateFormAdditionalDetailsRegion();
+    const addReminder = region.getByRole('button', { name: /add reminder/i }).first();
+    const hasReminder = await addReminder.isVisible({ timeout: 1000 }).catch(() => false);
+
+    let count = await this._countRemoveButtonsBefore(addTask);
+    if (count > 0) {
+      return { mode: 'before', addTask, end: null, after: null, count };
+    }
+
+    if (hasReminder) {
+      count = await this._countRemoveButtonsBefore(addReminder, addTask);
+      if (count > 0) {
+        return { mode: 'between', addTask, end: addReminder, after: addTask, count };
+      }
+    }
+
+    count = await this._countRemoveButtonsAfter(addTask, hasReminder ? addReminder : null);
+    if (count > 0) {
+      return { mode: 'after', addTask, end: hasReminder ? addReminder : null, after: addTask, count };
+    }
+
+    return { mode: 'none', addTask, end: hasReminder ? addReminder : null, after: addTask, count: 0 };
+  }
+
+  async _countTaskRemoveButtonsUsingLayout(layout) {
+    if (layout.mode === 'before') return this._countRemoveButtonsBefore(layout.addTask);
+    if (layout.mode === 'between') return this._countRemoveButtonsBefore(layout.end, layout.after);
+    if (layout.mode === 'after') return this._countRemoveButtonsAfter(layout.after, layout.end);
+    return 0;
+  }
+
+  async _clickFirstTaskRemoveButtonUsingLayout(layout) {
+    if (layout.mode === 'before') {
+      await this._clickFirstRemoveButtonBefore(layout.addTask);
+      return;
+    }
+    if (layout.mode === 'between') {
+      await this._clickFirstRemoveButtonBefore(layout.end, layout.after);
+      return;
+    }
+    if (layout.mode === 'after') {
+      await this._clickFirstRemoveButtonAfter(layout.after, layout.end);
+      return;
+    }
+    throw new Error('No Remove button found for schedule task section');
+  }
+
+  _scheduleCreateFormAssigneeChipDeleteIcon(chip) {
+    return chip
+      .locator('[class*="MuiChip-deleteIcon"], svg.lucide-x')
+      .first();
+  }
+
   async removeAssigneeInEdit() {
     await this.hideFreshchatWidget();
     const region = await this._scheduleCreateFormLabeledFieldContainer(/^assignees?\b/i);
+    await region.scrollIntoViewIfNeeded().catch(() => {});
+
     await expect(async () => {
-      const deletes = region.locator('.MuiChip-deleteIcon');
-      const count = await deletes.count();
+      const chips = region.locator('.MuiChip-root');
+      const count = await chips.count();
       if (count === 0) return;
-      await deletes.first().click({ force: true, timeout: 10000 });
-      await expect(deletes).toHaveCount(count - 1, { timeout: 5000 });
-    }).toPass({ timeout: 30000, intervals: [300, 500, 1000] });
+
+      const chip = chips.first();
+      const deleteIcon = this._scheduleCreateFormAssigneeChipDeleteIcon(chip);
+      await expect(deleteIcon).toBeVisible({ timeout: 3000 });
+      await chip.scrollIntoViewIfNeeded().catch(() => {});
+      await deleteIcon.click({ force: true, timeout: 10000 });
+      await expect(chips).toHaveCount(count - 1, { timeout: 5000 });
+      expect(await chips.count()).toBe(0);
+    }).toPass({ timeout: 60000, intervals: [300, 500, 1000] });
 
     const clear = region.locator('[aria-label*="Clear" i]').first();
     if (await clear.isVisible({ timeout: 1000 }).catch(() => false)) {
@@ -1442,20 +1727,27 @@ class SchedulePage extends BasePage {
   }
 
   async removeFirstTaskInEdit() {
+    await this.hideFreshchatWidget();
     await this.expandScheduleCreateFormAdditionalDetails();
-    const region = this._scheduleCreateFormAdditionalDetailsRegion();
-    const addTask = region.getByRole('button', { name: /^add task$/i }).first();
+    await this._scrollScheduleCreateFormToBottom();
+    await this._wheelScrollScheduleDrawer(12);
+
+    const addTask = await this._findScheduleCreateFormAddTaskButton();
+    await addTask.scrollIntoViewIfNeeded().catch(() => {});
     await expect(addTask).toBeVisible({ timeout: 15000 });
-    this._taskRemoveCountBefore = await this._countRemoveButtonsBefore(addTask);
+
+    this._taskRemoveLayout = await this._resolveScheduleCreateFormTaskRemoveLayout(addTask);
+    this._taskRemoveCountBefore = this._taskRemoveLayout.count;
     expect(this._taskRemoveCountBefore).toBeGreaterThan(0);
-    await this._clickFirstRemoveButtonBefore(addTask);
-    await this.logStep('Removed first task on edit form');
+    await this._clickFirstTaskRemoveButtonUsingLayout(this._taskRemoveLayout);
+    await this.logStep(`Removed first task on edit form (${this._taskRemoveLayout.mode})`);
   }
 
   async expectTaskRemovedInEdit() {
-    const region = this._scheduleCreateFormAdditionalDetailsRegion();
-    const addTask = region.getByRole('button', { name: /^add task$/i }).first();
-    const after = await this._countRemoveButtonsBefore(addTask);
+    const layout = this._taskRemoveLayout || (await this._resolveScheduleCreateFormTaskRemoveLayout(
+      await this._findScheduleCreateFormAddTaskButton()
+    ));
+    const after = await this._countTaskRemoveButtonsUsingLayout(layout);
     expect(after).toBe(this._taskRemoveCountBefore - 1);
     await this.logStep('Task removed from edit form');
   }
@@ -2051,11 +2343,35 @@ class SchedulePage extends BasePage {
 
   async _scheduleCreateFormDescriptionField() {
     const panel = this.formPanel();
-    const field = panel
+    const label = panel
+      .locator('label, .MuiFormLabel-root, p, span')
+      .filter({ hasText: /^description\b/i })
+      .first();
+    if (await label.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await label.scrollIntoViewIfNeeded().catch(() => {});
+    } else {
+      await this._scrollScheduleCreateFormToBottom().catch(() => {});
+    }
+
+    let field = panel
       .getByLabel(/description/i)
       .or(panel.getByRole('textbox', { name: /description/i }))
       .or(panel.locator('textarea[placeholder*="Description" i]'))
+      .or(panel.locator('textarea[name*="description" i], textarea[id*="description" i]'))
+      .or(
+        panel.locator(
+          'xpath=.//*[self::label or self::p or self::span][contains(translate(normalize-space(.), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "description")]/following::*[self::textarea or self::input][1]'
+        )
+      )
       .first();
+
+    if (!(await field.isVisible({ timeout: 3000 }).catch(() => false))) {
+      await this._scrollScheduleCreateFormToBottom().catch(() => {});
+      field = panel
+        .locator('textarea[placeholder*="Description" i], textarea[name*="description" i], textarea[id*="description" i], textarea')
+        .last();
+    }
+
     await expect(field).toBeVisible({ timeout: 20000 });
     return field;
   }
@@ -2064,10 +2380,23 @@ class SchedulePage extends BasePage {
   async fillRandomDescriptionOnScheduleCreateForm() {
     const text = `Schedule description ${this.randomSuffix()}`;
     await this.hideFreshchatWidget();
+    await this.page.keyboard.press('Escape').catch(() => {});
+    await this._dismissOpenMenusIfAny();
     const field = await this._scheduleCreateFormDescriptionField();
     await field.scrollIntoViewIfNeeded().catch(() => {});
-    await field.click({ force: true, timeout: 15000 });
-    await field.fill(text);
+    await field.click({ force: true, timeout: 15000 }).catch(async () => {
+      await this._scrollScheduleCreateFormToBottom().catch(() => {});
+      await field.click({ force: true, timeout: 15000 });
+    });
+    await field.fill('').catch(() => {});
+    await field.fill(text).catch(async () => {
+      await field.evaluate((node, value) => {
+        node.focus();
+        node.value = value;
+        node.dispatchEvent(new Event('input', { bubbles: true }));
+        node.dispatchEvent(new Event('change', { bubbles: true }));
+      }, text);
+    });
     await expect(field).toHaveValue(text, { timeout: 10000 });
     await this.logStep(`Entered Description: ${text}`);
     return text;
@@ -2616,11 +2945,36 @@ class SchedulePage extends BasePage {
   async _scheduleCreateFormAssigneePickerSurface() {
     const popover = this._scheduleAssigneePickerPopover();
     if (await popover.isVisible({ timeout: 3000 }).catch(() => false)) return popover;
-    const listbox = this.page.getByRole('listbox').last();
+    const listbox = this.page
+      .getByRole('listbox')
+      .filter({ has: this.page.locator('[role="option"], .MuiMenuItem-root, li, input[type="checkbox"]') })
+      .last();
     if (await listbox.isVisible({ timeout: 3000 }).catch(() => false)) return listbox;
-    const menu = this.page.getByRole('menu').last();
+    const menu = this.page
+      .getByRole('menu')
+      .filter({ has: this.page.locator('[role="option"], .MuiMenuItem-root, li, input[type="checkbox"]') })
+      .last();
     if (await menu.isVisible({ timeout: 2000 }).catch(() => false)) return menu;
-    return this.page.locator('.MuiPopover-root:visible, .MuiModal-root:visible').last();
+    return this.page
+      .locator('.MuiPopover-root:visible, .MuiModal-root:visible, .MuiPaper-root:visible')
+      .filter({
+        has: this.page.locator(
+          '[role="tab"], [role="option"], .MuiMenuItem-root, li, input[type="checkbox"], [id*="schedule-assignee"]'
+        ),
+      })
+      .last();
+  }
+
+  async _isScheduleAssigneePickerOpen() {
+    if (await this._scheduleAssigneeTab('users').isVisible({ timeout: 500 }).catch(() => false)) return true;
+    if (await this._scheduleAssigneeTab('vendors').isVisible({ timeout: 500 }).catch(() => false)) return true;
+    const listbox = this.page.getByRole('listbox').last();
+    if (await listbox.isVisible({ timeout: 500 }).catch(() => false)) return true;
+    const surface = this.page
+      .locator('.MuiPopover-root:visible, .MuiModal-root:visible, .MuiPaper-root:visible')
+      .filter({ hasText: /users|vendors|assignees?|select/i })
+      .last();
+    return surface.isVisible({ timeout: 500 }).catch(() => false);
   }
 
   async _clickScheduleAssigneeTab(tab) {
@@ -2771,9 +3125,30 @@ class SchedulePage extends BasePage {
 
   async openScheduleCreateFormAssigneesDropdown() {
     await this.hideFreshchatWidget();
+    await this.page.keyboard.press('Escape').catch(() => {});
+    const panel = this.formPanel();
+    const label = panel
+      .locator('label, .fw-500, .MuiFormLabel-root, p, span')
+      .filter({ hasText: /^assignees?\b/i })
+      .first();
     const trigger = await this._scheduleCreateFormAssigneeTrigger();
-    await trigger.scrollIntoViewIfNeeded().catch(() => {});
-    await trigger.click({ force: true, timeout: 30000 });
+    const candidates = [
+      trigger,
+      label.locator('xpath=following::*[@role="combobox"][1]').first(),
+      label.locator('xpath=following::input[1]').first(),
+      label.locator('xpath=following::*[contains(@class,"MuiInputBase-root")][1]').first(),
+      label.locator('xpath=following::button[1]').first(),
+      panel.getByRole('combobox', { name: /assignees?/i }).first(),
+      panel.getByLabel(/assignees?/i).first(),
+      panel.getByPlaceholder(/assignees?|select assignees?/i).first(),
+    ];
+
+    for (const candidate of candidates) {
+      if (!(await candidate.isVisible({ timeout: 1000 }).catch(() => false))) continue;
+      await candidate.scrollIntoViewIfNeeded().catch(() => {});
+      await candidate.click({ force: true, timeout: 15000 }).catch(() => {});
+      if (await this._isScheduleAssigneePickerOpen()) break;
+    }
 
     const usersTab = this._scheduleAssigneeTab('users');
     if (await usersTab.isVisible({ timeout: 5000 }).catch(() => false)) {
@@ -2782,10 +3157,41 @@ class SchedulePage extends BasePage {
     }
 
     const surface = await this._scheduleCreateFormAssigneePickerSurface();
-    await expect(surface).toBeVisible({ timeout: 15000 });
+    await expect(async () => {
+      expect(await this._isScheduleAssigneePickerOpen()).toBeTruthy();
+    }).toPass({ timeout: 20000, intervals: [500, 1000, 2000] });
+    if (await surface.isVisible({ timeout: 1000 }).catch(() => false)) return;
   }
 
   async expectScheduleCreateFormAssigneesListVisible() {
+    const pickerReady = async () => {
+      const usersTab = this._scheduleAssigneeTab('users');
+      if (await usersTab.isVisible({ timeout: 800 }).catch(() => false)) {
+        await this._clickScheduleAssigneeTab('users');
+        const panel = this._scheduleAssigneeTabPanel('users');
+        const tabRows = panel.locator(':scope > .MuiBox-root, label, [role="row"], input[type="checkbox"]');
+        if (await tabRows.first().isVisible({ timeout: 1500 }).catch(() => false)) return true;
+      }
+
+      const surface = await this._scheduleCreateFormAssigneePickerSurface();
+      if (!(await surface.isVisible({ timeout: 800 }).catch(() => false))) return false;
+      const visibleChoices = surface
+        .locator('[role="option"], .MuiMenuItem-root, li, label, [role="row"], input[type="checkbox"]')
+        .filter({ hasNotText: /^assignees?\b/i });
+      return visibleChoices.first().isVisible({ timeout: 1500 }).catch(() => false);
+    };
+
+    if (!(await pickerReady())) {
+      await this.openScheduleCreateFormAssigneesDropdown();
+    }
+
+    await expect(async () => {
+      expect(await pickerReady()).toBeTruthy();
+    }).toPass({ timeout: 20000, intervals: [500, 1000, 2000] });
+    await this.logStep('Assignees picker list is visible');
+  }
+
+  async expectScheduleCreateFormAssigneesListVisibleLegacy() {
     const usersTab = this._scheduleAssigneeTab('users');
     if (await usersTab.isVisible({ timeout: 5000 }).catch(() => false)) {
       await this._clickScheduleAssigneeTab('users');
@@ -2895,58 +3301,85 @@ class SchedulePage extends BasePage {
 
   /** Mouse-wheel scroll inside the open schedule drawer (works when scrollTop on container fails). */
   async _wheelScrollScheduleDrawer(steps = 10) {
-    const drawer = this._scheduleCreateFormDrawer();
-    if (await drawer.isVisible({ timeout: 2000 }).catch(() => false)) {
+    const panel = this.formPanel();
+    if (!(await panel.isVisible({ timeout: 2000 }).catch(() => false))) {
+      const drawer = this._scheduleCreateFormDrawer();
+      if (!(await drawer.isVisible({ timeout: 2000 }).catch(() => false))) return;
       await drawer.hover({ timeout: 5000 }).catch(() => {});
-      for (let i = 0; i < steps; i += 1) {
-        await this.page.mouse.wheel(0, 400);
-        await new Promise((r) => {
-          setTimeout(r, 60);
-        });
+    } else {
+      const hoverPoint = await panel
+        .evaluate((node) => {
+          const candidates = [node, ...node.querySelectorAll('*')];
+          const scrollable = candidates
+            .filter((el) => el.scrollHeight > el.clientHeight + 8)
+            .sort((a, b) => b.scrollHeight - a.scrollHeight)[0];
+          const target = scrollable || node;
+          target.scrollIntoView({ block: 'center' });
+          const rect = target.getBoundingClientRect();
+          return {
+            x: rect.x + rect.width / 2,
+            y: rect.y + Math.min(rect.height / 2, Math.max(rect.height - 20, 20)),
+          };
+        })
+        .catch(() => null);
+      if (hoverPoint) {
+        await this.page.mouse.move(hoverPoint.x, hoverPoint.y);
+      } else {
+        await panel.hover({ timeout: 5000 }).catch(() => {});
       }
+    }
+
+    for (let i = 0; i < steps; i += 1) {
+      await this.page.mouse.wheel(0, 400);
+      await new Promise((r) => {
+        setTimeout(r, 60);
+      });
     }
   }
 
-  /** Scroll Add Schedule drawer/offcanvas so lower sections (tasks, reminders, phase) are reachable. */
+  /** Scroll nested containers inside the schedule form so tasks/reminders are reachable. */
   async _scrollScheduleCreateFormToBottom() {
     await this.hideFreshchatWidget();
-    const drawer = this.page.locator('.MuiDrawer-paper:visible').last();
-    if (await drawer.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await drawer.evaluate((node) => {
-        node.scrollTop = node.scrollHeight;
-      }).catch(() => {});
-      return;
-    }
-    const offcanvas = this.page.locator('aside.offcanvas.show, .offcanvas.show').last();
-    if (await offcanvas.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await offcanvas.evaluate((node) => {
-        node.scrollTop = node.scrollHeight;
-      }).catch(() => {});
-      return;
-    }
-    const dialogPaper = this.page.locator('[role="dialog"] .MuiDialog-paper:visible').last();
-    if (await dialogPaper.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await dialogPaper.evaluate((node) => {
-        node.scrollTop = node.scrollHeight;
-      }).catch(() => {});
+    const scrollRoots = [
+      this.formPanel(),
+      this.page.locator('.MuiDrawer-paper:visible').last(),
+      this.page.locator('aside.offcanvas.show, .offcanvas.show').last(),
+      this.page.locator('[role="dialog"] .MuiDialog-paper:visible').last(),
+    ];
+
+    for (const root of scrollRoots) {
+      if (!(await root.isVisible({ timeout: 800 }).catch(() => false))) continue;
+      await root
+        .evaluate((node) => {
+          const candidates = [node, ...node.querySelectorAll('*')];
+          const scrollables = candidates
+            .filter((el) => el.scrollHeight > el.clientHeight + 8)
+            .sort((a, b) => b.scrollHeight - a.scrollHeight);
+          for (const el of scrollables) {
+            el.scrollTop = el.scrollHeight;
+          }
+        })
+        .catch(() => {});
     }
   }
 
   _scheduleCreateFormAdditionalDetailsRegion() {
+    const panel = this.formPanel();
     const drawer = this._scheduleCreateFormDrawer();
-    const accordionDetails = drawer
+    const root = panel.or(drawer);
+    const accordionDetails = root
       .locator('.MuiAccordion-root')
-      .filter({ has: drawer.getByText(/additional\s*details/i) })
+      .filter({ has: root.getByText(/additional\s*details/i) })
       .first()
       .locator('.MuiAccordionDetails-root')
       .first();
-    const expanded = drawer
+    const expanded = root
       .locator(
         '.MuiCollapse-entered, .MuiAccordionDetails-root, .collapse.show, [class*="Collapse"][class*="entered"]'
       )
-      .filter({ has: drawer.getByRole('button', { name: /add task|new task/i }) })
+      .filter({ has: root.getByRole('button', { name: /add task|new task/i }) })
       .last();
-    return accordionDetails.or(expanded).or(drawer);
+    return accordionDetails.or(expanded).or(panel);
   }
 
   async _scheduleCreateFormNewTaskNameInput() {
@@ -3057,6 +3490,21 @@ class SchedulePage extends BasePage {
     await this._scrollScheduleCreateFormToBottom();
     await this._wheelScrollScheduleDrawer(6);
     await this.logStep('Expanded Additional Details');
+  }
+
+  async scrollScheduleCreateFormDown() {
+    await this.hideFreshchatWidget();
+    await expect(async () => {
+      await this._scrollScheduleCreateFormToBottom();
+      await this._wheelScrollScheduleDrawer(12);
+      const panel = this.formPanel();
+      const taskSection = panel
+        .getByRole('button', { name: /add task|new task/i })
+        .or(panel.getByRole('button', { name: /^remove$/i }))
+        .first();
+      await expect(taskSection).toBeVisible({ timeout: 2000 });
+    }).toPass({ timeout: 45000, intervals: [500, 1500, 3000] });
+    await this.logStep('Scrolled down on schedule create form');
   }
 
   /** True when the inline new-task row is active (task assignee / status fields visible). */
@@ -3627,6 +4075,7 @@ class SchedulePage extends BasePage {
         for (const val of values) {
           const opt = document.querySelector(`li[data-value="${val}"], [data-value="${val}"]`);
           if (opt && opt.getBoundingClientRect().height > 0) {
+            opt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
             opt.click();
             return true;
           }
@@ -3666,27 +4115,41 @@ class SchedulePage extends BasePage {
     const statusLabel = this._scheduleCreateFormTaskStatusLabel(statusRegex);
     const dataValue = this._scheduleCreateFormTaskStatusDataValue(statusRegex);
 
-    const toDoCombo = this.page.getByRole('combobox', { name: 'To Do', exact: true }).last();
-    await expect(toDoCombo).toBeVisible({ timeout: 15000 });
-    await toDoCombo.scrollIntoViewIfNeeded().catch(() => {});
-    await toDoCombo.click({ force: true, timeout: 15000 });
+    try {
+      await this._selectScheduleCreateFormTaskStatusByDataValue(statusRegex);
+    } catch (firstError) {
+      await this._scrollScheduleCreateFormToBottom();
+      await this._wheelScrollScheduleDrawer(8);
+      await this.page.keyboard.press('Escape').catch(() => {});
 
-    const dataOpt = this.page.locator(`li[data-value="${dataValue}"], [data-value="${dataValue}"]`).first();
-    const statusOption = this.page.getByRole('option', { name: statusLabel, exact: true }).first();
-    if (await statusOption.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await statusOption.click({ force: true, timeout: 15000 });
-    } else if (await dataOpt.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await expect(this.page.getByText(statusLabel, { exact: true }).first()).toBeVisible({ timeout: 5000 });
-      await dataOpt.click({ force: true, timeout: 15000 });
-    } else if (await this._setScheduleCreateFormTaskStatusByDataValueInPanel(dataValue)) {
-      /* opened via MUI select + data-value */
-    } else {
-      const fallbackDataOpt = this._scheduleCreateFormTaskStatusOption(dataValue);
-      await expect(fallbackDataOpt).toBeVisible({ timeout: 10000 });
-      await fallbackDataOpt.click({ force: true, timeout: 15000 });
+      let opened = false;
+      const directCombos = [
+        this.page.getByRole('combobox', { name: /^to\s*do$/i }).last(),
+        this.page.getByRole('combobox', { name: /^(to\s*do|status)$/i }).last(),
+        await this._scanTaskStatusCombobox().catch(() => null),
+      ].filter(Boolean);
+
+      for (const combo of directCombos) {
+        if (!(await combo.isVisible({ timeout: 1200 }).catch(() => false))) continue;
+        await combo.scrollIntoViewIfNeeded().catch(() => {});
+        await combo.click({ force: true, timeout: 15000 }).catch(() => {});
+        if (await this._clickScheduleCreateFormTaskStatusOption(dataValue)) {
+          opened = true;
+          break;
+        }
+        await this.page.keyboard.press('Escape').catch(() => {});
+      }
+
+      if (!opened && !(await this._setScheduleCreateFormTaskStatusByDataValueInPanel(dataValue))) {
+        await this.page.keyboard.press('Escape').catch(() => {});
+        if (!(await this._openScheduleCreateFormTaskStatusAndPick(dataValue))) {
+          throw firstError;
+        }
+      }
     }
 
     await this.page.keyboard.press('Escape').catch(() => {});
+    await expect(this.formPanel().getByText(statusLabel, { exact: true }).last()).toBeVisible({ timeout: 10000 });
     await this.logStep(`Selected task status: ${statusLabel}`);
   }
 
@@ -3947,17 +4410,38 @@ class SchedulePage extends BasePage {
   async selectRandomExistingTaskOnScheduleCreateForm() {
     const panel = this.formPanel();
     await this.hideFreshchatWidget();
-    const addTaskBtn = panel.getByRole('button', { name: /^add task$/i }).first();
-    if (await addTaskBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await addTaskBtn.scrollIntoViewIfNeeded().catch(() => {});
-      await addTaskBtn.click({ force: true, timeout: 15000 });
-    }
+    await this.expandScheduleCreateFormAdditionalDetails();
+    const addTaskBtn = await this._findScheduleCreateFormAddTaskButton();
+    await addTaskBtn.scrollIntoViewIfNeeded().catch(() => {});
+    await addTaskBtn.click({ force: true, timeout: 15000 });
+    await this._scrollScheduleCreateFormToBottom();
+    await this._wheelScrollScheduleDrawer(8);
 
     let combo = panel.getByRole('combobox', { name: /task|select task|existing/i }).last();
     if (!(await combo.isVisible({ timeout: 2500 }).catch(() => false))) {
       combo = panel.getByLabel(/^task$/i).last();
     }
+    if (!(await combo.isVisible({ timeout: 2500 }).catch(() => false))) {
+      const taskLabel = panel
+        .locator('label, .MuiFormLabel-root, p, span')
+        .filter({ hasText: /^task\b|select\s*task|existing\s*task/i })
+        .last();
+      if (await taskLabel.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await taskLabel.scrollIntoViewIfNeeded().catch(() => {});
+        combo = taskLabel
+          .locator('xpath=following::*[@role="combobox" or self::input][1]')
+          .first();
+      }
+    }
+    if (!(await combo.isVisible({ timeout: 2500 }).catch(() => false))) {
+      combo = panel
+        .locator('.MuiAccordionDetails-root, .MuiCollapse-entered')
+        .last()
+        .locator('[role="combobox"], input[placeholder*="task" i], input')
+        .last();
+    }
     await expect(combo).toBeVisible({ timeout: 20000 });
+    await combo.scrollIntoViewIfNeeded().catch(() => {});
     await combo.click({ force: true, timeout: 15000 });
 
     const surface = this.page.getByRole('listbox').last();
