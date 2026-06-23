@@ -93,9 +93,13 @@ class AssetPage extends BasePage {
       .first();
 
     this.searchInput = page
-      .getByPlaceholder(/search\s+for\s+assets/i)
-      .or(page.getByLabel(/search/i))
-      .or(page.locator('input[placeholder*="search" i]'))
+      .getByRole('textbox', { name: /search/i })
+      .or(page.getByPlaceholder(/search/i))
+      .or(
+        page.locator(
+          'input[placeholder*="search" i], input[aria-label*="search" i], [role="search"] input, [contenteditable="true"]'
+        )
+      )
       .first();
 
     this.updateButton = page
@@ -179,9 +183,12 @@ class AssetPage extends BasePage {
   }
 
   async openResources() {
-    await expect(this.resourcesNav).toBeVisible({ timeout: this.defaultTimeout });
-    await this.resourcesNav.click();
-    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    const isManageAssetsVisible = await this.manageAssetsEntry.isVisible().catch(() => false);
+    if (!isManageAssetsVisible) {
+      await expect(this.resourcesNav).toBeVisible({ timeout: this.defaultTimeout });
+      await this.resourcesNav.click();
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    }
   }
 
   async openManageAssets() {
@@ -351,13 +358,38 @@ class AssetPage extends BasePage {
   }
 
   async searchForAsset(name) {
-    if (await this.searchInput.isVisible().catch(() => false)) {
-      await this.searchInput.click().catch(() => {});
-      await this.searchInput.press('Control+A').catch(() => {});
-      await this.searchInput.fill(name);
-      await this.searchInput.press('Tab').catch(() => {});
-      await this.page.waitForTimeout(1000);
+    console.log(`[AssetPage] Searching for asset ${name}`);
+    
+    // First, ensure we are on the Manage Assets list page.
+    const onListPage = await this.addNewButton.isVisible().catch(() => false);
+    if (!onListPage) {
+      console.log('[AssetPage] Not on Manage Assets list page, navigating there');
+      await this.navigateToManageAssets();
     }
+
+    // Now check if the search input is visible. If not, click the search toggle.
+    let isSearchInputVisible = await this.searchInput.isVisible().catch(() => false);
+    if (!isSearchInputVisible) {
+      console.log('[AssetPage] Search input is hidden. Clicking search toggle to reveal it.');
+      const toggle = this.page
+        .getByRole('button', { name: /search/i })
+        .or(this.page.getByText(/search/i))
+        .or(this.page.locator('[data-testid="SearchIcon"], svg[data-testid="SearchIcon"]'))
+        .first();
+      await expect(toggle).toBeVisible({ timeout: this.defaultTimeout });
+      await toggle.click();
+      
+      // Wait for the input to become visible
+      await expect(this.searchInput).toBeVisible({ timeout: 10000 });
+    }
+
+    // Fill the search input
+    await expect(this.searchInput).toBeVisible({ timeout: this.defaultTimeout });
+    await this.searchInput.click().catch(() => {});
+    await this.searchInput.press('Control+A').catch(() => {});
+    await this.searchInput.fill(name);
+    await this.searchInput.press('Tab').catch(() => {});
+    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
   }
 
   async waitForAssetListReady() {
@@ -377,6 +409,18 @@ class AssetPage extends BasePage {
     const tableRow = this.page.locator('tbody tr, .MuiDataGrid-row').filter({ hasText: name }).first();
     const roleRow = this.page.locator('[role="row"]').filter({ hasText: name }).first();
     return tableRow.or(roleRow).first();
+  }
+
+  getRowActionButton(row) {
+    return row
+      .locator('button:has([data-testid="MoreVertIcon"])')
+      .or(row.getByRole('button', { name: /more|action|options|menu|edit|delete/i }))
+      .or(
+        row.locator(
+          'button[aria-label*="more" i], button[aria-label*="action" i], button[aria-label*="menu" i], button'
+        ).last()
+      )
+      .first();
   }
 }
 

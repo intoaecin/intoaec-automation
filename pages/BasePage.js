@@ -1,5 +1,6 @@
 // pages/BasePage.js
 const path = require('path');
+const readline = require('readline');
 const { captureScreenshot, getScreenshotDir } = require('../support/screenshots');
 
 class BasePage {
@@ -25,6 +26,27 @@ class BasePage {
 
   async isVisible(selector) {
     return await this.page.locator(selector).isVisible();
+  }
+
+  async waitForEnterInTerminal(message = 'Press ENTER in the terminal to continue.') {
+    console.log(`[Manual Step] ${message}`);
+
+    if (!process.stdin.isTTY) {
+      console.log('[Manual Step] No interactive terminal detected; continuing without waiting for ENTER.');
+      return;
+    }
+
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    await new Promise((resolve) => {
+      rl.question('', () => {
+        rl.close();
+        resolve();
+      });
+    });
   }
 }
 
