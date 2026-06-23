@@ -5,18 +5,6 @@ class EditAssetPage extends AssetPage {
   constructor(page) {
     super(page);
   }
-
-  getRowActionButton(row) {
-    return row
-      .getByRole('button', { name: /more|action|options|menu|edit/i })
-      .or(
-        row.locator(
-          'button[aria-label*="more" i], button[aria-label*="action" i], button[aria-label*="menu" i], button'
-        ).last()
-      )
-      .first();
-  }
-
   async createAssetForEditing() {
     await this.navigateToManageAssets();
     await this.startCreateFlow();
@@ -50,6 +38,11 @@ class EditAssetPage extends AssetPage {
   async editAllAssetFields() {
     this.editedAssetData = this.buildEditAssetData();
     console.log(`[EditAssetPage] Editing asset to ${this.editedAssetData.name}`);
+    
+    // Log form HTML to debug fields
+    const formHTML = await this.page.locator('form, [role="dialog"], .MuiDrawer-root, [class*="drawer" i]').first().innerHTML().catch((err) => `Error: ${err.message}`);
+    console.log(`[DEBUG] Form HTML:\n${formHTML}`);
+
     await this.fillAssetFields(this.editedAssetData);
   }
 
@@ -63,6 +56,7 @@ class EditAssetPage extends AssetPage {
 
   async verifyAssetUpdatedSuccessfully() {
     const edited = this.editedAssetData;
+    await this.navigateToManageAssets();
     await expect(async () => {
       const toastVisible = await this.page
         .locator('.MuiAlert-root, .MuiSnackbar-root, [role="alert"]')

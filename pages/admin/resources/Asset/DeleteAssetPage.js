@@ -5,18 +5,6 @@ class DeleteAssetPage extends AssetPage {
   constructor(page) {
     super(page);
   }
-
-  getRowActionButton(row) {
-    return row
-      .getByRole('button', { name: /more|action|options|menu|edit|delete/i })
-      .or(
-        row.locator(
-          'button[aria-label*="more" i], button[aria-label*="action" i], button[aria-label*="menu" i], button'
-        ).last()
-      )
-      .first();
-  }
-
   async createAssetForDeletion() {
     await this.navigateToManageAssets();
     await this.startCreateFlow();
@@ -67,6 +55,7 @@ class DeleteAssetPage extends AssetPage {
 
   async verifyAssetDeletedSuccessfully() {
     const deletedName = this.assetData.name;
+    await this.navigateToManageAssets();
     await expect(async () => {
       const toastVisible = await this.page
         .locator('.MuiAlert-root, .MuiSnackbar-root, [role="alert"]')

@@ -99,7 +99,10 @@
     "test:admin:templates:questionnairetemplate": "npx cucumber-js features/admin/templates/QuestionnaireTemplate.feature",
     "test:admin:templates:scheduletemplate": "npx cucumber-js features/admin/templates/ScheduleTemplate.feature",
     "test:admin:templates:taskstemplate": "npx cucumber-js features/admin/templates/TasksTemplate.feature",
-    "test:admin:templates:termsconditionstemplate": "npx cucumber-js features/admin/templates/TermsConditionsTemplate.feature"
+    "test:admin:templates:termsconditionstemplate": "npx cucumber-js features/admin/templates/TermsConditionsTemplate.feature",
+    "test:admin:resources:asset:create": "npx cucumber-js features/admin/resources/Asset/asset.feature",
+    "test:admin:resources:asset:edit": "npx cucumber-js features/admin/resources/Asset/editAsset.feature",
+    "test:admin:resources:asset:delete": "npx cucumber-js features/admin/resources/Asset/deleteAsset.feature"
   },
   "devDependencies": {
     "@cucumber/cucumber": "^12.7.0",
