@@ -39,6 +39,11 @@ class ProjectProfilePage extends BasePage {
       return;
     }
 
+    if ((name || '').trim().toLowerCase() === 'work order') {
+      await this.clickWorkOrderModuleCard(scope, text);
+      return;
+    }
+
     // Targeted fallback for Estimate card: the UI has multiple "Estimate" text nodes
     // and generic card/container matching can sometimes click the wrong module.
     // This mirrors the stable selector observed in Playwright inspector for this app.
@@ -167,6 +172,52 @@ class ProjectProfilePage extends BasePage {
     }
 
     await expect(createPurchaseOrder).toBeVisible({ timeout: 60000 });
+  }
+
+  async clickWorkOrderModuleCard(scope, text) {
+    const createWorkOrder = this.page.getByRole('button', {
+      name: 'Create Work Order',
+    });
+
+    if (await createWorkOrder.isVisible({ timeout: 1500 }).catch(() => false)) {
+      return;
+    }
+
+    const candidates = [
+      scope.getByText('Work Order').first(),
+      scope.getByRole('tab', { name: text }).first(),
+      scope.getByRole('button', { name: text }).first(),
+      scope
+        .locator('[role="tab"], .MuiTab-root, .MuiCard-root, .MuiPaper-root, [role="button"], button, a, [role="link"]')
+        .filter({ hasText: text })
+        .first(),
+      scope
+        .locator('div, span, p')
+        .filter({ hasText: text })
+        .filter({ visible: true })
+        .first(),
+    ];
+
+    for (const candidate of candidates) {
+      if (!(await candidate.isVisible({ timeout: 3000 }).catch(() => false))) {
+        continue;
+      }
+
+      await candidate.scrollIntoViewIfNeeded().catch(() => {});
+      await candidate.click({ timeout: 30000 }).catch(async () => {
+        await candidate.click({ timeout: 30000, force: true });
+      });
+      await this.page.waitForLoadState('domcontentloaded');
+      await this.page
+        .waitForLoadState('networkidle', { timeout: 20000 })
+        .catch(() => {});
+
+      if (await createWorkOrder.isVisible({ timeout: 15000 }).catch(() => false)) {
+        return;
+      }
+    }
+
+    await expect(createWorkOrder).toBeVisible({ timeout: 60000 });
   }
 }
 

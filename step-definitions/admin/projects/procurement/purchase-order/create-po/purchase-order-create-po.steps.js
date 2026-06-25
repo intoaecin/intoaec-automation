@@ -120,6 +120,9 @@ Then(
     if (this.purchaseOrderEditPoPage?.poCreatedAndSentSuccessObserved) {
       return;
     }
+    if (this.purchaseOrderShipToPoPage?.poCreatedAndSentSuccessObserved) {
+      return;
+    }
     const po = getPurchaseOrderCreatePoPage(this);
     await po.expectPoCreatedAndSentToast();
   }
