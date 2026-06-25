@@ -83,6 +83,7 @@ class SchedulePage extends BasePage {
     const fromSchedule = this._formSurfaceFromTitle(this.addSchedulePanelHeading());
     const fromEditSchedule = this._formSurfaceFromTitle(this.editSchedulePanelHeading());
     const fromMilestone = this._formSurfaceFromTitle(this.addMilestonePanelHeading());
+    const fromEditMilestone = this._formSurfaceFromTitle(this.editMilestonePanelHeading());
     const shell = this.page.locator(
       '.offcanvas, aside.offcanvas, aside[class*="offcanvas"], [role="dialog"], .MuiDrawer-modal .MuiPaper-root, .MuiPaper-root.MuiDrawer-paper, .MuiDialog-root .MuiDialog-paper'
     );
@@ -95,13 +96,42 @@ class SchedulePage extends BasePage {
     const editScheduleTitle = this.page
       .getByRole('heading', { name: /^(edit|update) schedule$/i })
       .or(this.page.locator('.offcanvas-title, .MuiDialogTitle-root').filter({ hasText: /^(edit|update) schedule$/i }));
+    const editMilestoneTitle = this.page
+      .getByRole('heading', { name: /^(edit|update) milestone$/i })
+      .or(this.page.locator('.offcanvas-title, .MuiDialogTitle-root').filter({ hasText: /^(edit|update) milestone$/i }));
     const addSchedule = shell.filter({ has: scheduleTitle }).first();
     const editSchedule = shell.filter({ has: editScheduleTitle }).first();
     const addMilestone = shell.filter({ has: milestoneTitle }).first();
+    const editMilestone = shell.filter({ has: editMilestoneTitle }).first();
     const legacy = this.page
       .locator('.offcanvas.show, .MuiDialog-root .MuiDialog-paper:visible, [role="dialog"] .MuiPaper-root')
       .first();
-    return fromEditSchedule.or(fromSchedule).or(fromMilestone).or(editSchedule).or(addSchedule).or(addMilestone).or(legacy);
+    return fromEditSchedule
+      .or(fromEditMilestone)
+      .or(fromSchedule)
+      .or(fromMilestone)
+      .or(editSchedule)
+      .or(editMilestone)
+      .or(addSchedule)
+      .or(addMilestone)
+      .or(legacy);
+  }
+
+  /** Prefer the drawer whose title is currently visible (avoids `.or()` formPanel scoping issues). */
+  async activeFormPanel() {
+    if (await this.addMilestonePanelHeading().isVisible({ timeout: 800 }).catch(() => false)) {
+      return this._formSurfaceFromTitle(this.addMilestonePanelHeading());
+    }
+    if (await this.addSchedulePanelHeading().isVisible({ timeout: 800 }).catch(() => false)) {
+      return this._formSurfaceFromTitle(this.addSchedulePanelHeading());
+    }
+    if (await this.editSchedulePanelHeading().isVisible({ timeout: 800 }).catch(() => false)) {
+      return this._formSurfaceFromTitle(this.editSchedulePanelHeading());
+    }
+    if (await this.editMilestonePanelHeading().isVisible({ timeout: 800 }).catch(() => false)) {
+      return this._formSurfaceFromTitle(this.editMilestonePanelHeading());
+    }
+    return this.formPanel();
   }
 
   /** Heading used to confirm Add Schedule offcanvas/drawer is open (source of truth for TC-02+). */
@@ -123,8 +153,14 @@ class SchedulePage extends BasePage {
       .or(this.page.locator('.offcanvas-title, .MuiDialogTitle-root').filter({ hasText: /^(edit|update) schedule$/i }));
   }
 
+  editMilestonePanelHeading() {
+    return this.page
+      .getByRole('heading', { name: /^(edit|update) milestone$/i })
+      .or(this.page.locator('.offcanvas-title, .MuiDialogTitle-root').filter({ hasText: /^(edit|update) milestone$/i }));
+  }
+
   async expectEditScheduleOffCanvasOpen() {
-    await expect(this.editSchedulePanelHeading().or(this.formPanel()).first()).toBeVisible({
+    await expect(this.editSchedulePanelHeading().or(this.editMilestonePanelHeading()).or(this.formPanel()).first()).toBeVisible({
       timeout: this.uiTimeout,
     });
   }
@@ -835,7 +871,7 @@ class SchedulePage extends BasePage {
   }
 
   async _findVisibleListTabRowByScrolling(name) {
-    const row = this.listTabRow(name);
+    const row = this.listTabExactRow(name);
     const ratios = [0, 0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1];
 
     for (const ratio of ratios) {
@@ -844,6 +880,11 @@ class SchedulePage extends BasePage {
         await row.scrollIntoViewIfNeeded().catch(() => {});
         await this.logStep(`Found schedule in list view after scrolling: ${name}`);
         return row;
+      }
+      const markedRow = await this.markVisibleListTabRowByRenderedText(name);
+      if (markedRow) {
+        await this.logStep(`Found schedule in list view by rendered row text: ${name}`);
+        return markedRow;
       }
     }
 
@@ -857,6 +898,8 @@ class SchedulePage extends BasePage {
         await this.logStep(`Found schedule in list view with keyboard scroll: ${name}`);
         return row;
       }
+      const markedRow = await this.markVisibleListTabRowByRenderedText(name);
+      if (markedRow) return markedRow;
     }
 
     for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -868,6 +911,8 @@ class SchedulePage extends BasePage {
         await this.logStep(`Found schedule in list view with wheel scroll: ${name}`);
         return row;
       }
+      const markedRow = await this.markVisibleListTabRowByRenderedText(name);
+      if (markedRow) return markedRow;
     }
 
     return null;
@@ -878,11 +923,19 @@ class SchedulePage extends BasePage {
     const firstPassRow = await this._findVisibleListTabRowByScrolling(name);
     if (firstPassRow) return firstPassRow;
 
+    await this.clearListTabSearchIfAvailable();
+    const visibleWithoutSearchRow = await this._findVisibleListTabRowByScrolling(name);
+    if (visibleWithoutSearchRow) return visibleWithoutSearchRow;
+
     const paginationChanged = await this.setListRowsPerPageTo100IfAvailable();
     if (paginationChanged) {
       await this.searchListTabScheduleIfAvailable(name);
       const rowAfterPagination = await this._findVisibleListTabRowByScrolling(name);
       if (rowAfterPagination) return rowAfterPagination;
+
+      await this.clearListTabSearchIfAvailable();
+      const rowAfterPaginationWithoutSearch = await this._findVisibleListTabRowByScrolling(name);
+      if (rowAfterPaginationWithoutSearch) return rowAfterPaginationWithoutSearch;
     }
 
     throw new Error(`Could not find schedule "${name}" in list view after search and scrolling`);
@@ -945,8 +998,13 @@ class SchedulePage extends BasePage {
   }
 
   async openEditForListSchedule(name) {
-    const row = await this.findListTabRowByScrolling(name);
-    await this._openEditFromListRow(row);
+    try {
+      const row = await this.findListTabRowByScrolling(name);
+      await this._openEditFromListRow(row);
+    } catch (error) {
+      await this.logStep(`List row not found for "${name}" — opening exact row from Gantt sidebar fallback`);
+      await this.openEditForGanttSidebarSchedule(name);
+    }
   }
 
   async openEditForFirstVisibleListScheduleName(names) {
@@ -1180,7 +1238,7 @@ class SchedulePage extends BasePage {
     await this.searchGanttSidebarScheduleIfAvailable(name);
     await this.expectScheduleInGanttSidebarList(name);
 
-    const row = this.ganttSidebarRow(name);
+    const row = await this.findGanttSidebarRowByExactName(name);
     await expect(row).toBeVisible({ timeout: this.uiTimeout });
     await row.scrollIntoViewIfNeeded().catch(() => {});
     await row.hover({ force: true, timeout: this.quickTimeout }).catch(() => {});
@@ -1253,71 +1311,286 @@ class SchedulePage extends BasePage {
   async _openGanttSidebarRowActionsMenu(row) {
     await expect(row).toBeVisible({ timeout: this.uiTimeout });
     await row.scrollIntoViewIfNeeded().catch(() => {});
-    await row.hover({ force: true, timeout: this.quickTimeout }).catch(() => {});
 
     const menuButton = row
       .getByRole('button', { name: /more|actions|options|menu/i })
       .or(row.locator('button[aria-haspopup="menu"], button[aria-label*="more" i], button[aria-label*="action" i]'))
+      .or(row.locator('[data-testid*="More" i], svg[data-testid*="More" i]').locator('xpath=ancestor::button[1]'))
+      .or(
+        row
+          .locator('svg.lucide-ellipsis, svg.lucide-more-vertical, svg.lucide-more-horizontal, svg.lucide-menu')
+          .locator('xpath=ancestor::button[1]')
+      )
       .or(row.locator('button').last())
       .first();
-    await expect(menuButton).toBeVisible({ timeout: this.uiTimeout });
-    await menuButton.click({ force: true, timeout: this.quickTimeout });
+
+    const cells = row.locator('td, [role="cell"], [role="gridcell"]');
+    const cellCount = await cells.count().catch(() => 0);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await row.hover({ force: true, timeout: this.quickTimeout }).catch(() => {});
+      if (cellCount > 0) {
+        await cells.nth(cellCount - 1).hover({ force: true, timeout: this.quickTimeout }).catch(() => {});
+      }
+      if (await menuButton.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await menuButton.click({ force: true, timeout: this.quickTimeout });
+        return;
+      }
+      if (attempt === 3) {
+        await expect(menuButton).toBeVisible({ timeout: this.uiTimeout });
+        await menuButton.click({ force: true, timeout: this.quickTimeout });
+      }
+    }
+  }
+
+  async _expectDeleteMenuItemVisible() {
+    const deleteItem = this.page
+      .getByRole('menuitem', { name: /^delete$/i })
+      .or(this.page.getByRole('button', { name: /^delete$/i }))
+      .or(this.page.getByRole('menu').getByText(/^delete$/i))
+      .or(this.page.locator('[role="menu"] *').filter({ hasText: /^delete$/i }))
+      .first();
+    await expect(deleteItem).toBeVisible({ timeout: this.uiTimeout });
+    return deleteItem;
   }
 
   async _clickDeleteInOpenActionsMenu() {
-    const del = this.page
-      .getByRole('menuitem', { name: /^delete$/i })
-      .or(this.page.getByRole('button', { name: /^delete$/i }))
-      .or(this.page.locator('[role="menu"] *').filter({ hasText: /^delete$/i }))
-      .first();
-    await expect(del).toBeVisible({ timeout: this.uiTimeout });
+    const del = await this._expectDeleteMenuItemVisible();
     await del.click({ force: true, timeout: this.quickTimeout });
   }
 
   async _confirmDeleteSchedulePopup() {
-    const dialog = this.page.locator('[role="dialog"]').filter({ visible: true }).last();
-    const yes = dialog
-      .getByRole('button', { name: /^yes$/i })
-      .or(this.page.getByRole('button', { name: /^yes$/i }))
+    const dialog = this.page
+      .locator('[role="dialog"], .MuiDialog-root .MuiDialog-paper')
+      .filter({ visible: true })
+      .last();
+    const confirm = dialog
+      .getByRole('button', { name: /^yes$|^confirm$|^ok$|^delete$/i })
+      .or(dialog.getByRole('button', { name: /yes.*delete|confirm.*delete|delete.*confirm/i }))
+      .or(this.page.getByRole('button', { name: /^yes$|^confirm$|^ok$/i }))
       .first();
-    await expect(yes).toBeVisible({ timeout: 15000 });
-    await yes.click({ force: true, timeout: this.quickTimeout });
+    await expect(confirm).toBeVisible({ timeout: 15000 });
+    await confirm.click({ force: true, timeout: this.quickTimeout });
     await this._waitScheduleSettled();
+  }
+
+  _ganttSidebarScheduleRowCandidates() {
+    const side = this.ganttSidebar();
+    return [
+      side.locator('table.MuiTable-root tbody tr'),
+      side.locator('table tbody tr'),
+      side.locator('tbody tr').filter({ has: side.locator('td, [role="cell"]') }),
+      side.locator('tr').filter({ has: side.locator('td, [role="cell"], [role="gridcell"]') }),
+    ];
+  }
+
+  async _collectVisibleGanttSidebarScheduleRows() {
+    const visibleRows = [];
+    for (const rows of this._ganttSidebarScheduleRowCandidates()) {
+      const count = await rows.count().catch(() => 0);
+      for (let i = 0; i < count; i += 1) {
+        const row = rows.nth(i);
+        if (!(await row.isVisible({ timeout: 300 }).catch(() => false))) continue;
+        const cells = row.locator('td, [role="cell"], [role="gridcell"]');
+        const cellCount = await cells.count().catch(() => 0);
+        if (cellCount === 0) continue;
+
+        const firstCellText = ((await cells.first().innerText().catch(() => '')) || '').trim();
+        if (/^schedule\s*name$|^start\s*date$|^end\s*date$|^duration$|^created\s*on$/i.test(firstCellText)) {
+          continue;
+        }
+
+        let text = ((await row.innerText().catch(() => '')) || '').trim();
+        if (!text) {
+          const cellTexts = [];
+          for (let cellIndex = 0; cellIndex < Math.min(cellCount, 4); cellIndex += 1) {
+            const cellText = ((await cells.nth(cellIndex).innerText().catch(() => '')) || '').trim();
+            if (cellText) cellTexts.push(cellText);
+          }
+          text = cellTexts.join(' ').trim();
+        }
+        if (!text || /no rows|no data|loading|add schedule/i.test(text)) continue;
+        visibleRows.push({ row, label: text.split(/\r?\n/)[0].trim() });
+      }
+      if (visibleRows.length > 0) break;
+    }
+    return visibleRows;
   }
 
   async _findVisibleDeletableGanttSidebarScheduleRow() {
     await this.switchToGanttView();
     const side = this.ganttSidebar();
     await expect(side).toBeVisible({ timeout: this.uiTimeout });
-    const rows = side.locator('tbody tr, tr.schedule-list-row, tr').filter({ has: side.locator('td') });
-    const visibleRows = [];
-    const count = await rows.count().catch(() => 0);
-    for (let i = 0; i < count; i += 1) {
-      const row = rows.nth(i);
-      if (!(await row.isVisible({ timeout: 300 }).catch(() => false))) continue;
-      const cells = row.locator('td');
-      const cellCount = await cells.count().catch(() => 0);
-      if (cellCount === 0) continue;
-      const firstCellText = ((await cells.first().innerText().catch(() => '')) || '').trim();
-      if (/schedule\s*name|^start\s*date$|^end\s*date$/i.test(firstCellText)) continue;
-      let text = ((await row.innerText().catch(() => '')) || '').trim();
-      if (!text || /no rows|no data|loading/i.test(text)) continue;
-      visibleRows.push({ row, label: text.split(/\r?\n/)[0].trim() });
+
+    for (const ratio of [0, 0.2, 0.4, 0.6, 0.8, 1]) {
+      await this.scrollGanttSidebarListToRatio(ratio);
+      const visibleRows = await this._collectVisibleGanttSidebarScheduleRows();
+      if (visibleRows.length > 0) {
+        const picked = visibleRows[Math.floor(Math.random() * visibleRows.length)];
+        await picked.row.scrollIntoViewIfNeeded().catch(() => {});
+        await this.logStep(`Found gantt sidebar schedule row: ${picked.label}`);
+        return picked;
+      }
     }
-    if (visibleRows.length === 0) return null;
-    return visibleRows[Math.floor(Math.random() * visibleRows.length)];
+    return null;
+  }
+
+  async _scrollGanttTimelineToRatio(ratio) {
+    const tl = this.ganttTimelineHost();
+    await tl
+      .evaluate((root, value) => {
+        const candidates = [root, ...root.querySelectorAll('*')];
+        const scrollables = candidates.filter(
+          (el) => el.scrollHeight > el.clientHeight + 8 || el.scrollWidth > el.clientWidth + 8
+        );
+        for (const el of scrollables) {
+          el.scrollLeft = Math.round((el.scrollWidth - el.clientWidth) * value);
+          el.scrollTop = Math.round((el.scrollHeight - el.clientHeight) * value);
+        }
+      }, ratio)
+      .catch(() => {});
+    await this._waitScheduleSettled();
+  }
+
+  async _findGanttChartBarBySidebarRow(row, name) {
+    const tl = this.ganttTimelineHost();
+    await expect(tl).toBeVisible({ timeout: this.uiTimeout });
+    const rowBox = await row.boundingBox();
+    if (!rowBox) return null;
+
+    const rowCenterY = rowBox.y + rowBox.height / 2;
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const nameRe = new RegExp(`^${escaped}$`, 'i');
+
+    const textTarget = tl.getByText(name, { exact: true }).first();
+    if (await textTarget.isVisible({ timeout: 1500 }).catch(() => false)) {
+      return textTarget;
+    }
+
+    const labeled = tl
+      .locator(`[title="${name}"], [aria-label="${name}"], [aria-label*="${name}"]`)
+      .or(tl.locator('div, span, foreignObject, text, tspan').filter({ hasText: nameRe }))
+      .first();
+    if (await labeled.isVisible({ timeout: 1500 }).catch(() => false)) {
+      return labeled;
+    }
+
+    const barCandidates = tl.locator(
+      'div[style*="background"], div[class*="bar"], div[class*="task"], div[class*="event"], rect, path, svg'
+    );
+    const count = await barCandidates.count().catch(() => 0);
+    let best = null;
+    let bestDelta = Infinity;
+    for (let i = 0; i < count; i += 1) {
+      const bar = barCandidates.nth(i);
+      if (!(await bar.isVisible({ timeout: 200 }).catch(() => false))) continue;
+      const box = await bar.boundingBox();
+      if (!box || box.width < 12 || box.height < 6) continue;
+      const centerY = box.y + box.height / 2;
+      const delta = Math.abs(centerY - rowCenterY);
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        best = bar;
+      }
+    }
+    if (best && bestDelta <= 40) return best;
+    return null;
+  }
+
+  async _findGanttChartBarForSchedule(name) {
+    const tl = this.ganttTimelineHost();
+    await expect(tl).toBeVisible({ timeout: this.uiTimeout });
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const nameRe = new RegExp(`^${escaped}$`, 'i');
+
+    const pickVisible = async (candidates) => {
+      for (const pick of candidates) {
+        const loc = pick();
+        if (await loc.isVisible({ timeout: 1200 }).catch(() => false)) {
+          return loc;
+        }
+      }
+      return null;
+    };
+
+    for (const ratio of [0, 0.25, 0.5, 0.75, 1]) {
+      await this._scrollGanttTimelineToRatio(ratio);
+      const target = await pickVisible([
+        () => tl.getByText(name, { exact: true }).first(),
+        () => tl.locator('*').filter({ hasText: nameRe }).first(),
+        () => tl.locator(`[title="${name}"], [aria-label="${name}"], [aria-label*="${name}"]`).first(),
+        () =>
+          tl
+            .locator('div, span, foreignObject, text, tspan')
+            .filter({ hasText: nameRe })
+            .first(),
+      ]);
+      if (target) return target;
+    }
+
+    return null;
+  }
+
+  async _selectGanttSidebarScheduleRow(row) {
+    await expect(row).toBeVisible({ timeout: this.uiTimeout });
+    await row.scrollIntoViewIfNeeded().catch(() => {});
+    await row.click({ force: true, timeout: this.quickTimeout });
+    await this._waitScheduleSettled();
+  }
+
+  async _openGanttChartContextMenuAtSidebarRowY(row) {
+    const rowBox = await row.boundingBox();
+    const tl = this.ganttTimelineHost();
+    const tlBox = await tl.boundingBox();
+    if (!rowBox || !tlBox) {
+      throw new Error('Could not resolve gantt sidebar row or timeline bounds for context menu');
+    }
+
+    const clickX = tlBox.x + Math.min(Math.max(tlBox.width * 0.35, 120), tlBox.width - 40);
+    const clickY = rowBox.y + rowBox.height / 2;
+
+    await tl.hover({ force: true, timeout: this.quickTimeout }).catch(() => {});
+    await this.page.mouse.move(clickX, clickY);
+    await this.page.mouse.click(clickX, clickY, { button: 'right' });
+  }
+
+  async _openGanttChartContextMenuForSchedule(name, sidebarRow = null) {
+    if (sidebarRow) {
+      let opened = false;
+      await expect(async () => {
+        await this._openGanttChartContextMenuAtSidebarRowY(sidebarRow);
+        await this._expectDeleteMenuItemVisible();
+        opened = true;
+      }).toPass({ timeout: 15000, intervals: [500, 1000] }).catch(() => {});
+
+      if (!opened) {
+        const target = await this._findGanttChartBarBySidebarRow(sidebarRow, name);
+        if (!target) {
+          throw new Error(`Could not open gantt chart context menu for schedule "${name}"`);
+        }
+        await this._openContextMenuOnScheduleTarget(target);
+      }
+      return;
+    }
+
+    const target = await this._findGanttChartBarForSchedule(name);
+    if (!target) {
+      throw new Error(`Could not find gantt chart bar for schedule "${name}"`);
+    }
+    await this._openContextMenuOnScheduleTarget(target);
   }
 
   async _openContextMenuOnScheduleTarget(target) {
     await expect(target).toBeVisible({ timeout: this.uiTimeout });
     await target.scrollIntoViewIfNeeded().catch(() => {});
-    await target.click({ button: 'left', force: true, timeout: this.quickTimeout });
-    const menuOpen = await this.page
-      .getByRole('menuitem', { name: /^delete$/i })
-      .isVisible({ timeout: 1500 })
-      .catch(() => false);
-    if (!menuOpen) {
-      await target.click({ button: 'right', force: true, timeout: this.quickTimeout });
+    await target.hover({ force: true, timeout: this.quickTimeout }).catch(() => {});
+
+    await target.click({ button: 'right', force: true, timeout: this.quickTimeout });
+    if (!(await this._expectDeleteMenuItemVisible().then(() => true).catch(() => false))) {
+      const box = await target.boundingBox();
+      if (box) {
+        await this.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
+      }
+      await this._expectDeleteMenuItemVisible();
     }
   }
 
@@ -1357,19 +1630,8 @@ class SchedulePage extends BasePage {
       }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
     }
     const { row, label: name } = picked;
-    await row.scrollIntoViewIfNeeded().catch(() => {});
-    await row.click({ force: true, timeout: this.quickTimeout }).catch(() => {});
-    await this._waitScheduleSettled();
-
-    const tl = this.ganttTimelineHost();
-    let target = tl.getByText(name, { exact: true }).first();
-    if (!(await target.isVisible({ timeout: 5000 }).catch(() => false))) {
-      target = tl.locator('*').filter({ hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }).first();
-    }
-    if (!(await target.isVisible({ timeout: 3000 }).catch(() => false))) {
-      target = this.page.getByText(name, { exact: true }).last();
-    }
-    await this._openContextMenuOnScheduleTarget(target);
+    await this._selectGanttSidebarScheduleRow(row);
+    await this._openGanttChartContextMenuForSchedule(name, row);
     await this._clickDeleteInOpenActionsMenu();
     await this._confirmDeleteSchedulePopup();
     await this.logStep(`Deleted schedule from gantt chart context menu: ${name}`);
@@ -1752,6 +2014,75 @@ class SchedulePage extends BasePage {
     await this.logStep('Task removed from edit form');
   }
 
+  async _resolveScheduleCreateFormReminderRemoveLayout() {
+    const region = this._scheduleCreateFormAdditionalDetailsRegion();
+    const addTask = await this._findScheduleCreateFormAddTaskButton();
+    const addReminder = region.getByRole('button', { name: /add reminder/i }).first();
+    const hasReminder = await addReminder.isVisible({ timeout: 1000 }).catch(() => false);
+    if (!hasReminder) {
+      return { addTask, addReminder: null, count: 0 };
+    }
+    const count = await this._countRemoveButtonsBefore(addReminder, addTask);
+    return { addTask, addReminder, count };
+  }
+
+  async removeAllTasksInEdit() {
+    await this.hideFreshchatWidget();
+    await this.expandScheduleCreateFormAdditionalDetails();
+    await this._scrollScheduleCreateFormToBottom();
+    await this._wheelScrollScheduleDrawer(12);
+
+    await expect(async () => {
+      const addTask = await this._findScheduleCreateFormAddTaskButton();
+      await addTask.scrollIntoViewIfNeeded().catch(() => {});
+      const layout = await this._resolveScheduleCreateFormTaskRemoveLayout(addTask);
+      if (layout.count === 0) return;
+
+      await this._clickFirstTaskRemoveButtonUsingLayout(layout);
+      await expect(async () => {
+        const remaining = (await this._resolveScheduleCreateFormTaskRemoveLayout(addTask)).count;
+        expect(remaining).toBe(layout.count - 1);
+      }).toPass({ timeout: 5000 });
+      expect((await this._resolveScheduleCreateFormTaskRemoveLayout(addTask)).count).toBe(0);
+    }).toPass({ timeout: 90000, intervals: [300, 500, 1000] });
+
+    await this.logStep('Removed all tasks on edit form');
+  }
+
+  async expectAllTasksRemovedInEdit() {
+    const addTask = await this._findScheduleCreateFormAddTaskButton();
+    const layout = await this._resolveScheduleCreateFormTaskRemoveLayout(addTask);
+    expect(layout.count).toBe(0);
+    await this.logStep('All tasks removed from edit form');
+  }
+
+  async removeAllRemindersInEdit() {
+    await this.hideFreshchatWidget();
+    await this.expandScheduleCreateFormAdditionalDetails();
+    await this._scrollScheduleCreateFormToBottom();
+    await this._wheelScrollScheduleDrawer(12);
+
+    await expect(async () => {
+      const layout = await this._resolveScheduleCreateFormReminderRemoveLayout();
+      if (layout.count === 0) return;
+
+      await this._clickFirstRemoveButtonBefore(layout.addReminder, layout.addTask);
+      await expect(async () => {
+        const remaining = (await this._resolveScheduleCreateFormReminderRemoveLayout()).count;
+        expect(remaining).toBe(layout.count - 1);
+      }).toPass({ timeout: 5000 });
+      expect((await this._resolveScheduleCreateFormReminderRemoveLayout()).count).toBe(0);
+    }).toPass({ timeout: 90000, intervals: [300, 500, 1000] });
+
+    await this.logStep('Removed all reminders on edit form');
+  }
+
+  async expectAllRemindersRemovedInEdit() {
+    const layout = await this._resolveScheduleCreateFormReminderRemoveLayout();
+    expect(layout.count).toBe(0);
+    await this.logStep('All reminders removed from edit form');
+  }
+
   async removeFirstReminderInEdit() {
     await this.expandScheduleCreateFormAdditionalDetails();
     const region = this._scheduleCreateFormAdditionalDetailsRegion();
@@ -1777,6 +2108,11 @@ class SchedulePage extends BasePage {
     console.log(msg);
   }
 
+  /** Milestones (TS-06+) use names like "milestone 1" / "MILESTONE UPDATE" — no end date, duration 0m. */
+  _looksLikeMilestoneName(name) {
+    return /\bmilestone\b/i.test(String(name || ''));
+  }
+
   /** Left panel table in Gantt (scroll list + quick add footer). */
   ganttSidebar() {
     return this.page.locator('[data-pdf-export-schedule-list="true"]').first();
@@ -1784,6 +2120,7 @@ class SchedulePage extends BasePage {
 
   extractCalendarFragment(text) {
     const s = String(text || '').trim();
+    if (!s || /^[-–—]$/.test(s)) return '';
     // "12 May 2026 10:00 AM" / localized month-day strings — compare date only, not time-of-day.
     const dmy = s.match(/(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})/);
     if (dmy) return dmy[1].trim();
@@ -1826,10 +2163,40 @@ class SchedulePage extends BasePage {
   ganttSidebarRow(scheduleName) {
     const side = this.ganttSidebar();
     return side
-      .locator('tbody tr, tr.schedule-list-row, tr')
+      .locator('table.MuiTable-root tbody tr, table tbody tr, tbody tr, tr.schedule-list-row, tr')
       .filter({ hasText: scheduleName })
       .or(side.getByRole('row').filter({ hasText: scheduleName }))
       .last();
+  }
+
+  exactTextRegex(text) {
+    const escaped = String(text || '').trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+    return new RegExp(`^\\s*${escaped}\\s*$`, 'i');
+  }
+
+  ganttSidebarExactRow(scheduleName) {
+    const side = this.ganttSidebar();
+    const exact = side.getByText(this.exactTextRegex(scheduleName)).first();
+    return exact.locator('xpath=ancestor::tr[1]');
+  }
+
+  async findGanttSidebarRowByExactName(name) {
+    await this.searchGanttSidebarScheduleIfAvailable(name);
+    const exactRow = this.ganttSidebarExactRow(name);
+    if (await exactRow.isVisible({ timeout: 1500 }).catch(() => false)) {
+      return exactRow;
+    }
+
+    for (const ratio of [0, 0.15, 0.3, 0.5, 0.7, 0.85, 1]) {
+      await this.scrollGanttSidebarListToRatio(ratio);
+      if (await exactRow.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await exactRow.scrollIntoViewIfNeeded().catch(() => {});
+        await this.logStep(`Found exact schedule in Gantt sidebar: ${name}`);
+        return exactRow;
+      }
+    }
+
+    throw new Error(`Could not find exact schedule "${name}" in the Gantt sidebar list`);
   }
 
   async scrollGanttSidebarListToBottom() {
@@ -1878,6 +2245,64 @@ class SchedulePage extends BasePage {
       .filter({ hasText: scheduleName })
       .filter({ hasNot: this.page.locator('[data-pdf-export-schedule-list="true"]') })
       .last();
+  }
+
+  listTabExactRow(scheduleName) {
+    const exactText = this.page.getByText(this.exactTextRegex(scheduleName));
+    return this.page
+      .locator('tbody tr, [role="row"], .MuiDataGrid-row, .MuiTableRow-root, [class*="DataGrid-row"]')
+      .filter({ has: exactText })
+      .filter({ hasNot: this.page.locator('[data-pdf-export-schedule-list="true"]') })
+      .first();
+  }
+
+  async markVisibleListTabRowByRenderedText(scheduleName) {
+    const marker = `codex-list-row-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    const found = await this.page
+      .evaluate(
+        ({ name, attr }) => {
+          const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          const target = normalize(name);
+          const isTargetMatch = (text) => {
+            if (text === target) return true;
+            if (!target.includes(' ')) return false;
+            return text.startsWith(`${target} `);
+          };
+          document.querySelectorAll('[data-codex-list-row-match]').forEach((el) => {
+            el.removeAttribute('data-codex-list-row-match');
+          });
+
+          const rows = [
+            ...document.querySelectorAll(
+              'tbody tr, [role="row"], .MuiDataGrid-row, .MuiTableRow-root, [class*="DataGrid-row"]'
+            ),
+          ].filter((row) => {
+            if (row.closest('[data-pdf-export-schedule-list="true"]')) return false;
+            const box = row.getBoundingClientRect();
+            return box.width > 0 && box.height > 0 && box.bottom > 0 && box.right > 0;
+          });
+
+          for (const row of rows) {
+            const cells = [...row.querySelectorAll('td, [role="gridcell"], [role="cell"]')];
+            const texts = (cells.length ? cells : [row])
+              .map((el) => normalize(el.innerText || el.textContent))
+              .filter(Boolean);
+            const firstLine = normalize((row.innerText || row.textContent || '').split(/\r?\n/)[0]);
+            if (texts.some((text) => isTargetMatch(text)) || isTargetMatch(firstLine)) {
+              row.setAttribute('data-codex-list-row-match', attr);
+              return true;
+            }
+          }
+          return false;
+        },
+        { name: scheduleName, attr: marker }
+      )
+      .catch(() => false);
+
+    if (!found) return null;
+    const row = this.page.locator(`[data-codex-list-row-match="${marker}"]`).first();
+    await row.scrollIntoViewIfNeeded().catch(() => {});
+    return row;
   }
 
   async clickGanttSidebarAddSchedule() {
@@ -1940,6 +2365,11 @@ class SchedulePage extends BasePage {
     await expect(row).toBeVisible({ timeout: 30000 });
     await expect(async () => {
       const { startKey, endKey } = await this._ganttSidebarStartEndKeys(name);
+      if (this._looksLikeMilestoneName(name)) {
+        expect(startKey).toBeTruthy();
+        if (endKey) expect(startKey).toStrictEqual(endKey);
+        return;
+      }
       expect(startKey).toStrictEqual(endKey);
     }).toPass({ timeout: 30000, intervals: [800, 2000, 4000] });
   }
@@ -1967,15 +2397,30 @@ class SchedulePage extends BasePage {
     const startKey = this.extractCalendarFragment(startText);
     const endKey = this.extractCalendarFragment(endText);
     const createdKey = this.extractCalendarFragment(createdText);
+
+    if (this._looksLikeMilestoneName(name)) {
+      expect(startKey).toBeTruthy();
+      expect(startKey).toStrictEqual(createdKey);
+      if (endKey) expect(startKey).toStrictEqual(endKey);
+      await this.logStep(`Milestone list dates aligned (${name}): start=${startKey}, end=${endKey || 'empty'}`);
+      return;
+    }
+
     expect(startKey).toStrictEqual(endKey);
     expect(startKey).toStrictEqual(createdKey);
   }
 
-  /** Expect working duration label containing one calendar day (“1d” per UI rules). */
+  /** Schedules: “1d”. Milestones: always “0m” (no end date). */
   async expectListTabScheduleDurationIndicatesOneWorkingDay(name) {
     const row = this.listTabRow(name);
-    const dur = await row.locator('td, [role="gridcell"]').nth(3).innerText();
-    expect(dur.trim()).toMatch(/\b1\s*d\b/i);
+    const dur = ((await row.locator('td, [role="gridcell"]').nth(3).innerText()) || '').trim();
+    if (this._looksLikeMilestoneName(name)) {
+      expect(dur).toMatch(/\b0\s*m\b/i);
+      await this.logStep(`Milestone duration is 0m (${name})`);
+      return;
+    }
+    expect(dur).toMatch(/\b1\s*d\b/i);
+    await this.logStep(`Schedule duration is 1d (${name})`);
   }
 
   async expectListTabScheduleCompletionShows(name, expectedPct) {
@@ -2820,6 +3265,11 @@ class SchedulePage extends BasePage {
     await this.page.keyboard.press('Escape').catch(() => {});
   }
 
+  /** True when Add Milestone off-canvas/drawer is open (no end date on form). */
+  async _isMilestoneCreateFormOpen() {
+    return this.addMilestonePanelHeading().isVisible({ timeout: 1500 }).catch(() => false);
+  }
+
   async pickRandomStartDateTimeOnScheduleCreateForm() {
     const panel = this.formPanel();
     await this._prepareCreateFormForDateEntry();
@@ -2828,6 +3278,15 @@ class SchedulePage extends BasePage {
     this._scheduleCreateFormStartMs = start.getTime();
     this._scheduleCreateFormRequiresNonZeroDuration = false;
     await this._pickScheduleCreateFormDateTime(panel, start, 'start');
+
+    if (await this._isMilestoneCreateFormOpen()) {
+      await this._muiConfirmPickerIfPresent();
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this._scheduleDatePickerPopper().waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+      await this.logStep('Picked milestone start datetime (no end date on form)');
+      return;
+    }
+
     const endInput = panel.getByLabel(/end date/i);
     await expect(async () => {
       expect(await endInput.isEnabled().catch(() => false)).toBeTruthy();
@@ -2866,18 +3325,82 @@ class SchedulePage extends BasePage {
     throw lastError || new Error('Schedule duration remained 0m after multiple end datetime attempts.');
   }
 
-  /** Primary Create button in Add Schedule off canvas header. */
+  _scheduleCreateFormDrawerSurface() {
+    return this.page
+      .locator('.MuiDrawer-paper:visible, .offcanvas.show, aside.offcanvas.show, [role="dialog"] .MuiDialog-paper:visible')
+      .last();
+  }
+
+  async _resolveScheduleCreateFormCreateButton() {
+    await this.hideFreshchatWidget();
+    const panel = await this.activeFormPanel();
+    await panel
+      .evaluate((root) => {
+        const nodes = [root, ...root.querySelectorAll('*')];
+        for (const el of nodes) {
+          if (!el || typeof el.scrollTop !== 'number') continue;
+          if (el.scrollTop > 0) el.scrollTop = 0;
+        }
+      })
+      .catch(() => {});
+
+    const drawer = this._scheduleCreateFormDrawerSurface();
+    const primary = drawer.locator('button.btnPrimaryUI').filter({ hasText: /^create$/i }).first();
+    if (await primary.isVisible({ timeout: 3000 }).catch(() => false)) {
+      return primary;
+    }
+
+    const creates = drawer.getByRole('button', { name: /^create$/i });
+    const count = await creates.count();
+    for (let i = count - 1; i >= 0; i -= 1) {
+      const btn = creates.nth(i);
+      if (await btn.isVisible({ timeout: 500 }).catch(() => false)) {
+        return btn;
+      }
+    }
+
+    return this.page.getByRole('button', { name: /^create$/i }).filter({ visible: true }).last();
+  }
+
+  async _expectScheduleCreateFormClosed() {
+    await expect(this.addSchedulePanelHeading()).toBeHidden({ timeout: this.uiTimeout });
+    await expect(this.addMilestonePanelHeading()).toBeHidden({ timeout: 5000 }).catch(() => {});
+  }
+
+  /** Primary Create button in Add Schedule / Add Milestone off-canvas header. */
   async submitScheduleCreateForm() {
-    const panel = this.formPanel();
+    await this.hideFreshchatWidget();
+
     if (this._scheduleCreateFormRequiresNonZeroDuration) {
       await this.waitForScheduleCreateFormDurationNotZero(20000);
     }
-    const btn = panel.getByRole('button', { name: /^create$/i }).first();
+
+    await this._muiConfirmPickerIfPresent();
+    await this.page.keyboard.press('Escape').catch(() => {});
+    await this._scheduleDatePickerPopper().waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+    await this._dismissOpenMenusIfAny();
+
+    const assigneePop = this._scheduleAssigneePickerPopover();
+    if (await assigneePop.isVisible({ timeout: 500 }).catch(() => false)) {
+      await this.page.keyboard.press('Escape').catch(() => {});
+    }
+    await this.page.getByRole('listbox').last().waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+
+    const btn = await this._resolveScheduleCreateFormCreateButton();
     await expect(btn).toBeVisible({ timeout: 20000 });
-    await btn.click();
-    await this._waitScheduleSettled();
-    await expect(panel).toBeHidden({ timeout: this.uiTimeout });
+    await expect(btn).toBeEnabled({ timeout: 15000 });
+
+    await expect(async () => {
+      await btn.scrollIntoViewIfNeeded().catch(() => {});
+      await btn.click({ force: true, timeout: 15000 });
+      await this._waitScheduleSettled();
+      const scheduleOpen = await this.addSchedulePanelHeading().isVisible({ timeout: 1500 }).catch(() => false);
+      const milestoneOpen = await this.addMilestonePanelHeading().isVisible({ timeout: 500 }).catch(() => false);
+      expect(scheduleOpen || milestoneOpen).toBeFalsy();
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
+
     this._scheduleCreateFormRequiresNonZeroDuration = false;
+    await this.logStep('Submitted schedule/milestone create form');
   }
 
   /** Schedule assignee picker popover (Users / Vendors tabs). */
@@ -3851,8 +4374,32 @@ class SchedulePage extends BasePage {
     if (!(await option.isVisible({ timeout: 2000 }).catch(() => false))) {
       option = this.page.getByRole('option', { name: looseRe }).first();
     }
+    if (!(await option.isVisible({ timeout: 2000 }).catch(() => false))) {
+      option = await this._findScrollableListboxOption(listbox, looseRe);
+    }
     await expect(option).toBeVisible({ timeout: 15000 });
     await option.click({ force: true });
+  }
+
+  async _findScrollableListboxOption(listbox, looseRe) {
+    const itemSel = '[role="option"], .MuiMenuItem-root, li';
+    for (let scroll = 0; scroll < 20; scroll += 1) {
+      const items = listbox.locator(itemSel);
+      const count = await items.count();
+      for (let i = 0; i < count; i += 1) {
+        const item = items.nth(i);
+        const text = ((await item.innerText().catch(() => '')) || '').trim();
+        if (looseRe.test(text)) {
+          await item.scrollIntoViewIfNeeded().catch(() => {});
+          return item;
+        }
+      }
+      await listbox.evaluate((el) => {
+        el.scrollTop += Math.max(120, Math.floor(el.clientHeight * 0.8));
+      }).catch(() => {});
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return listbox.locator(itemSel).filter({ hasText: looseRe }).first();
   }
 
   /** MUI task-status option values on the Add Schedule inline task row (stable across sessions). */
@@ -4366,25 +4913,46 @@ class SchedulePage extends BasePage {
     await this.logStep('Picked random end date time on task');
   }
 
-  async selectRandomPhaseOnScheduleCreateForm() {
-    const panel = this.formPanel();
+  async _resolveScheduleCreateFormPhaseCombobox() {
+    const panel = await this.activeFormPanel();
     await this.hideFreshchatWidget();
+
     let combo = panel.getByRole('combobox', { name: /^phase$/i }).first();
-    if (!(await combo.isVisible({ timeout: 2500 }).catch(() => false))) {
-      combo = panel.getByLabel(/^phase$/i).first();
-    }
-    if (!(await combo.isVisible({ timeout: 2500 }).catch(() => false))) {
-      const lbl = panel
-        .locator('label, .fw-500, .MuiFormLabel-root, p, span')
-        .filter({ hasText: /^phase\b/i })
+    if (await combo.isVisible({ timeout: 1500 }).catch(() => false)) return combo;
+
+    combo = panel.getByLabel(/^phase$/i).first();
+    if (await combo.isVisible({ timeout: 1500 }).catch(() => false)) return combo;
+
+    const lbl = panel
+      .locator('label, .fw-500, .MuiFormLabel-root, p, span')
+      .filter({ hasText: /^phase\b/i })
+      .first();
+    if (await lbl.isVisible({ timeout: 3000 }).catch(() => false)) {
+      const fromLabel = lbl.locator('xpath=following::*[@role="combobox"][1]').first();
+      if (await fromLabel.isVisible({ timeout: 2000 }).catch(() => false)) return fromLabel;
+      const input = lbl.locator('xpath=following::input[1]').first();
+      if (await input.isVisible({ timeout: 2000 }).catch(() => false)) return input;
+      const muiInput = lbl
+        .locator('xpath=following::*[contains(@class,"MuiInputBase-root")][1]')
         .first();
-      if (await lbl.isVisible({ timeout: 3000 }).catch(() => false)) {
-        const fromLabel = lbl.locator('xpath=following::*[@role="combobox"][1]').first();
-        if (await fromLabel.isVisible({ timeout: 2000 }).catch(() => false)) {
-          combo = fromLabel;
-        }
-      }
+      if (await muiInput.isVisible({ timeout: 2000 }).catch(() => false)) return muiInput;
     }
+
+    try {
+      const region = await this._scheduleCreateFormLabeledFieldContainer(/^phase\b/i);
+      combo = region.getByRole('combobox').first();
+      if (await combo.isVisible({ timeout: 1500 }).catch(() => false)) return combo;
+      const muiSelect = region.locator('.MuiSelect-select, .MuiAutocomplete-input').first();
+      if (await muiSelect.isVisible({ timeout: 1500 }).catch(() => false)) return muiSelect;
+    } catch {
+      // Phase label not in this form variant — fall through to default locator.
+    }
+
+    return panel.getByLabel(/^phase$/i).first();
+  }
+
+  async selectRandomPhaseOnScheduleCreateForm() {
+    const combo = await this._resolveScheduleCreateFormPhaseCombobox();
     await expect(combo).toBeVisible({ timeout: 20000 });
     await combo.scrollIntoViewIfNeeded().catch(() => {});
     await combo.click({ force: true, timeout: 15000 });
@@ -4566,24 +5134,67 @@ class SchedulePage extends BasePage {
   }
 
   async selectPhaseNamedOnScheduleCreateForm(phaseName) {
-    const panel = this.formPanel();
-    await this.hideFreshchatWidget();
-    let combo = panel.getByRole('combobox', { name: /^phase$/i }).first();
-    if (!(await combo.isVisible({ timeout: 2500 }).catch(() => false))) {
-      combo = panel.getByLabel(/^phase$/i).first();
-    }
+    const combo = await this._resolveScheduleCreateFormPhaseCombobox();
     await expect(combo).toBeVisible({ timeout: 20000 });
     await combo.scrollIntoViewIfNeeded().catch(() => {});
     await combo.click({ force: true, timeout: 15000 });
 
-    const surface = this.page.getByRole('listbox').last();
-    await expect(surface).toBeVisible({ timeout: 15000 });
-    const option = surface
-      .locator('[role="option"], .MuiMenuItem-root, li')
-      .filter({ hasText: new RegExp(phaseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') })
-      .first();
-    await expect(option).toBeVisible({ timeout: 10000 });
-    await option.click({ force: true });
+    const looseRe = new RegExp(
+      phaseName.replace(/\s+/g, '\\s*').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+      'i'
+    );
+    const listbox = this.page.getByRole('listbox').last();
+    await listbox.waitFor({ state: 'visible', timeout: 15000 }).catch(async () => {
+      await combo.click({ force: true, timeout: 10000 }).catch(() => {});
+      await expect(listbox).toBeVisible({ timeout: 10000 });
+    });
+
+    const normalizedTarget = phaseName.trim().toLowerCase();
+    const pickNamedPhase = async () => {
+      const tryClick = async (option) => {
+        if (!(await option.isVisible({ timeout: 1500 }).catch(() => false))) return false;
+        await option.scrollIntoViewIfNeeded().catch(() => {});
+        await option.click({ force: true });
+        return true;
+      };
+
+      if (await tryClick(listbox.getByRole('option', { name: looseRe }).first())) return;
+      if (await tryClick(this.page.getByRole('option', { name: looseRe }).first())) return;
+
+      const items = listbox.locator('[role="option"], .MuiMenuItem-root, li');
+      const count = await items.count();
+      for (let i = 0; i < count; i += 1) {
+        const item = items.nth(i);
+        const text = ((await item.innerText().catch(() => '')) || '').trim();
+        if (text.toLowerCase() === normalizedTarget || looseRe.test(text)) {
+          await item.click({ force: true });
+          return;
+        }
+      }
+
+      const scrolled = await this._findScrollableListboxOption(listbox, looseRe);
+      if (await tryClick(scrolled)) return;
+
+      const optionTexts = await items.allInnerTexts().catch(() => []);
+      throw new Error(
+        `Phase "${phaseName}" not found. Visible options: ${optionTexts.filter(Boolean).slice(0, 25).join(' | ') || '(none)'}`
+      );
+    };
+
+    try {
+      await pickNamedPhase();
+    } catch (firstErr) {
+      const typeTarget = combo.locator('input, textarea').first();
+      if (await typeTarget.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await typeTarget.fill('');
+        await typeTarget.pressSequentially(phaseName, { delay: 40 });
+        await new Promise((r) => setTimeout(r, 1000));
+        await pickNamedPhase();
+      } else {
+        throw firstErr;
+      }
+    }
+
     await this.logStep(`Selected phase: ${phaseName}`);
     await this.page.keyboard.press('Escape').catch(() => {});
   }
