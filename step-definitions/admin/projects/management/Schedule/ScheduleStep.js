@@ -432,9 +432,20 @@ When('I remove the first task on the open schedule edit form', async function ()
   await schedulePage.removeFirstTaskInEdit();
 });
 
+When('I remove all tasks on the open schedule edit form', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.logStep('removeAllTasksInEdit');
+  await schedulePage.removeAllTasksInEdit();
+});
+
 Then('the first task should be removed on the open schedule edit form', async function () {
   const schedulePage = getSchedulePage(this);
   await schedulePage.expectTaskRemovedInEdit();
+});
+
+Then('all tasks should be removed on the open schedule edit form', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.expectAllTasksRemovedInEdit();
 });
 
 When('I remove the first reminder on the open schedule edit form', async function () {
@@ -442,9 +453,20 @@ When('I remove the first reminder on the open schedule edit form', async functio
   await schedulePage.removeFirstReminderInEdit();
 });
 
+When('I remove all reminders on the open schedule edit form', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.logStep('removeAllRemindersInEdit');
+  await schedulePage.removeAllRemindersInEdit();
+});
+
 Then('the first reminder should be removed on the open schedule edit form', async function () {
   const schedulePage = getSchedulePage(this);
   await schedulePage.expectReminderRemovedInEdit();
+});
+
+Then('all reminders should be removed on the open schedule edit form', async function () {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.expectAllRemindersRemovedInEdit();
 });
 
 When('I clear the phase on the open schedule edit form', async function () {
@@ -549,7 +571,7 @@ Then(
 
 Then('in list tab schedule {string} duration shows one working day', async function (name) {
   const schedulePage = getSchedulePage(this);
-  await schedulePage.logStep(`Duration = 1d (${name})`);
+  await schedulePage.logStep(`Verify list duration (${name})`);
   await schedulePage.expectListTabScheduleDurationIndicatesOneWorkingDay(name);
 });
 

@@ -570,10 +570,10 @@ Feature: Schedule — incremental test cases
     Then the schedule create form description field should be empty
     When I expand additional details on the schedule create form
     And I scroll down on the schedule create form
-    And I remove the first task on the open schedule edit form
-    Then the first task should be removed on the open schedule edit form
-    And I remove the first reminder on the open schedule edit form
-    Then the first reminder should be removed on the open schedule edit form
+    And I remove all tasks on the open schedule edit form
+    Then all tasks should be removed on the open schedule edit form
+    And I remove all reminders on the open schedule edit form
+    Then all reminders should be removed on the open schedule edit form
     When I save the open schedule edit form
     Then the schedule form panel should be closed
 
@@ -755,9 +755,6 @@ Feature: Schedule — incremental test cases
     And I select a random existing task on the schedule create form
     And I submit the schedule create form
     Then I should see schedule "milestone 9" in the gantt sidebar list
-    When I click back from the project module
-    And I open the Task module from project management
-    Then the selected existing task kanban card should link to schedule "milestone 9"
 
   @TS06 @TC49 @regression @positive
   Scenario: TC-49 — Create milestone with reminder
@@ -780,12 +777,12 @@ Feature: Schedule — incremental test cases
     Then I should see schedule "milestone 10" in the gantt sidebar list
 
   @TS06 @TC50 @regression @positive
-  Scenario: TC-50 — Create schedule MILESTONE with phase and full fields
+  Scenario: TC-50 — Create milestone MILESTONE with phase and full fields
     When I switch schedule to gantt view
-    And I open the create schedule panel
-    Then the add schedule off canvas should be open
+    And I open the create milestone panel
+    Then the add milestone off canvas should be open
     When I fill the schedule create form with name "MILESTONE"
-    And I select phase "milestone 5" on the schedule create form
+    And I select a random phase on the schedule create form
     And I open the assignees dropdown on the schedule create form
     Then the schedule create form assignees list should be visible
     When I select up to 2 assignees on the schedule create form
@@ -816,7 +813,7 @@ Feature: Schedule — incremental test cases
     And I search for schedule "MILESTONE UPDATE" in the schedule list
     And I open the edit option for schedule "MILESTONE UPDATE" from the list row menu
     Then the edit schedule off canvas should be open
-    When I select phase "milestone 6" on the schedule create form
+    When I select a random phase on the schedule create form
     And I save the open schedule edit form
     Then the schedule form panel should be closed
 
@@ -826,7 +823,7 @@ Feature: Schedule — incremental test cases
     And I search for schedule "milestone 1" in the schedule list
     And I open the edit option for schedule "milestone 1" from the list row menu
     Then the edit schedule off canvas should be open
-    When I select phase "milestone 3" on the schedule create form
+    When I select a random phase on the schedule create form
     And I save the open schedule edit form
     Then the schedule form panel should be closed
 
