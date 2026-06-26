@@ -1091,7 +1091,15 @@ class SchedulePage extends BasePage {
 
   async updateScheduleAssigneeFromListRowMenu(name) {
     await this.openEditForListSchedule(name);
+    await this.hideFreshchatWidget();
+
+    const region = await this._scheduleCreateFormLabeledFieldContainer(/^assignees?\b/i);
+    if ((await region.locator('.MuiChip-root').count().catch(() => 0)) > 0) {
+      await this.removeAssigneeInEdit();
+    }
+
     await this.openScheduleCreateFormAssigneesDropdown();
+    await this.expectScheduleCreateFormAssigneesListVisible();
     await this.selectUpToTwoAssigneesOnScheduleCreateForm(1);
     await this.submitPanelPrimary();
     await this.searchListTabScheduleIfAvailable(name);
@@ -1270,13 +1278,12 @@ class SchedulePage extends BasePage {
   }
 
   async deleteNamedItemViaRowMenu(name) {
-    const row = this.page.locator(`tr:has-text("${name}")`).first();
-    await expect(row).toBeVisible({ timeout: 60000 });
-    const menuBtn = row.locator('button').last();
-    await menuBtn.click();
+    const row = await this.findListTabRowByScrolling(name);
+    await this._openListRowActionsMenu(row);
     await this._clickDeleteInOpenActionsMenu();
     await this._confirmDeleteSchedulePopup();
     await expect(row).toBeHidden({ timeout: 60000 }).catch(() => {});
+    await this.logStep(`Deleted from list row menu: ${name}`);
   }
 
   async _openListRowActionsMenu(row) {
@@ -1451,6 +1458,51 @@ class SchedulePage extends BasePage {
     await this._waitScheduleSettled();
   }
 
+  async _findGanttChartMilestoneMarkerBySidebarRow(row, name) {
+    const tl = this.ganttTimelineHost();
+    await expect(tl).toBeVisible({ timeout: this.uiTimeout });
+    const rowBox = row ? await row.boundingBox() : null;
+    const rowCenterY = rowBox ? rowBox.y + rowBox.height / 2 : null;
+
+    const label = tl.getByText(name, { exact: true }).first();
+    if (await label.isVisible({ timeout: 1500 }).catch(() => false)) {
+      const rowContainer = label.locator('xpath=ancestor::div[1]');
+      const diamondInRow = rowContainer.locator('div.MuiBox-root[aria-hidden="true"]').first();
+      if (await diamondInRow.isVisible({ timeout: 500 }).catch(() => false)) {
+        return diamondInRow;
+      }
+
+      const precedingDiamond = label.locator(
+        'xpath=preceding-sibling::div[contains(@class,"MuiBox-root")][@aria-hidden="true"][1]'
+      );
+      if (await precedingDiamond.isVisible({ timeout: 500 }).catch(() => false)) {
+        return precedingDiamond;
+      }
+
+      return label;
+    }
+
+    if (rowCenterY == null) return null;
+
+    const markers = tl.locator('div.MuiBox-root[aria-hidden="true"]');
+    const count = await markers.count().catch(() => 0);
+    let best = null;
+    let bestDelta = Infinity;
+    for (let i = 0; i < count; i += 1) {
+      const marker = markers.nth(i);
+      if (!(await marker.isVisible({ timeout: 200 }).catch(() => false))) continue;
+      const box = await marker.boundingBox();
+      if (!box || box.width < 4 || box.height < 4) continue;
+      const centerY = box.y + box.height / 2;
+      const delta = Math.abs(centerY - rowCenterY);
+      if (delta < bestDelta && delta <= 25) {
+        bestDelta = delta;
+        best = marker;
+      }
+    }
+    return best;
+  }
+
   async _findGanttChartBarBySidebarRow(row, name) {
     const tl = this.ganttTimelineHost();
     await expect(tl).toBeVisible({ timeout: this.uiTimeout });
@@ -1460,6 +1512,11 @@ class SchedulePage extends BasePage {
     const rowCenterY = rowBox.y + rowBox.height / 2;
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const nameRe = new RegExp(`^${escaped}$`, 'i');
+
+    if (this._looksLikeMilestoneName(name)) {
+      const milestoneMarker = await this._findGanttChartMilestoneMarkerBySidebarRow(row, name);
+      if (milestoneMarker) return milestoneMarker;
+    }
 
     const textTarget = tl.getByText(name, { exact: true }).first();
     if (await textTarget.isVisible({ timeout: 1500 }).catch(() => false)) {
@@ -1514,6 +1571,10 @@ class SchedulePage extends BasePage {
 
     for (const ratio of [0, 0.25, 0.5, 0.75, 1]) {
       await this._scrollGanttTimelineToRatio(ratio);
+      if (this._looksLikeMilestoneName(name)) {
+        const milestoneMarker = await this._findGanttChartMilestoneMarkerBySidebarRow(null, name);
+        if (milestoneMarker) return milestoneMarker;
+      }
       const target = await pickVisible([
         () => tl.getByText(name, { exact: true }).first(),
         () => tl.locator('*').filter({ hasText: nameRe }).first(),
@@ -1555,6 +1616,20 @@ class SchedulePage extends BasePage {
 
   async _openGanttChartContextMenuForSchedule(name, sidebarRow = null) {
     if (sidebarRow) {
+      if (this._looksLikeMilestoneName(name)) {
+        const milestoneMarker = await this._findGanttChartMilestoneMarkerBySidebarRow(sidebarRow, name);
+        if (milestoneMarker) {
+          let opened = false;
+          await expect(async () => {
+            await this._openContextMenuOnScheduleTarget(milestoneMarker);
+            opened = true;
+          })
+            .toPass({ timeout: 15000, intervals: [500, 1000] })
+            .catch(() => {});
+          if (opened) return;
+        }
+      }
+
       let opened = false;
       await expect(async () => {
         await this._openGanttChartContextMenuAtSidebarRowY(sidebarRow);
@@ -1636,6 +1711,25 @@ class SchedulePage extends BasePage {
     await this._confirmDeleteSchedulePopup();
     await this.logStep(`Deleted schedule from gantt chart context menu: ${name}`);
     return name;
+  }
+
+  async deleteNamedItemFromGanttChartContextMenu(name) {
+    await this.switchToGanttView();
+    await this.searchGanttSidebarScheduleIfAvailable(name);
+    const row = await this.findGanttSidebarRowByExactName(name);
+    await expect(row).toBeVisible({ timeout: this.uiTimeout });
+    await this._selectGanttSidebarScheduleRow(row);
+
+    if (this._looksLikeMilestoneName(name)) {
+      const marker = await this._findGanttChartMilestoneMarkerBySidebarRow(row, name);
+      await expect(marker).toBeVisible({ timeout: this.uiTimeout });
+      await this.logStep(`Milestone "${name}" visible on gantt chart`);
+    }
+
+    await this._openGanttChartContextMenuForSchedule(name, row);
+    await this._clickDeleteInOpenActionsMenu();
+    await this._confirmDeleteSchedulePopup();
+    await this.logStep(`Deleted from gantt chart context menu: ${name}`);
   }
 
   async deleteRandomScheduleFromListRowMenu() {
@@ -3270,8 +3364,17 @@ class SchedulePage extends BasePage {
     return this.addMilestonePanelHeading().isVisible({ timeout: 1500 }).catch(() => false);
   }
 
+  /** Milestone create/edit forms have start date only — no enabled end date field. */
+  async _isMilestoneScheduleFormWithoutEndDate() {
+    if (await this._isMilestoneCreateFormOpen()) return true;
+    const panel = await this.activeFormPanel();
+    const endInput = panel.getByLabel(/end date/i).first();
+    if (!(await endInput.isVisible({ timeout: 1500 }).catch(() => false))) return true;
+    return !(await endInput.isEnabled({ timeout: 1500 }).catch(() => false));
+  }
+
   async pickRandomStartDateTimeOnScheduleCreateForm() {
-    const panel = this.formPanel();
+    const panel = await this.activeFormPanel();
     await this._prepareCreateFormForDateEntry();
     const start = this.randomWeekdayDateTimeBetween(3, 25);
     this._pendingScheduleRandomStartMs = start.getTime();
@@ -3279,7 +3382,7 @@ class SchedulePage extends BasePage {
     this._scheduleCreateFormRequiresNonZeroDuration = false;
     await this._pickScheduleCreateFormDateTime(panel, start, 'start');
 
-    if (await this._isMilestoneCreateFormOpen()) {
+    if (await this._isMilestoneScheduleFormWithoutEndDate()) {
       await this._muiConfirmPickerIfPresent();
       await this.page.keyboard.press('Escape').catch(() => {});
       await this._scheduleDatePickerPopper().waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
@@ -3649,7 +3752,7 @@ class SchedulePage extends BasePage {
   async openScheduleCreateFormAssigneesDropdown() {
     await this.hideFreshchatWidget();
     await this.page.keyboard.press('Escape').catch(() => {});
-    const panel = this.formPanel();
+    const panel = await this.activeFormPanel();
     const label = panel
       .locator('label, .fw-500, .MuiFormLabel-root, p, span')
       .filter({ hasText: /^assignees?\b/i })
@@ -3775,7 +3878,19 @@ class SchedulePage extends BasePage {
     }
 
     const options = surface.locator('[role="option"], .MuiMenuItem-root, li').filter({ visible: true });
-    const optionCount = await options.count();
+    let optionCount = await options.count();
+    if (optionCount === 0) {
+      if (await this._scheduleAssigneeTab('users').isVisible({ timeout: 2000 }).catch(() => false)) {
+        const selected = await this._selectAssigneesFromScheduleAssigneeTab('users', maxCount);
+        await this._dismissScheduleAssigneePickerByClickingAway();
+        await this.logStep(`Selected ${selected} assignee(s) from Users tab`);
+        return selected;
+      }
+      await this._selectRandomAssigneeCheckboxFromScheduleAssigneeTabs();
+      await this._dismissScheduleAssigneePickerByClickingAway();
+      await this.logStep('Selected assignee from Users/Vendors tabs');
+      return Math.min(maxCount, 1);
+    }
     expect(optionCount).toBeGreaterThan(0);
     const toSelect = Math.min(maxCount, optionCount);
     for (let i = 0; i < toSelect; i += 1) {
@@ -5209,7 +5324,11 @@ class SchedulePage extends BasePage {
   async updateNamedScheduleStartDateFromListRowMenu(name) {
     await this.openEditForListSchedule(name);
     await this.pickRandomStartDateTimeOnScheduleCreateForm();
-    await this.pickRandomEndDateTimeAfterStartOnScheduleCreateForm();
+    const isMilestone =
+      this._looksLikeMilestoneName(name) || (await this._isMilestoneScheduleFormWithoutEndDate());
+    if (!isMilestone) {
+      await this.pickRandomEndDateTimeAfterStartOnScheduleCreateForm();
+    }
     await this.submitPanelPrimary();
     await this.searchListTabScheduleIfAvailable(name);
   }

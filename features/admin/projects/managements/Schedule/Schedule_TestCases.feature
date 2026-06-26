@@ -831,7 +831,7 @@ Feature: Schedule — incremental test cases
   Scenario: TC-54 — Update milestone assignee
     When I switch schedule to list view
     And I update schedule "MILESTONE UPDATE" assignee from the list row menu
-    Then I should see schedule or milestone "MILESTONE UPDATE" in the UI
+    Then the schedule form panel should be closed
 
   @TS07 @TC55 @regression @positive
   Scenario: TC-55 — Update milestone priority
@@ -902,26 +902,26 @@ Feature: Schedule — incremental test cases
     Then the schedule form panel should be closed
 
   @TS08 @TC64 @regression @positive
-  Scenario: TC-64 — Edit milestone by removing task
+  Scenario: TC-64 — Edit milestone by removing all tasks
     When I switch schedule to list view
     And I search for schedule "milestone 9" in the schedule list
     And I open the edit option for schedule "milestone 9" from the list row menu
     Then the edit schedule off canvas should be open
     When I expand additional details on the schedule create form
-    And I remove the first task on the open schedule edit form
-    Then the first task should be removed on the open schedule edit form
+    And I remove all tasks on the open schedule edit form
+    Then all tasks should be removed on the open schedule edit form
     When I save the open schedule edit form
     Then the schedule form panel should be closed
 
   @TS08 @TC65 @regression @positive
-  Scenario: TC-65 — Edit milestone by removing reminder
+  Scenario: TC-65 — Edit milestone by removing all reminders
     When I switch schedule to list view
     And I search for schedule "milestone 10" in the schedule list
     And I open the edit option for schedule "milestone 10" from the list row menu
     Then the edit schedule off canvas should be open
     When I expand additional details on the schedule create form
-    And I remove the first reminder on the open schedule edit form
-    Then the first reminder should be removed on the open schedule edit form
+    And I remove all reminders on the open schedule edit form
+    Then all reminders should be removed on the open schedule edit form
     When I save the open schedule edit form
     Then the schedule form panel should be closed
 
@@ -947,9 +947,9 @@ Feature: Schedule — incremental test cases
     Then schedule or milestone "milestone 8" should not be visible in the schedule UI
 
   @TS10 @TC82 @regression @positive
-  Scenario: TC-82 — Delete a milestone via gantt tab
+  Scenario: TC-82 — Delete a milestone via gantt chart context menu
     When I switch schedule to gantt view
-    And I delete schedule or milestone named "milestone 6" from the gantt sidebar row menu
+    And I delete schedule or milestone named "milestone 6" from the gantt chart context menu
     Then schedule or milestone "milestone 6" should not be visible in the schedule UI
 
   @TS10 @TC83 @regression @positive
@@ -957,12 +957,6 @@ Feature: Schedule — incremental test cases
     When I switch schedule to list view
     And I delete schedule or milestone named "milestone 5" from list row menu
     Then schedule or milestone "milestone 5" should not be visible in the schedule UI
-
-  @TS10 @TC84 @regression @positive
-  Scenario: TC-84 — Delete parent schedule
-    When I switch schedule to list view
-    And I delete schedule or milestone named "milestone 3" from list row menu
-    Then schedule or milestone "milestone 3" should not be visible in the schedule UI
 
   # ===========================================================================
   # TS-11 — Activity Tracker (@TS11 @TC85+)

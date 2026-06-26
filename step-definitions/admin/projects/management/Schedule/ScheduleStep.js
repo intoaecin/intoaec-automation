@@ -852,6 +852,12 @@ When('I delete schedule or milestone named {string} from the gantt sidebar row m
   await schedulePage.deleteNamedItemFromGanttSidebarMenu(name);
 });
 
+When('I delete schedule or milestone named {string} from the gantt chart context menu', async function (name) {
+  const schedulePage = getSchedulePage(this);
+  await schedulePage.logStep(`deleteNamedItemFromGanttChartContextMenu ${name}`);
+  await schedulePage.deleteNamedItemFromGanttChartContextMenu(name);
+});
+
 Then('schedule or milestone {string} should not be visible in the schedule UI', async function (name) {
   const schedulePage = getSchedulePage(this);
   await schedulePage.expectScheduleNotVisibleInUi(name);
