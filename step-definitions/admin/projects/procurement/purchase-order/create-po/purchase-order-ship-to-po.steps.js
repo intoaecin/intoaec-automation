@@ -10,10 +10,33 @@ function getPurchaseOrderShipToPoPage(world) {
 
 When(
   'I check the Ship To checkbox on the purchase order form',
-  { timeout: 120000 },
+  { timeout: 60000 },
   async function () {
     const po = getPurchaseOrderShipToPoPage(this);
     await po.checkShipToCheckbox();
   }
 );
 
+When(
+  'I add a manual line item for ship to purchase order with name {string} description {string} quantity {string} unit {string} rate {string}',
+  { timeout: 90000 },
+  async function (name, description, quantity, unit, rate) {
+    const po = getPurchaseOrderShipToPoPage(this);
+    await po.addLineItemManuallyForShipToFlow({
+      itemName: name,
+      description,
+      quantity,
+      unitLabel: unit,
+      rate,
+    });
+  }
+);
+
+When(
+  'I compose and send the purchase order email for ship to flow',
+  { timeout: 180000 },
+  async function () {
+    const po = getPurchaseOrderShipToPoPage(this);
+    await po.composeAndSendEmailForShipToFlow();
+  }
+);

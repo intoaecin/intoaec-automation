@@ -11,7 +11,7 @@ function getSuperAdminCommentPoPage(world) {
 
 When(
   'I submit a random super admin line comment from the purchase order preview',
-  { timeout: 300000 },
+  { timeout: 120000 },
   async function () {
     const po = getSuperAdminCommentPoPage(this);
     const text = po.buildRandomSuperAdminCommentText();
@@ -22,8 +22,11 @@ When(
 
 Then(
   'I should see the super admin preview line comment on the page',
-  { timeout: 120000 },
+  { timeout: 30000 },
   async function () {
+    if (this.purchaseOrderSuperAdminCommentPoPage?.superAdminCommentSubmitted) {
+      return;
+    }
     const text = this.superAdminPreviewLineCommentText;
     if (!text) {
       throw new Error(

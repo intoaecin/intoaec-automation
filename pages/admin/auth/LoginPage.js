@@ -12,8 +12,17 @@ class LoginPage extends BasePage {
   }
 
   async goto() {
-    await this.page.goto(`${env.admin}/auth/signIn`, { waitUntil: 'domcontentloaded' });
-    await this.page.waitForLoadState('networkidle').catch(() => {});
+    await this.page.goto(env.admin, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000,
+    });
+    if (this.isAlreadyAuthenticated()) {
+      return;
+    }
+    await this.page.goto(`${env.admin}/auth/signIn`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000,
+    });
   }
 
   async login(email, password) {
@@ -36,13 +45,28 @@ class LoginPage extends BasePage {
 
     await this.loginButton.waitFor({ state: 'visible', timeout: 15000 });
     await this.loginButton.click();
+    const ok = await this.isLoginSuccessful();
+    if (!ok) {
+      throw new Error('Login did not leave the sign-in page within the expected time.');
+    }
   }
 
   async isLoginSuccessful() {
     try {
-      await this.page.waitForURL(
-        url => !url.toString().includes('signIn'), { timeout: 15000 }
-      );
+      await Promise.race([
+        this.page.waitForURL(
+          url => !url.toString().includes('signIn'),
+          { timeout: 45000 }
+        ),
+        this.page
+          .getByLabel(/clients\/projects/i)
+          .first()
+          .waitFor({ state: 'visible', timeout: 45000 }),
+        this.page
+          .getByText(/dashboard/i)
+          .first()
+          .waitFor({ state: 'visible', timeout: 45000 }),
+      ]);
       return true;
     } catch {
       return false;
@@ -56,7 +80,6 @@ class LoginPage extends BasePage {
       return;
     }
     await this.login(email, password);
-    await this.isLoginSuccessful();
   }
 
   /** True when the app is already past the sign-in screen (reused session / same browser run). */

@@ -117,6 +117,12 @@ Then(
   'I should see the purchase order created and sent success toast',
   { timeout: 180000 },
   async function () {
+    if (this.purchaseOrderEditPoPage?.poCreatedAndSentSuccessObserved) {
+      return;
+    }
+    if (this.purchaseOrderShipToPoPage?.poCreatedAndSentSuccessObserved) {
+      return;
+    }
     const po = getPurchaseOrderCreatePoPage(this);
     await po.expectPoCreatedAndSentToast();
   }

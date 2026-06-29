@@ -1172,6 +1172,36 @@ class EstimatePage extends BasePage {
     await this.waitForNetworkIdle();
   }
 
+  async createAndSendMinimalEstimateForRfq(title) {
+    const finalTitle = String(title || `RFQ Estimate ${Date.now()}`).trim();
+    const sectionName = `SEC-${this.randomLetters(4)}`;
+    const itemName = `ITEM-${this.randomLetters(4)}`;
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `[Estimate][${new Date().toISOString()}] Creating sent estimate "${finalTitle}" for RFQ start-from-estimate flow`
+    );
+
+    await this.clickCreateEstimate();
+    await this.startFromScratchAndProceed();
+    await this.fillEstimateTitleOnly(finalTitle);
+    await this.addSection(sectionName);
+    await this.addManualItem(
+      {
+        name: itemName,
+        description: 'RFQ start from estimate item',
+        qty: 1,
+        unit: 'Nos',
+        rate: 100,
+        profit: 10
+      },
+      { manualIndex: 0 }
+    );
+    await this.composeAndSendEmail();
+
+    return finalTitle;
+  }
+
   async saveAsDraftFromActionMenu() {
     const actionBtn = this.page.getByRole('button', { name: 'Action', exact: true }).first();
     await expect(actionBtn).toBeVisible({ timeout: this.defaultTimeout });

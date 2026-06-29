@@ -15,8 +15,7 @@ Feature: Purchase Order — create PO with Ship To checked and send email
     When I start creating a purchase order from scratch
     And I fill purchase order title with "PO Ship To"
     And I add the first vendor from the vendor modal
-    And I add a manual line item with name "cable wire" description "ccccc" quantity "10" unit "Nos" rate "2000"
+    And I add a manual line item for ship to purchase order with name "cable wire" description "ccccc" quantity "10" unit "Nos" rate "2000"
     And I check the Ship To checkbox on the purchase order form
-    And I compose and send the purchase order email
+    And I compose and send the purchase order email for ship to flow
     Then I should see the purchase order created and sent success toast
-

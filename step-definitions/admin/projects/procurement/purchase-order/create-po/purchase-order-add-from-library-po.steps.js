@@ -96,3 +96,12 @@ Then(
     await po.expectPurchaseOrderComposeEmailDialogFromActionMenu();
   }
 );
+
+When(
+  'I click send email in the purchase order compose dialog after add from library',
+  { timeout: 120000 },
+  async function () {
+    const po = getPurchaseOrderAddFromLibraryPoPage(this);
+    await po.clickSendEmailInComposeDialogToCompleteAddFromLibraryFlow();
+  }
+);
