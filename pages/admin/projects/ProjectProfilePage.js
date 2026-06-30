@@ -101,6 +101,27 @@ class ProjectProfilePage extends BasePage {
       return;
     }
 
+    // Assets card: same Project Management grid as Schedule/Task; generic card matching often misses it.
+    if ((name || '').trim().toLowerCase() === 'assets') {
+      const assetsTimeout = 40000;
+      const grid = scope
+        .locator(
+          'div.MuiGrid-root.MuiGrid-container.MuiGrid-spacing-xs-2, motion.div.MuiGrid-root.MuiGrid-container.MuiGrid-spacing-xs-2'
+        )
+        .first();
+      const assetsByLabel = grid
+        .locator('.MuiCard-root, .MuiPaper-root, [role="button"], a, div')
+        .filter({ hasText: text })
+        .first();
+      const assetsCell = grid.locator('div').filter({ has: scope.getByText(text) }).first();
+      const assetsCard = assetsByLabel.or(assetsCell).first();
+      await expect(assetsCard).toBeVisible({ timeout: assetsTimeout });
+      await assetsCard.scrollIntoViewIfNeeded().catch(() => {});
+      await assetsCard.click({ timeout: assetsTimeout });
+      await this.page.waitForLoadState('domcontentloaded');
+      return;
+    }
+
     // Task card: same Project Management grid as Schedule; generic card matching often misses it.
     if ((name || '').trim().toLowerCase() === 'task') {
       const taskTimeout = 40000;

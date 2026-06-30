@@ -9,7 +9,10 @@
     "test:admin:account:myorganization": "npx cucumber-js features/admin/account/MyOrganization.feature",
     "test:admin:activity:activitytracker": "npx cucumber-js features/admin/activity/ActivityTracker.feature",
     "test:admin:auth:login": "npx cucumber-js features/admin/auth/login.feature",
-    "test:admin:common:calllog": "npx cucumber-js features/admin/common/CallLog.feature",
+    "test:admin:common:calllog": "npx cucumber-js features/admin/common/CallLog/",
+    "test:admin:common:calllog:create": "npx cucumber-js features/admin/common/CallLog/createCallLog.feature",
+    "test:admin:common:calllog:edit": "npx cucumber-js features/admin/common/CallLog/editCallLog.feature",
+    "test:admin:common:calllog:delete": "npx cucumber-js features/admin/common/CallLog/deleteCallLog.feature",
     "test:admin:common:communication": "npx cucumber-js features/admin/common/Communication.feature",
     "test:admin:common:document": "npx cucumber-js features/admin/common/Document.feature",
     "test:admin:common:event": "npx cucumber-js features/admin/common/Event.feature",
@@ -124,7 +127,10 @@
     "test:admin:templates:termsconditionstemplate": "npx cucumber-js features/admin/templates/TermsConditionsTemplate.feature",
     "test:admin:resources:asset:create": "npx cucumber-js features/admin/resources/Asset/asset.feature",
     "test:admin:resources:asset:edit": "npx cucumber-js features/admin/resources/Asset/editAsset.feature",
-    "test:admin:resources:asset:delete": "npx cucumber-js features/admin/resources/Asset/deleteAsset.feature"
+    "test:admin:resources:asset:delete": "npx cucumber-js features/admin/resources/Asset/deleteAsset.feature",
+    "test:admin:projects:clientassets:request": "npx cucumber-js features/admin/projects/management/ClientAssets/requestAsset.feature",
+    "test:admin:resources:assetrequest:approve": "npx cucumber-js features/admin/resources/AssetRequest/approveAssetRequest.feature",
+    "test:admin:resources:assetrequest:decline": "npx cucumber-js features/admin/resources/AssetRequest/declineAssetRequest.feature"
   },
   "devDependencies": {
     "@cucumber/cucumber": "^12.7.0",
