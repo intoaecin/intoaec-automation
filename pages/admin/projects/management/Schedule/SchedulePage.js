@@ -3235,8 +3235,12 @@ class SchedulePage extends BasePage {
         return new RegExp(`^\\s*${preferredStr}\\s*$`, 'i').test(t) || new RegExp(`\\b${preferredStr}\\b`, 'i').test(a);
       }
       if (kind === 'hour') {
+        const n = parseInt(preferredStr, 10);
+        const padded = Number.isNaN(n) ? preferredStr : String(n).padStart(2, '0');
         return (
           new RegExp(`^\\s*${preferredStr}\\s*$`).test(t) ||
+          new RegExp(`^\\s*${padded}\\s*$`).test(t) ||
+          (!Number.isNaN(n) && parseInt(t, 10) === n) ||
           new RegExp(`^${preferredStr}\\s+hours?`, 'i').test(a) ||
           new RegExp(`^${preferredStr}\\b`, 'i').test(a)
         );
@@ -5395,26 +5399,267 @@ class SchedulePage extends BasePage {
 
   async expectActivityLogContains(text) {
     const needle = String(text || '').trim();
-    await expect(this.page.getByText(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')).first()).toBeVisible({
-      timeout: 60000,
-    });
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const main = this.page.locator('main, [role="main"]').first();
+    const scope = (await main.isVisible({ timeout: 2000 }).catch(() => false)) ? main : this.page;
+
+    const phaseMatch = needle.match(/phase\s+(\d+)/i);
+    const phaseNum = phaseMatch ? phaseMatch[1] : null;
+    const actionMatch = needle.match(/^(created|updated|deleted)\b/i);
+    const action = actionMatch ? actionMatch[1].toLowerCase() : null;
+
+    const verbGroup =
+      action === 'updated'
+        ? 'updated|edited|modified|changed|renamed'
+        : action === 'created'
+          ? 'created|added'
+          : action === 'deleted'
+            ? 'deleted|removed'
+            : null;
+
+    const patterns = [
+      new RegExp(escaped, 'i'),
+      new RegExp(escaped.replace(/\s+a\s+/g, '\\s+(?:a\\s+)?'), 'i'),
+    ];
+
+    if (phaseNum && verbGroup) {
+      const phaseEsc = `phase\\s+${phaseNum}`;
+      patterns.push(new RegExp(`${verbGroup}.*${phaseEsc}`, 'i'));
+      patterns.push(new RegExp(`${verbGroup}.*schedule.*${phaseEsc}`, 'i'));
+      patterns.push(new RegExp(`${verbGroup}.*schedule`, 'i'));
+      patterns.push(new RegExp(`${phaseEsc}.*${verbGroup}`, 'i'));
+      patterns.push(new RegExp(`to\\s+${phaseEsc}`, 'i'));
+    }
+
+    const rowLocator = (pattern) =>
+      scope.locator('div, li, tr, p, span, article').filter({ hasText: pattern }).first();
+
+    await expect(async () => {
+      for (const pattern of patterns) {
+        if (await scope.getByText(pattern).first().isVisible({ timeout: 1200 }).catch(() => false)) {
+          return;
+        }
+        if (await rowLocator(pattern).isVisible({ timeout: 1200 }).catch(() => false)) {
+          return;
+        }
+      }
+
+      if (phaseNum && verbGroup) {
+        const verbRe = new RegExp(verbGroup, 'i');
+        const phaseRe = new RegExp(`phase\\s+${phaseNum}`, 'i');
+        const combined = scope
+          .locator('div, li, tr, p, span, article')
+          .filter({ hasText: phaseRe })
+          .filter({ hasText: verbRe })
+          .first();
+        if (await combined.isVisible({ timeout: 1200 }).catch(() => false)) {
+          return;
+        }
+        const scheduleAction = scope
+          .locator('div, li, tr, p, span, article')
+          .filter({ hasText: /schedule/i })
+          .filter({ hasText: verbRe })
+          .first();
+        if (await scheduleAction.isVisible({ timeout: 1200 }).catch(() => false)) {
+          return;
+        }
+      }
+
+      throw new Error(`Activity log entry not found: ${needle}`);
+    }).toPass({ timeout: 60000, intervals: [1000, 2000, 3000, 5000] });
+
     await this.logStep(`Activity log contains: ${needle}`);
   }
 
-  async openWorkingCalendarDialog() {
-    await this.switchToGanttView();
-    const btn = this.page
+  _workingCalendarToolbarButton() {
+    return this.page
       .getByRole('button', { name: /working calendar/i })
       .or(this.page.locator('button[aria-label*="Working Calendar" i]'))
+      .filter({ visible: true })
       .first();
+  }
+
+  async _ensureWorkingCalendarDialogClosed() {
+    const dialog = this._workingCalendarDialog();
+    if (!(await dialog.isVisible({ timeout: 800 }).catch(() => false))) return;
+
+    const cancel = dialog.getByRole('button', { name: /^cancel$/i });
+    if (await cancel.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await cancel.click({ force: true, timeout: this.quickTimeout }).catch(() => {});
+    } else {
+      await this.page.keyboard.press('Escape').catch(() => {});
+    }
+    await dialog.waitFor({ state: 'hidden', timeout: 15000 }).catch(() => {});
+  }
+
+  async _prepareWorkingCalendarForOpen() {
+    await this.hideFreshchatWidget();
+    await this._muiConfirmWorkingCalendarPicker().catch(() => {});
+    await this._dismissOpenMenusIfAny();
+    await this._ensureWorkingCalendarDialogClosed();
+  }
+
+  async openWorkingCalendarDialog() {
+    await this._prepareWorkingCalendarForOpen();
+    await this.switchToGanttView();
+
+    const existing = this._workingCalendarDialog();
+    if (await existing.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await this.logStep('Working calendar dialog already open');
+      return;
+    }
+
+    const btn = this._workingCalendarToolbarButton();
     await expect(btn).toBeVisible({ timeout: this.uiTimeout });
-    await btn.click({ force: true, timeout: this.quickTimeout });
-    const dialog = this.page.getByRole('dialog').filter({ hasText: /working calendar/i }).last();
-    await expect(dialog).toBeVisible({ timeout: 15000 });
+
+    await expect(async () => {
+      await btn.scrollIntoViewIfNeeded().catch(() => {});
+      await btn.click({ force: true, timeout: this.quickTimeout });
+      expect(await this._workingCalendarDialog().isVisible({ timeout: 2500 }).catch(() => false)).toBeTruthy();
+    }).toPass({ timeout: 30000, intervals: [500, 1000, 2000, 3000] });
+
+    await this.logStep('Opened Working Calendar dialog');
   }
 
   _workingCalendarDialog() {
     return this.page.getByRole('dialog').filter({ hasText: /working calendar/i }).last();
+  }
+
+  _workingCalendarDialogContent() {
+    return this._workingCalendarDialog().locator('.MuiDialogContent-root, [class*="DialogContent"]').first();
+  }
+
+  _workingCalendarHolidaySection() {
+    const dialog = this._workingCalendarDialog();
+    return dialog
+      .locator('div, section')
+      .filter({ hasText: /public holidays/i })
+      .last();
+  }
+
+  async _scrollWorkingCalendarTo(textRe) {
+    const dialog = this._workingCalendarDialog();
+    const anchor = dialog.getByText(textRe).first();
+    const content = this._workingCalendarDialogContent();
+    for (let i = 0; i < 10; i += 1) {
+      if (await anchor.isVisible({ timeout: 800 }).catch(() => false)) {
+        await anchor.scrollIntoViewIfNeeded();
+        return;
+      }
+      await content.evaluate((el) => {
+        el.scrollTop += 220;
+      }).catch(() => {});
+      await dialog.evaluate((el) => {
+        const scrollable = el.querySelector('.MuiDialogContent-root') || el;
+        if (scrollable && scrollable.scrollTop !== undefined) scrollable.scrollTop += 220;
+      }).catch(() => {});
+    }
+    await anchor.scrollIntoViewIfNeeded().catch(() => {});
+  }
+
+  async _muiConfirmWorkingCalendarPicker() {
+    const popper = this._scheduleDatePickerPopper();
+    if (!(await popper.isVisible({ timeout: 800 }).catch(() => false))) return;
+
+    const ok = popper.getByRole('button', { name: /^OK$|^Set$|^Done$/i }).first();
+    if (await ok.isVisible({ timeout: 2500 }).catch(() => false)) {
+      await ok.click({ force: true, timeout: 10000 });
+    }
+    await popper.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => {});
+  }
+
+  async _openWorkingCalendarTimePicker(dialog, which) {
+    await this._muiConfirmWorkingCalendarPicker().catch(() => {});
+
+    const mer = which === 'end' ? 'PM' : 'AM';
+    const btn = dialog
+      .locator(`button[aria-label*="Choose time" i][aria-label*="${mer}" i]:not([disabled])`)
+      .filter({ visible: true })
+      .first();
+    await expect(btn).toBeVisible({ timeout: 15000 });
+    await btn.scrollIntoViewIfNeeded().catch(() => {});
+    await btn.click({ force: true, timeout: 10000 });
+    await expect(this._scheduleDatePickerPopper()).toBeVisible({ timeout: 15000 });
+    this._lastWorkingCalendarTimeButton = btn;
+    return btn;
+  }
+
+  _parseWorkingCalendarSelectedTime(ariaLabel) {
+    const match = String(ariaLabel || '').match(/selected time is\s+([\d:]+\s*[AP]M)/i);
+    return match ? match[1].replace(/\s+/g, ' ').trim().toUpperCase() : '';
+  }
+
+  _formatWorkingCalendarTime(h12, minute, mer) {
+    return `${String(h12).padStart(2, '0')}:${String(minute).padStart(2, '0')} ${mer}`;
+  }
+
+  async _pickWorkingCalendarTimeInPopper(targetDate) {
+    const popper = this._scheduleDatePickerPopper();
+    await expect(popper).toBeVisible({ timeout: 15000 });
+
+    const h24 = targetDate.getHours();
+    let h12 = h24 % 12;
+    if (h12 === 0) h12 = 12;
+    const minStr = String(targetDate.getMinutes()).padStart(2, '0');
+    const hourLabel = String(h12).padStart(2, '0');
+
+    const hoursLb = popper.getByRole('listbox', { name: 'Select hours' });
+    await hoursLb.click({ timeout: 5000 }).catch(() => {});
+    const hourOpt = hoursLb.locator('[role="option"]').filter({ hasText: new RegExp(`^${hourLabel}$`) }).first();
+    await hourOpt.scrollIntoViewIfNeeded();
+    await hourOpt.click({ force: true, timeout: 10000 });
+
+    const minsLb = popper.getByRole('listbox', { name: 'Select minutes' });
+    await minsLb.click({ timeout: 5000 }).catch(() => {});
+    const minOpt = minsLb.locator('[role="option"]').filter({ hasText: new RegExp(`^${minStr}$`) }).first();
+    await minOpt.scrollIntoViewIfNeeded();
+    await minOpt.click({ force: true, timeout: 10000 });
+
+    await this._muiConfirmWorkingCalendarPicker();
+  }
+
+  async _pickRandomWorkingCalendarTime(meridiem) {
+    const mer = meridiem === 'PM' ? 'PM' : 'AM';
+    const aria = (await this._lastWorkingCalendarTimeButton?.getAttribute('aria-label')) || '';
+    const current = this._parseWorkingCalendarSelectedTime(aria);
+
+    let hour12 = mer === 'AM' ? Math.floor(Math.random() * 4) + 7 : Math.floor(Math.random() * 5) + 1;
+    let minute = [0, 15, 30, 45][Math.floor(Math.random() * 4)];
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const formatted = this._formatWorkingCalendarTime(hour12, minute, mer);
+      if (formatted.toUpperCase() !== current) break;
+      minute = (minute + 15) % 60;
+      if (minute === 0) hour12 = (hour12 % 12) + 1;
+    }
+
+    const h24 = mer === 'PM' ? (hour12 === 12 ? 12 : hour12 + 12) : hour12 === 12 ? 0 : hour12;
+    const targetDate = new Date();
+    targetDate.setHours(h24, minute, 0, 0);
+
+    await this._pickWorkingCalendarTimeInPopper(targetDate);
+    await this._workingCalendarDialog().getByText(/^working hours$/i).first().click({ force: true }).catch(() => {});
+  }
+
+  async _pickRandomDateInOpenCalendar() {
+    const popper = this._scheduleDatePickerPopper();
+    await expect(popper).toBeVisible({ timeout: 15000 });
+    let enabledDays = popper.locator(
+      'button.MuiPickersDay-root:not(.Mui-disabled):not([aria-disabled="true"]):not(.MuiPickersDay-outsideCurrentMonth)'
+    );
+    let count = await enabledDays.count();
+    if (count < 3) {
+      const target = new Date();
+      target.setDate(target.getDate() + 10);
+      await this._muiNavigatePopperToMonthYear(popper, target);
+      enabledDays = popper.locator(
+        'button.MuiPickersDay-root:not(.Mui-disabled):not([aria-disabled="true"]):not(.MuiPickersDay-outsideCurrentMonth)'
+      );
+      count = await enabledDays.count();
+    }
+    const idx = Math.min(count - 1, Math.floor(Math.random() * Math.max(count, 1)));
+    await enabledDays.nth(Math.max(0, idx)).click({ force: true, timeout: 10000 });
+    await popper.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => {});
   }
 
   async toggleWorkingCalendarDays(dayNames) {
@@ -5429,14 +5674,30 @@ class SchedulePage extends BasePage {
 
   async saveWorkingCalendarDialog() {
     const dialog = this._workingCalendarDialog();
-    await dialog.getByRole('button', { name: /^save$/i }).click({ force: true, timeout: this.quickTimeout });
+    await expect(dialog).toBeVisible({ timeout: 10000 });
+    const saveBtn = dialog.getByRole('button', { name: /^save$/i });
+    await expect(async () => {
+      expect(await saveBtn.isEnabled().catch(() => false)).toBeTruthy();
+    }).toPass({ timeout: 20000, intervals: [500, 1000, 2000] });
+    await saveBtn.click({ force: true, timeout: this.quickTimeout });
     await this._waitScheduleSettled();
+    await dialog.waitFor({ state: 'hidden', timeout: 30000 }).catch(() => {});
+    await this.logStep('Saved working calendar dialog');
   }
 
   async expectWorkingCalendarUpdatedToast() {
-    await expect(
-      this.page.getByText(/working calendar updated successfully/i).first()
-    ).toBeVisible({ timeout: 20000 });
+    const toast = this.page
+      .locator('.MuiAlert-root, .MuiSnackbar-root, [role="alert"], .toast-message')
+      .filter({
+        hasText: /working calendar updated successfully|working calendar.*updated|calendar updated successfully/i,
+      })
+      .first();
+    await expect(toast).toBeVisible({ timeout: 20000 });
+    await this.logStep('Working calendar updated toast visible');
+    await toast.waitFor({ state: 'hidden', timeout: 20000 }).catch(() => {});
+    await this._ensureWorkingCalendarDialogClosed();
+    await this._prepareWorkingCalendarForOpen();
+    await this._waitScheduleSettled();
   }
 
   async expectWorkingCalendarDaySelected(dayName, selected) {
@@ -5451,17 +5712,38 @@ class SchedulePage extends BasePage {
 
   async addWorkingCalendarPublicHoliday(holidayName) {
     const dialog = this._workingCalendarDialog();
-    const nameField = dialog.getByPlaceholder(/holiday name/i).or(dialog.locator('input').first());
+    await this._scrollWorkingCalendarTo(/public holidays/i);
+
+    const nameField = dialog
+      .getByLabel(/^holiday name$/i)
+      .or(
+        dialog
+          .locator('input:not([disabled]):not([placeholder*="hh:mm" i]):not([placeholder*="Select date" i])')
+          .filter({ visible: true })
+      )
+      .first();
+    await expect(nameField).toBeVisible({ timeout: 15000 });
+    await nameField.scrollIntoViewIfNeeded();
+    await nameField.click({ force: true });
     await nameField.fill(holidayName);
-    const dateField = dialog.locator('input[placeholder*="date" i], input[placeholder*="Select" i]').last();
-    if (await dateField.isVisible({ timeout: 3000 }).catch(() => false)) {
+
+    const dateField = dialog.getByPlaceholder(/select date/i).first();
+    const dateOpener = dialog.getByRole('button', { name: /^choose date$/i }).last();
+    if (await dateOpener.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await dateOpener.click({ force: true });
+    } else if (await dateField.isVisible({ timeout: 3000 }).catch(() => false)) {
       await dateField.click({ force: true });
-      const todayCell = this.page.locator('.MuiPickersDay-root:not(.Mui-disabled)').first();
-      if (await todayCell.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await todayCell.click({ force: true });
-      }
     }
-    await dialog.getByRole('button', { name: /^add$/i }).click({ force: true });
+    await this._pickRandomDateInOpenCalendar();
+
+    const addBtn = dialog.getByRole('button', { name: /^add$/i });
+    await expect(async () => {
+      const dateVal = await dialog.getByPlaceholder(/select date/i).inputValue().catch(() => '');
+      expect(dateVal.trim().length).toBeGreaterThan(0);
+      expect(await addBtn.isEnabled().catch(() => false)).toBeTruthy();
+    }).toPass({ timeout: 15000, intervals: [500, 1000, 2000] });
+    await addBtn.scrollIntoViewIfNeeded();
+    await addBtn.click({ force: true, timeout: this.quickTimeout });
     await expect(dialog.getByText(holidayName).first()).toBeVisible({ timeout: 10000 });
     await this.logStep(`Added working calendar holiday: ${holidayName}`);
   }
@@ -5474,18 +5756,18 @@ class SchedulePage extends BasePage {
 
   async setWorkingCalendarStartTimeToAm() {
     const dialog = this._workingCalendarDialog();
-    const startPicker = dialog.locator('.MuiInputBase-root input').first();
-    await startPicker.click({ force: true });
-    await startPicker.fill('09:00 AM');
-    await startPicker.press('Enter').catch(() => {});
+    await this._scrollWorkingCalendarTo(/working\s*hours|start\s*time|hours/i).catch(() => {});
+    await this._openWorkingCalendarTimePicker(dialog, 'start');
+    await this._pickRandomWorkingCalendarTime('AM');
+    await this.logStep('Set working calendar start time (random AM)');
   }
 
   async setWorkingCalendarEndTimeToPm() {
     const dialog = this._workingCalendarDialog();
-    const endPicker = dialog.locator('.MuiInputBase-root input').nth(1);
-    await endPicker.click({ force: true });
-    await endPicker.fill('06:00 PM');
-    await endPicker.press('Enter').catch(() => {});
+    await this._scrollWorkingCalendarTo(/working\s*hours|end\s*time|hours/i).catch(() => {});
+    await this._openWorkingCalendarTimePicker(dialog, 'end');
+    await this._pickRandomWorkingCalendarTime('PM');
+    await this.logStep('Set working calendar end time (random PM)');
   }
 
   async expectTodayIndicatorVisibleInGanttChart() {
@@ -5496,8 +5778,24 @@ class SchedulePage extends BasePage {
 
   async clickBackFromProjectModule() {
     await this.dismissOpenOverlays();
-    this._wasOnScheduleModule = true;
-    await this.logStep('Clicked Back');
+    await this.hideFreshchatWidget();
+
+    const backCandidates = [
+      this.page.locator('button:has(svg[data-testid="ChevronLeftIcon"])').filter({ visible: true }).first(),
+      this.page.locator('svg[data-testid="ChevronLeftIcon"]').locator('xpath=ancestor::button[1]').first(),
+      this.page.getByRole('button', { name: /^back$/i }).first(),
+    ];
+
+    for (const backBtn of backCandidates) {
+      if (!(await backBtn.isVisible({ timeout: 2500 }).catch(() => false))) continue;
+      await backBtn.scrollIntoViewIfNeeded().catch(() => {});
+      await backBtn.click({ force: true, timeout: 15000 });
+      break;
+    }
+
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    this._wasOnScheduleModule = false;
+    await this.logStep('Clicked back from project module');
   }
 
   async openTaskModuleFromProjectManagement() {

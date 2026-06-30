@@ -16,13 +16,8 @@ When('I navigate to the Projects page', { timeout: 120000 }, async function () {
 
 When('I click on the first project in the list', { timeout: 120000 }, async function () {
   const schedulePage = new SchedulePage(this.page);
-  const projectProfilePage = new ProjectProfilePage(this.page);
   if (await schedulePage.isOnScheduleModule()) {
     console.log('Already on Schedule module — skipping project selection');
-    return;
-  }
-  if (await projectProfilePage.isInsideProjectProfile()) {
-    console.log('Already inside project — skipping project selection');
     return;
   }
   const projectNavigationPage = new ProjectNavigationPage(this.page);

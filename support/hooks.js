@@ -66,7 +66,16 @@ AfterStep(async function ({ pickle, result }) {
     const SchedulePage = require('../pages/admin/projects/management/Schedule/SchedulePage');
     const schedulePage = this.schedulePage || new SchedulePage(this.page);
     const panelOpen = await schedulePage.formPanel().isVisible({ timeout: 800 }).catch(() => false);
-    if (!panelOpen) return;
+    const wcOpen = await schedulePage
+      ._workingCalendarDialog()
+      .isVisible({ timeout: 800 })
+      .catch(() => false);
+    if (!panelOpen && !wcOpen) return;
+    if (wcOpen) {
+      await schedulePage.logStep('Step failed — closing working calendar dialog for next TC');
+      await schedulePage._ensureWorkingCalendarDialogClosed().catch(() => {});
+      return;
+    }
     await schedulePage.logStep('Step failed — closing schedule off-canvas for next TC');
     await schedulePage.dismissOpenOverlays();
   } catch {
