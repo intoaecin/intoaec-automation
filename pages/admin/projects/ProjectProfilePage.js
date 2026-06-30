@@ -13,15 +13,31 @@ class ProjectProfilePage extends BasePage {
     this.communicationDocsHeading = page.getByRole('button', { name: 'Communication & Docs' });
   }
 
-  async selectHeading(name) {
-    await this.page.getByRole('button', { name }).click();
+  _visibleHeading(name) {
+    return this.page.getByRole('button', { name }).filter({ visible: true }).first();
   }
 
-  /** True when project profile module headings are visible (already inside a project). */
+  async selectHeading(name) {
+    let heading = this._visibleHeading(name);
+
+    if (!(await heading.isVisible({ timeout: 3000 }).catch(() => false))) {
+      const ProjectNavigationPage = require('./ProjectNavigationPage');
+      const nav = new ProjectNavigationPage(this.page);
+      if (!(await nav.returnToProjectProfile())) {
+        await nav.openClientsProjectsList();
+        await nav.clickFirstProject();
+      }
+      heading = this._visibleHeading(name);
+    }
+
+    await expect(heading).toBeVisible({ timeout: 60000 });
+    await heading.scrollIntoViewIfNeeded().catch(() => {});
+    await heading.click();
+  }
+
+  /** True when the project profile hub is open (Project Management tab visible). */
   async isInsideProjectProfile() {
-    const main = this.page.locator('main, [role="main"]').first();
-    return main
-      .getByRole('button', { name: 'Project Management' })
+    return this._visibleHeading('Project Management')
       .isVisible({ timeout: 2000 })
       .catch(() => false);
   }
