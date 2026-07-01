@@ -74,6 +74,25 @@ AfterStep(async function ({ pickle, result }) {
   }
 });
 
+After({ tags: '@note' }, async function () {
+  if (!this.page || this.page.isClosed()) return;
+
+  try {
+    const EditNotePage = require('../pages/admin/common/Note/EditNotePage');
+    const notePage = this.editNotePage || new EditNotePage(this.page);
+    await notePage.dismissOpenMenus();
+    await notePage.closeNoteFormIfOpen();
+    await notePage.clearNotesSearch();
+  } catch {
+    await this.page.keyboard.press('Escape').catch(() => {});
+  }
+
+  this.editNotePage = null;
+  this.notePage = null;
+  this.deleteNotePage = null;
+  this.createNoteValidationPage = null;
+});
+
 After(async function (scenario) {
   if (scenario.result.status === 'FAILED' && this.page && !this.page.isClosed()) {
     const safeName = scenario.pickle.name.replace(/[<>:"/\\|?*]+/g, '_');
