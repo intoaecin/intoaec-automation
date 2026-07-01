@@ -64,6 +64,26 @@ module.exports = {
     ],
     tags: '@TS01 and @TC06',
   },
+  /** Work Order TC-07 — compose send + list ⋮ Preview */
+  'wo-tc07': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/procurement/work-order/create-wo/WorkOrder_TestCases.feature',
+    ],
+    tags: '@TS02 and @TC07',
+  },
+  /** Work Order TC-08 — compose send qty 100 + Update progress completed qty 50 */
+  'wo-tc08': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/procurement/work-order/create-wo/WorkOrder_TestCases.feature',
+    ],
+    tags: '@TS02 and @TC08',
+  },
   /** Work Order — all create TCs */
   wo: {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],

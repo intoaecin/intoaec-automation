@@ -2,79 +2,84 @@ const { expect } = require('@playwright/test');
 const WorkOrderComposeSendPage = require('./work-order-compose-send.page');
 
 /**
- * Many manual WO rows: MUI unit menus can stay open and block the next "Add manually" click.
- * Fills each new row in table order (Service Name → qty → unit → weight) like TC-01.
+ * Fast bulk manual WO rows: minimal waits, last-row fill, Nos unit skip when already set.
+ * Set WO_MULTI_LINE_COUNT to override default row count (20).
  */
 class WorkOrderMultiLineItemPage extends WorkOrderComposeSendPage {
-  static defaultUnitPool() {
-    const raw = process.env.WO_MULTI_LINE_UNITS || 'Nos,Sqft,Rft,Kg';
-    return raw
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
+  constructor(page) {
+    super(page);
+    this.woMultiLineRowTimeout = this.woFastMode ? 12000 : 30000;
   }
 
-  static useRandomUnits() {
-    return /^1|true|yes$/i.test(
-      String(process.env.WO_MULTI_LINE_RANDOM_UNITS || '')
-    );
-  }
-
-  randomInt(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-  }
-
-  pick(arr) {
-    return arr[this.randomInt(0, arr.length - 1)];
+  static defaultLineCount() {
+    const n = Number(process.env.WO_MULTI_LINE_COUNT);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 20;
   }
 
   randomLineItemArgs(lineIndex) {
-    let unitLabel = 'Nos';
-    if (WorkOrderMultiLineItemPage.useRandomUnits()) {
-      const pool = WorkOrderMultiLineItemPage.defaultUnitPool();
-      unitLabel = pool[this.randomInt(0, pool.length - 1)];
-    }
     return {
-      scopeOfWork: `labour work ${lineIndex}`,
+      scopeOfWork: `lw${lineIndex}`,
       description: null,
-      quantity: this.buildRandomWoLineItemQuantity(),
-      unitLabel,
-      unitRate: this.buildRandomWoLineItemRate(),
+      quantity: String(1 + (lineIndex % 25)),
+      unitLabel: 'Nos',
+      unitRate: String(1000 + lineIndex * 137),
     };
   }
 
   async clickAddManuallyOnWorkOrderForm() {
-    await this.dismissOpenMenusAndPopovers();
-    await super.clickAddManuallyOnWorkOrderForm();
+    await this.page.keyboard.press('Escape').catch(() => {});
+    await this.ensureWoLineItemsTableVisible();
+    await this.page
+      .getByText(/line items/i)
+      .first()
+      .scrollIntoViewIfNeeded()
+      .catch(() => {});
+
+    const candidates = [
+      this.page.getByText('+ Add Manually').first(),
+      this.page.getByText(/^\+?\s*Add Manually$/i).first(),
+      this.page.getByText(/add manually/i).first(),
+      this.page.locator('span.pointer').filter({ hasText: /add manually/i }).first(),
+    ];
+
+    for (const candidate of candidates) {
+      if (await candidate.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await candidate.scrollIntoViewIfNeeded();
+        await candidate.click({ force: true, timeout: 15000 });
+        return;
+      }
+    }
+
+    throw new Error('WO multi-line: + Add Manually control not found.');
   }
 
-  async selectWoLineRowUnitForMultiLine(row, unitLabel = 'Nos') {
-    await row.scrollIntoViewIfNeeded();
-    const unitSelect = await this.getPoLineRowUnitSelectLocator(row);
+  async getLastWoLineItemRowFast(table) {
+    const row = table.locator('tbody tr').last();
+    await expect(row).toBeVisible({ timeout: this.woMultiLineRowTimeout });
+    return row;
+  }
+
+  async ensureWoLineRowUnitNos(dataRow) {
+    const unitSelect = await this.getPoLineRowUnitSelectLocator(dataRow);
     if (!unitSelect) {
       return;
     }
 
-    await unitSelect.click({ timeout: 20000 }).catch(async () => {
-      await unitSelect.click({ force: true, timeout: 10000 });
+    const display = await this.getPoLineRowUnitDisplayText(dataRow);
+    if (!this.isPoLineUnitPlaceholderText(display)) {
+      return;
+    }
+
+    await unitSelect.click({ timeout: 8000 }).catch(async () => {
+      await unitSelect.click({ force: true, timeout: 5000 });
     });
 
     const listbox = this.page.getByRole('listbox').last();
-    await expect(listbox).toBeVisible({ timeout: 20000 });
-
-    const label = String(unitLabel || 'Nos').trim();
-    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const option = listbox
-      .getByRole('option', { name: new RegExp(escaped, 'i') })
-      .first();
-    if (await option.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await option.click();
-    } else {
+    if (await listbox.isVisible({ timeout: 5000 }).catch(() => false)) {
       await this.pickFirstPoLineUnitFromOpenListbox(listbox);
+      await listbox.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
     }
-
-    await listbox.waitFor({ state: 'hidden', timeout: 20000 }).catch(() => {});
-    await this.dismissOpenMenusAndPopovers();
+    await this.page.keyboard.press('Escape').catch(() => {});
   }
 
   locatorWoRowWeightInput(dataRow) {
@@ -85,111 +90,80 @@ class WorkOrderMultiLineItemPage extends WorkOrderComposeSendPage {
       .first();
   }
 
-  /**
-   * Table-row fill for multi-line WO: scope → qty → unit → wait for weight enabled → rate.
-   * Skips page-level codegen path so earlier rows are not overwritten.
-   */
-  async fillLastWoLineItemRow({
+  async fillActiveWoLineItemFast({ scopeOfWork, quantity, unitLabel = 'Nos', unitRate }) {
+    const table = await this.ensureWoLineItemsTableVisible();
+    const dataRow = await this.getLastWoLineItemRowFast(table);
+
+    const serviceInRow = dataRow.getByRole('textbox', { name: 'Service Name' }).first();
+    const serviceOnPage = this.page
+      .getByRole('textbox', { name: 'Service Name' })
+      .filter({ visible: true })
+      .last();
+
+    let scopeField = serviceInRow;
+    if (!(await serviceInRow.isVisible({ timeout: 1500 }).catch(() => false))) {
+      scopeField = serviceOnPage;
+    }
+
+    await expect(scopeField).toBeVisible({ timeout: this.woMultiLineRowTimeout });
+    await scopeField.fill(scopeOfWork);
+
+    const qtyInput = await this.resolveWoLineQtyInput(dataRow);
+    await qtyInput.fill(String(quantity));
+
+    await this.ensureWoLineRowUnitNos(dataRow);
+
+    const rateInput = this.locatorWoRowWeightInput(dataRow);
+    await expect
+      .poll(async () => rateInput.isEnabled().catch(() => false), {
+        timeout: this.woMultiLineRowTimeout,
+        intervals: [80, 120, 200, 400, 800],
+      })
+      .toBe(true);
+
+    await rateInput.fill(String(unitRate));
+  }
+
+  async addWorkOrderLineItemManually({
     scopeOfWork,
     quantity,
     unitLabel,
     unitRate,
-    table: tableOverride,
   }) {
-    const table = tableOverride || (await this.ensureWoLineItemsTableVisible());
-    const dataRow = await this.getLastWoLineItemDataRow(table);
-    await dataRow.scrollIntoViewIfNeeded().catch(() => {});
-    await dataRow.click({ position: { x: 12, y: 12 }, timeout: 10000 }).catch(() => {});
-
-    let scopeField = dataRow.getByRole('textbox', { name: 'Service Name' }).first();
-    if (!(await scopeField.isVisible({ timeout: 5000 }).catch(() => false))) {
-      scopeField = await this.resolveWoLineItemScopeField(dataRow);
+    if (!(await this.isWorkOrderTitleFieldVisible().catch(() => false))) {
+      await this.waitForWorkOrderCreateForm();
     }
-
-    await expect(scopeField).toBeVisible({ timeout: 20000 });
-    await scopeField.click({ timeout: 15000 });
-    await scopeField.fill(scopeOfWork);
-    await scopeField.blur();
-    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-
-    const qtyInput = await this.resolveWoLineQtyInput(dataRow);
-    await expect(qtyInput).toBeVisible({ timeout: 20000 });
-    await qtyInput.click({ timeout: 10000 });
-    await qtyInput.fill(String(quantity));
-    await qtyInput.blur();
-    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-
-    await this.selectWoLineRowUnitForMultiLine(dataRow, unitLabel || 'Nos');
-
-    const rateInput = this.locatorWoRowWeightInput(dataRow);
-    let rateReady = false;
-    try {
-      await expect
-        .poll(
-          async () => {
-            if (!(await rateInput.isVisible().catch(() => false))) {
-              return false;
-            }
-            return rateInput.isEnabled().catch(() => false);
-          },
-          { timeout: this.woUiTimeout, intervals: [200, 400, 800, 1500, 2500] }
-        )
-        .toBe(true);
-      rateReady = true;
-    } catch {
-      const inlineService = this.page
-        .getByRole('textbox', { name: 'Service Name' })
-        .filter({ visible: true })
-        .last();
-      if (
-        (await inlineService.isVisible({ timeout: 3000 }).catch(() => false)) &&
-        (await inlineService.isEnabled().catch(() => false))
-      ) {
-        await this.fillWoLineItemCodegenPattern({
-          scopeOfWork,
-          quantity,
-          unitLabel,
-          unitRate,
-        });
-        await this.dismissOpenMenusAndPopovers();
-        return;
-      }
-    }
-
-    if (!rateReady) {
-      throw new Error(
-        `WO multi-line: weight/rate field did not become enabled for scope "${scopeOfWork}".`
-      );
-    }
-
-    await rateInput.scrollIntoViewIfNeeded();
-    await rateInput.click({ timeout: 15000 });
-    await rateInput.fill(String(unitRate));
-    await rateInput.blur();
-
-    await this.waitForWoUiSettled();
-    await this.dismissOpenMenusAndPopovers();
+    await this.clickAddManuallyOnWorkOrderForm();
+    await this.fillActiveWoLineItemFast({
+      scopeOfWork,
+      quantity,
+      unitLabel,
+      unitRate,
+    });
+    // eslint-disable-next-line no-console
+    console.log(
+      `[WO multi-line] Line item: scope="${scopeOfWork}" qty=${quantity} rate=${unitRate}`
+    );
   }
 
   async addManyManualWorkOrderLineItemsWithRandomDetails(count) {
-    const n = Math.max(1, Number(count) || 1);
+    const n = Math.max(1, Number(count) || WorkOrderMultiLineItemPage.defaultLineCount());
+    const started = Date.now();
     for (let i = 1; i <= n; i += 1) {
       const args = this.randomLineItemArgs(i);
       // eslint-disable-next-line no-await-in-loop
       await this.addWorkOrderLineItemManually(args);
-      if (i % 5 === 0 || i === n) {
+      if (i % 10 === 0 || i === n) {
+        const elapsed = ((Date.now() - started) / 1000).toFixed(1);
         // eslint-disable-next-line no-console
-        console.log(`[WO multi-line] Added ${i}/${n} manual line items.`);
+        console.log(`[WO multi-line] ${i}/${n} rows (${elapsed}s)`);
       }
     }
   }
 
-  /**
-   * Login → WO create → title → many manual line items → vendor → Action → Compose → Send.
-   */
   async completeWorkOrderComposeSendMultiLineJourney(
     title = 'electrician',
-    lineItemCount = 20
+    lineItemCount = WorkOrderMultiLineItemPage.defaultLineCount()
   ) {
     await this.navigateToWorkOrderModuleForFirstProject();
     await this.prepareWorkOrderListForCreateClick();
@@ -201,7 +175,7 @@ class WorkOrderMultiLineItemPage extends WorkOrderComposeSendPage {
     await this.composeAndSendWorkOrderEmail();
     // eslint-disable-next-line no-console
     console.log(
-      `[WO] Complete multi-line (${lineItemCount}) → compose → send flow finished.`
+      `[WO] Multi-line (${lineItemCount}) compose → send finished.`
     );
   }
 }
