@@ -27,6 +27,15 @@ When(
 );
 
 When(
+  'I complete the work order compose send journey with line item quantity {string} and title {string}',
+  { timeout: 360000 },
+  async function (quantity, title) {
+    const wo = getWorkOrderComposeSendPage(this);
+    await wo.completeWorkOrderComposeSendJourneyWithLineQty(title, quantity);
+  }
+);
+
+When(
   'I complete the work order create compose send flow with title {string}',
   { timeout: 360000 },
   async function (title) {
@@ -77,5 +86,104 @@ Then(
   async function () {
     const wo = getWorkOrderComposeSendPage(this);
     await wo.expectWorkOrderEmailSentSuccessfully();
+  }
+);
+
+When(
+  'I complete the work order compose send preview journey with title {string}',
+  { timeout: 360000 },
+  async function (title) {
+    const wo = getWorkOrderComposeSendPage(this);
+    await wo.completeWorkOrderComposeSendPreviewJourney(title);
+  }
+);
+
+When(
+  'I wait for the work order list after compose send redirect',
+  { timeout: 180000 },
+  async function () {
+    const wo = getWorkOrderComposeSendPage(this);
+    await wo.waitForWorkOrderListAfterComposeSendRedirect();
+  }
+);
+
+When(
+  'I open the three dot menu on the first work order card',
+  { timeout: 120000 },
+  async function () {
+    const wo = getWorkOrderComposeSendPage(this);
+    await wo.openThreeDotMenuOnFirstWorkOrderCard();
+  }
+);
+
+When(
+  'I click preview in the work order card menu',
+  { timeout: 120000 },
+  async function () {
+    const wo = getWorkOrderComposeSendPage(this);
+    await wo.clickPreviewInWorkOrderCardMenu();
+  }
+);
+
+Then(
+  'I should see the work order full screen preview',
+  { timeout: 120000 },
+  async function () {
+    const wo = getWorkOrderComposeSendPage(this);
+    await wo.expectWorkOrderFullScreenPreviewVisible();
+  }
+);
+
+When(
+  'I close the work order full screen preview',
+  { timeout: 120000 },
+  async function () {
+    const wo = getWorkOrderComposeSendPage(this);
+    await wo.closeWorkOrderFullScreenPreview();
+  }
+);
+
+Then(
+  'I should be on the work order list with create action visible',
+  { timeout: 120000 },
+  async function () {
+    const wo = getWorkOrderComposeSendPage(this);
+    await wo.expectWorkOrderListWithCreateActionVisible();
+  }
+);
+
+When(
+  'I click update progress in the work order card menu',
+  { timeout: 120000 },
+  async function () {
+    const wo = getWorkOrderComposeSendPage(this);
+    await wo.clickUpdateProgressInWorkOrderCardMenu();
+  }
+);
+
+Then(
+  'I should see the work order update progress off canvas',
+  { timeout: 120000 },
+  async function () {
+    const wo = getWorkOrderComposeSendPage(this);
+    await wo.expectWorkOrderUpdateProgressOffCanvasVisible();
+  }
+);
+
+When(
+  'I fill completed quantity {string} on the work order update progress table',
+  { timeout: 120000 },
+  async function (completedQty) {
+    const wo = getWorkOrderComposeSendPage(this);
+    await wo.fillWorkOrderUpdateProgressCompletedQty(completedQty);
+  }
+);
+
+When(
+  'I close the work order update progress off canvas',
+  { timeout: 120000 },
+  async function () {
+    const wo = getWorkOrderComposeSendPage(this);
+    await wo.closeWorkOrderUpdateProgressOffCanvas();
   }
 );

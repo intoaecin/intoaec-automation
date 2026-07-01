@@ -10,7 +10,7 @@ function getWorkOrderMultiLineItemPage(world) {
 
 When(
   'I complete the work order compose send multi line journey with title {string} and {int} manual line items',
-  { timeout: 900000 },
+  { timeout: 600000 },
   async function (title, count) {
     const wo = getWorkOrderMultiLineItemPage(this);
     await wo.completeWorkOrderComposeSendMultiLineJourney(title, count);
@@ -19,7 +19,7 @@ When(
 
 When(
   'I add {int} manual work order line items with random fields',
-  { timeout: 900000 },
+  { timeout: 600000 },
   async function (count) {
     const wo = getWorkOrderMultiLineItemPage(this);
     await wo.addManyManualWorkOrderLineItemsWithRandomDetails(count);
