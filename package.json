@@ -49,7 +49,7 @@
     "test:admin:projects:management:assets": "npx cucumber-js features/admin/projects/management/Assets.feature",
     "test:admin:projects:management:budgeting": "npx cucumber-js features/admin/projects/management/Budgeting.feature",
     "test:admin:projects:management:dailylog": "npx cucumber-js features/admin/projects/management/DailyLog.feature",
-    "test:admin:projects:management:schedule": "npx cucumber-js features/admin/projects/managements/Schedule/Schedule.feature",
+    "test:admin:projects:management:schedule": "npx cucumber-js features/admin/projects/managements/Schedule/Schedule_TestCases.feature",
     "test:admin:projects:managements:schedule:tc": "npx cucumber-js features/admin/projects/managements/Schedule/Schedule_TestCases.feature",
     "test:admin:projects:managements:schedule:testcases": "npx cross-env HEADLESS=true STEP_DELAY_MS=0 cucumber-js features/admin/projects/managements/Schedule/Schedule_TestCases.feature",
     "test:admin:projects:managements:schedule:tc01": "npx cucumber-js features/admin/projects/managements/Schedule/Schedule_TestCases.feature --tags @TC01",

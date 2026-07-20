@@ -127,3 +127,30 @@ Apply these conventions when adding or refactoring tests. **If a rule is already
 - Fall back to stable **`data-testid`** or scoped CSS only when the UI does not expose good roles/labels.
 - Avoid brittle selectors that depend on generated CSS class names unless no alternative exists.
 
+---
+
+## Task Management (`@task`) — incremental TC file
+
+Mirror the **Schedule** pattern (`Schedule_TestCases.feature`):
+
+| Layer | Path |
+|-------|------|
+| Feature | `features/admin/projects/managements/TaskManagement/Task_TestCases.feature` |
+| Steps | `step-definitions/admin/projects/management/TaskManagement/TaskStep.js` |
+| Page | `pages/admin/projects/management/TaskManagement/TaskManagementPage.js` |
+
+**UI reference:** `intoaec-UI/src/features/TaskManagement/` (`TaskManagementHome.tsx`, kanban, create modal).
+
+**Tags:** `@task` on the feature; `@TS01` / `@TC01` … per test sheet (same as Schedule).
+
+**Background:** login → project → Project Management → `I navigate to the task management module` (handles arriving from Schedule without changing Schedule files).
+
+**Schedule cross-module checks (unchanged):** `Schedule_TestCases.feature` still uses `pages/admin/projects/management/TaskPage.js` and steps in `ScheduleStep.js` (`I open the Task module from project management`, kanban verify, linked schedule). Do **not** move or refactor those for Task Management TCs.
+
+**Step cache:** `world.taskManagementPage` + `getTaskManagementPage(world)` in `TaskStep.js`.
+
+**Run one TC:**
+```bash
+npx cucumber-js features/admin/projects/managements/TaskManagement/Task_TestCases.feature --tags "@TS01 and @TC01"
+```
+

@@ -63,6 +63,21 @@ AfterStep(async function ({ pickle, result }) {
   if (!isScheduleTc) return;
 
   try {
+    if (isTaskTc) {
+      const TaskManagementPage = require('../pages/admin/projects/management/TaskManagement/TaskManagementPage');
+      const taskPage = this.taskManagementPage || new TaskManagementPage(this.page);
+      const modalOpen = await taskPage.createTaskModal().isVisible({ timeout: 800 }).catch(() => false);
+      const viewOpen = await taskPage.viewTaskModal().isVisible({ timeout: 800 }).catch(() => false);
+      const addColOpen = await taskPage
+        ._addColumnDialog()
+        .isVisible({ timeout: 800 })
+        .catch(() => false);
+      if (!modalOpen && !viewOpen && !addColOpen) return;
+      await taskPage.logStep('Step failed — closing task overlays for next TC');
+      await taskPage.dismissOpenOverlays();
+      return;
+    }
+
     const SchedulePage = require('../pages/admin/projects/management/Schedule/SchedulePage');
     const schedulePage = this.schedulePage || new SchedulePage(this.page);
     const panelOpen = await schedulePage.formPanel().isVisible({ timeout: 800 }).catch(() => false);
