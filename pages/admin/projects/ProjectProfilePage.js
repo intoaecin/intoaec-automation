@@ -60,6 +60,16 @@ class ProjectProfilePage extends BasePage {
       return;
     }
 
+    if ((name || '').trim().toLowerCase() === 'indent') {
+      await this.clickIndentModuleCard(scope, text);
+      return;
+    }
+
+    if ((name || '').trim().toLowerCase() === 'client report') {
+      await this.clickClientReportModuleCard(scope, text);
+      return;
+    }
+
     // Targeted fallback for Estimate card: the UI has multiple "Estimate" text nodes
     // and generic card/container matching can sometimes click the wrong module.
     // This mirrors the stable selector observed in Playwright inspector for this app.
@@ -213,48 +223,258 @@ class ProjectProfilePage extends BasePage {
 
   async clickWorkOrderModuleCard(scope, text) {
     const createWorkOrder = this.page.getByRole('button', {
-      name: 'Create Work Order',
+      name: /create work order/i,
     });
 
     if (await createWorkOrder.isVisible({ timeout: 1500 }).catch(() => false)) {
       return;
     }
 
-    const candidates = [
-      scope.getByText('Work Order').first(),
-      scope.getByRole('tab', { name: text }).first(),
-      scope.getByRole('button', { name: text }).first(),
-      scope
-        .locator('[role="tab"], .MuiTab-root, .MuiCard-root, .MuiPaper-root, [role="button"], button, a, [role="link"]')
-        .filter({ hasText: text })
-        .first(),
-      scope
-        .locator('div, span, p')
-        .filter({ hasText: text })
-        .filter({ visible: true })
-        .first(),
-    ];
-
-    for (const candidate of candidates) {
-      if (!(await candidate.isVisible({ timeout: 3000 }).catch(() => false))) {
-        continue;
-      }
-
-      await candidate.scrollIntoViewIfNeeded().catch(() => {});
-      await candidate.click({ timeout: 30000 }).catch(async () => {
-        await candidate.click({ timeout: 30000, force: true });
-      });
-      await this.page.waitForLoadState('domcontentloaded');
-      await this.page
-        .waitForLoadState('networkidle', { timeout: 20000 })
-        .catch(() => {});
-
-      if (await createWorkOrder.isVisible({ timeout: 15000 }).catch(() => false)) {
+    const href = this.page.url();
+    if (
+      /tab=RFQAndPO/i.test(href) &&
+      (/subTab=WO/i.test(href) ||
+        /subTab=WorkOrder/i.test(href) ||
+        /subTab%3DWO/i.test(href) ||
+        /subTab%3DWorkOrder/i.test(href))
+    ) {
+      await this.activateWorkOrderSubTabIfPresent();
+      if (await createWorkOrder.isVisible({ timeout: 5000 }).catch(() => false)) {
         return;
       }
     }
 
+    const candidates = [
+      this.page.locator('div').filter({ hasText: /^Work Order$/i }).nth(1),
+      scope.locator('div').filter({ hasText: /^Work Order$/i }).nth(1),
+      scope.getByRole('tab', { name: /work order/i }).first(),
+      scope.getByText(/^Work Order$/i).first(),
+      scope.getByRole('tab', { name: text }).first(),
+      scope.getByRole('button', { name: text }).first(),
+      scope
+        .locator(
+          '[role="tab"], .MuiTab-root, .MuiCard-root, .MuiPaper-root, [role="button"], button, a, [role="link"]'
+        )
+        .filter({ hasText: text })
+        .first(),
+    ];
+
+    for (const candidate of candidates) {
+      if (!(await candidate.isVisible({ timeout: 2000 }).catch(() => false))) {
+        continue;
+      }
+
+      await candidate.scrollIntoViewIfNeeded().catch(() => {});
+      const clicked = await candidate
+        .click({ timeout: 10000, force: true })
+        .then(() => true)
+        .catch(() => false);
+      if (!clicked) {
+        continue;
+      }
+
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      await this.page
+        .waitForLoadState('networkidle', { timeout: 15000 })
+        .catch(() => {});
+
+      if (await createWorkOrder.isVisible({ timeout: 10000 }).catch(() => false)) {
+        return;
+      }
+    }
+
+    const projectMatch = href.match(/projectId=([^&]+)/i);
+    const clientMatch = href.match(/clientId=([^&]+)/i);
+    if (projectMatch && clientMatch) {
+      const base = href.split('?')[0];
+      const woUrl = `${base}?projectId=${projectMatch[1]}&isActive=true&tab=RFQAndPO&subTab=WorkOrder&clientId=${clientMatch[1]}`;
+      await this.page.goto(woUrl, { waitUntil: 'domcontentloaded' });
+      await this.page
+        .waitForURL(/tab=RFQAndPO/i, { timeout: 60000 })
+        .catch(() => {});
+    }
+
     await expect(createWorkOrder).toBeVisible({ timeout: 60000 });
+  }
+
+  async activateWorkOrderSubTabIfPresent() {
+    const woTab = this.page.getByRole('tab', { name: /work order/i }).first();
+    if (!(await woTab.isVisible({ timeout: 3000 }).catch(() => false))) {
+      return;
+    }
+    if ((await woTab.getAttribute('aria-selected').catch(() => null)) === 'true') {
+      return;
+    }
+    await woTab.click({ timeout: 10000, force: true }).catch(() => {});
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+  }
+
+  async clickIndentModuleCard(scope, text) {
+    const createIndent = this.page.getByRole('button', {
+      name: /create indent/i,
+    });
+
+    if (await createIndent.isVisible({ timeout: 1500 }).catch(() => false)) {
+      return;
+    }
+
+    const href = this.page.url();
+    if (
+      /tab=RFQAndPO/i.test(href) &&
+      (/subTab=Indent/i.test(href) || /subTab%3DIndent/i.test(href))
+    ) {
+      await this.activateIndentSubTabIfPresent();
+      if (await createIndent.isVisible({ timeout: 5000 }).catch(() => false)) {
+        return;
+      }
+    }
+
+    const candidates = [
+      this.page.locator('div').filter({ hasText: /^Indent$/i }).nth(1),
+      scope.locator('div').filter({ hasText: /^Indent$/i }).nth(1),
+      scope.getByRole('tab', { name: /^indent$/i }).first(),
+      scope.getByText(/^Indent$/i).first(),
+      scope.getByRole('tab', { name: text }).first(),
+      scope.getByRole('button', { name: text }).first(),
+      scope
+        .locator(
+          '[role="tab"], .MuiTab-root, .MuiCard-root, .MuiPaper-root, [role="button"], button, a, [role="link"]'
+        )
+        .filter({ hasText: text })
+        .first(),
+    ];
+
+    for (const candidate of candidates) {
+      if (!(await candidate.isVisible({ timeout: 2000 }).catch(() => false))) {
+        continue;
+      }
+
+      await candidate.scrollIntoViewIfNeeded().catch(() => {});
+      const clicked = await candidate
+        .click({ timeout: 10000, force: true })
+        .then(() => true)
+        .catch(() => false);
+      if (!clicked) {
+        continue;
+      }
+
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      await this.page
+        .waitForLoadState('networkidle', { timeout: 15000 })
+        .catch(() => {});
+
+      if (await createIndent.isVisible({ timeout: 10000 }).catch(() => false)) {
+        return;
+      }
+    }
+
+    const projectMatch = href.match(/projectId=([^&]+)/i);
+    const clientMatch = href.match(/clientId=([^&]+)/i);
+    if (projectMatch && clientMatch) {
+      const base = href.split('?')[0];
+      const indentUrl = `${base}?projectId=${projectMatch[1]}&isActive=true&tab=RFQAndPO&subTab=Indent&clientId=${clientMatch[1]}`;
+      await this.page.goto(indentUrl, { waitUntil: 'domcontentloaded' });
+      await this.page
+        .waitForURL(/tab=RFQAndPO/i, { timeout: 60000 })
+        .catch(() => {});
+    }
+
+    await expect(createIndent).toBeVisible({ timeout: 60000 });
+  }
+
+  async activateIndentSubTabIfPresent() {
+    const indentTab = this.page.getByRole('tab', { name: /^indent$/i }).first();
+    if (!(await indentTab.isVisible({ timeout: 3000 }).catch(() => false))) {
+      return;
+    }
+    if ((await indentTab.getAttribute('aria-selected').catch(() => null)) === 'true') {
+      return;
+    }
+    await indentTab.click({ timeout: 10000, force: true }).catch(() => {});
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+  }
+
+  /**
+   * Communication & Docs grid tile — generic card matching misses Client Report (same as Call Log).
+   */
+  async clickClientReportModuleCard(scope, text) {
+    const createClientReport = this.page
+      .getByRole('button', { name: /create client report/i })
+      .or(this.page.getByRole('button', { name: /^create$/i }))
+      .first();
+
+    if (await createClientReport.isVisible({ timeout: 1500 }).catch(() => false)) {
+      return;
+    }
+
+    const href = this.page.url();
+    if (/tab=ClientReport/i.test(href) && (await createClientReport.isVisible({ timeout: 3000 }).catch(() => false))) {
+      return;
+    }
+
+    const grid = scope
+      .locator('div.MuiGrid-root.MuiGrid-container.MuiGrid-spacing-xs-2')
+      .first();
+
+    const candidates = [
+      grid
+        .locator('div.MuiBox-root')
+        .filter({ hasText: /^client\s*report$/i })
+        .first(),
+      grid
+        .locator('.MuiCard-root, .MuiPaper-root, [role="button"], a, div')
+        .filter({ hasText: /^client\s*report$/i })
+        .first(),
+      grid.locator('div').filter({ has: scope.getByText(/^client\s*report$/i) }).first(),
+      scope.locator('div').filter({ hasText: /^Client Report$/i }).first(),
+      scope.locator('div').filter({ hasText: /^Client Report$/i }).nth(1),
+      scope.getByRole('tab', { name: /client report/i }).first(),
+      scope.getByRole('button', { name: /client report/i }).first(),
+      scope.getByText(/^Client Report$/i).first(),
+      scope
+        .locator(
+          '[role="tab"], .MuiTab-root, .MuiCard-root, .MuiPaper-root, [role="button"], button, a, [role="link"], div.MuiBox-root'
+        )
+        .filter({ hasText: text })
+        .first(),
+    ];
+
+    for (const candidate of candidates) {
+      if (!(await candidate.isVisible({ timeout: 2000 }).catch(() => false))) {
+        continue;
+      }
+
+      await candidate.scrollIntoViewIfNeeded().catch(() => {});
+      const clicked = await candidate
+        .click({ timeout: 10000, force: true })
+        .then(() => true)
+        .catch(() => false);
+      if (!clicked) {
+        continue;
+      }
+
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      await this.page
+        .waitForLoadState('networkidle', { timeout: 15000 })
+        .catch(() => {});
+
+      if (await createClientReport.isVisible({ timeout: 10000 }).catch(() => false)) {
+        return;
+      }
+    }
+
+    const projectMatch = href.match(/projectId=([^&]+)/i);
+    const clientMatch = href.match(/clientId=([^&]+)/i);
+    if (projectMatch && clientMatch) {
+      const base = href.split('?')[0];
+      const clientReportUrl = `${base}?projectId=${projectMatch[1]}&isActive=true&tab=ClientReport&clientId=${clientMatch[1]}`;
+      await this.page.goto(clientReportUrl, { waitUntil: 'domcontentloaded' });
+      await this.page
+        .waitForURL(/tab=ClientReport/i, { timeout: 60000 })
+        .catch(() => {});
+    }
+
+    await expect(createClientReport).toBeVisible({ timeout: 60000 });
   }
 }
 
