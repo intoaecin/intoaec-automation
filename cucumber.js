@@ -93,4 +93,73 @@ module.exports = {
       'features/admin/projects/procurement/work-order/create-wo/WorkOrder_TestCases.feature',
     ],
   },
+  /** Indent TC-01 — Material Indent create */
+  'indent-tc01': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
+    ],
+    tags: '@TS01 and @TC01',
+  },
+  /** Indent TC-02 — Work Indent create */
+  'indent-tc02': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
+    ],
+    tags: '@TS01 and @TC02',
+  },
+  /** Indent TC-03 — Material Indent + Approver */
+  'indent-tc03': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
+    ],
+    tags: '@TS01 and @TC03',
+  },
+  /** Indent TC-04 — Material Indent create → Preview */
+  'indent-tc04': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
+    ],
+    tags: '@TS01 and @TC04',
+  },
+  /** Indent TC-05 — Material Indent create → Edit → Add Manually */
+  'indent-tc05': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
+    ],
+    tags: '@TS01 and @TC05',
+  },
+  /** Indent TC-06 — Convert Indent → PO → vendor → Compose email */
+  'indent-tc06': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
+    ],
+    tags: '@TS01 and @TC06',
+  },
+  /** Indent — all create TCs */
+  indent: {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
+    ],
+  },
 };

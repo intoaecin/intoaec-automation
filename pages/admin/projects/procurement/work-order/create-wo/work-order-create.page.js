@@ -71,8 +71,20 @@ class WorkOrderCreatePage extends PurchaseOrderCreatePoPage {
       await nav.clickFirstProject();
     }
 
-    await profile.selectHeading('Procurement');
-    await this.clickWorkOrderModuleCard();
+    const createBtn = this.page.getByRole('button', { name: /create work order/i });
+    const alreadyOnWo =
+      /tab=RFQAndPO/i.test(this.page.url()) &&
+      (/subTab=WO|subTab=WorkOrder|subTab%3DWO|subTab%3DWorkOrder/i.test(this.page.url()) ||
+        (await createBtn.isVisible({ timeout: 2000 }).catch(() => false)));
+
+    if (!alreadyOnWo) {
+      await profile.selectHeading('Procurement');
+      await this.clickWorkOrderModuleCard();
+    } else {
+      await this.activateWorkOrderSubTab();
+      await this.ensureWorkOrderListReady().catch(() => {});
+    }
+
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
     // eslint-disable-next-line no-console
     console.log('[WO] Navigated to Work Order module.');

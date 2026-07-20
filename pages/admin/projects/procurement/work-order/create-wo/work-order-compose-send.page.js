@@ -349,36 +349,86 @@ class WorkOrderComposeSendPage extends WorkOrderAddFromLibraryPage {
     });
   }
 
-  woUpdateProgressTable() {
+  woUpdateProgressPanel() {
     return this.page
-      .getByRole('table')
-      .filter({ has: this.page.getByText('-', { exact: true }) })
+      .locator(
+        '.MuiDrawer-paper, .MuiModal-root .MuiPaper-root, .offcanvas.show, aside.offcanvas.show, [role="dialog"]'
+      )
+      .filter({ visible: true })
+      .filter({
+        has: this.page.getByText(/update progress|completed qty|completed quantity/i),
+      })
       .last();
   }
 
-  async waitForWoUpdateProgressPanelReady() {
-    const panelTitle = this.page.locator('h2').filter({ hasText: /update progress/i }).first();
-    const table = this.woUpdateProgressTable();
+  woUpdateProgressTable() {
+    const panel = this.woUpdateProgressPanel();
+    return panel
+      .getByRole('table')
+      .first()
+      .or(this.page.getByRole('table').last());
+  }
 
-    await expect(panelTitle.or(table)).toBeVisible({ timeout: this.woUiTimeout });
-    await expect(table).toBeVisible({ timeout: this.woUiTimeout });
-    await expect(table.locator('tbody tr').first()).toBeVisible({
-      timeout: this.woUiTimeout,
+  async findWoUpdateProgressCompletedColumnIndex(table) {
+    return table.evaluate((el) => {
+      const headers = el.querySelectorAll('thead th, thead td');
+      for (let i = 0; i < headers.length; i += 1) {
+        const text = (headers[i].textContent || '').replace(/\s+/g, ' ').trim();
+        if (/completed\s*qty|completed\s*quantity|qty\s*completed/i.test(text)) {
+          return i;
+        }
+      }
+      return headers.length >= 4 ? 3 : Math.max(0, headers.length - 1);
     });
   }
 
+  async clickWoUpdateProgressCompletedCell(table) {
+    const dashCell = table.getByText('-', { exact: true }).first();
+    if (await dashCell.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await dashCell.click({ timeout: 10000 });
+      return;
+    }
+
+    const colIndex = await this.findWoUpdateProgressCompletedColumnIndex(table);
+    const cell = table.locator('tbody tr').first().locator('td').nth(colIndex);
+    await expect(cell).toBeVisible({ timeout: 10000 });
+    await cell.click({ timeout: 10000, force: true });
+  }
+
+  async waitForWoUpdateProgressPanelReady() {
+    await expect
+      .poll(
+        async () => {
+          const table = this.woUpdateProgressTable();
+          if (!(await table.isVisible({ timeout: 500 }).catch(() => false))) {
+            return false;
+          }
+          return table
+            .locator('tbody tr')
+            .first()
+            .isVisible({ timeout: 500 })
+            .catch(() => false);
+        },
+        { timeout: this.woUiTimeout, intervals: [300, 500, 1000, 2000] }
+      )
+      .toBe(true);
+  }
+
   updateProgressOffCanvasRoot() {
-    const panelTitle = this.page.locator('h2').filter({ hasText: /update progress/i }).first();
-    return panelTitle.locator(
-      'xpath=ancestor::*[contains(@class,"Drawer") or contains(@class,"Modal") or contains(@class,"offcanvas") or @role="dialog"][1]'
-    );
+    const panel = this.woUpdateProgressPanel();
+    return panel.or(this.woUpdateProgressPanelFromTitle());
   }
 
   async isWoUpdateProgressOffCanvasOpen() {
-    return this.page
-      .locator('h2')
-      .filter({ hasText: /update progress/i })
+    const panelOpen = await this.page
+      .getByText(/update progress/i)
       .first()
+      .isVisible({ timeout: 1500 })
+      .catch(() => false);
+    if (panelOpen) {
+      return true;
+    }
+    return this.woUpdateProgressTable()
       .isVisible({ timeout: 1500 })
       .catch(() => false);
   }
@@ -398,9 +448,17 @@ class WorkOrderComposeSendPage extends WorkOrderAddFromLibraryPage {
 
   async expectWorkOrderUpdateProgressOffCanvasVisible() {
     await this.waitForWoUpdateProgressPanelReady();
+    const table = this.woUpdateProgressTable();
+    await expect(table).toBeVisible({ timeout: this.woUiTimeout });
+    await expect(table.locator('tbody tr').first()).toBeVisible({
+      timeout: this.woUiTimeout,
+    });
     await expect(
-      this.page.locator('h2').filter({ hasText: /update progress/i }).first()
-    ).toBeVisible({ timeout: this.woUiTimeout });
+      table
+        .getByText(/completed\s*qty|completed\s*quantity/i)
+        .first()
+        .or(table.getByText('-', { exact: true }).first())
+    ).toBeVisible({ timeout: 15000 });
     // eslint-disable-next-line no-console
     console.log('[WO update-progress] Off-canvas with completed qty table is visible.');
   }
@@ -409,9 +467,7 @@ class WorkOrderComposeSendPage extends WorkOrderAddFromLibraryPage {
     await this.waitForWoUpdateProgressPanelReady();
 
     const table = this.woUpdateProgressTable();
-    const completedPlaceholder = table.getByText('-', { exact: true }).first();
-    await expect(completedPlaceholder).toBeVisible({ timeout: 15000 });
-    await completedPlaceholder.click({ timeout: 10000 });
+    await this.clickWoUpdateProgressCompletedCell(table);
 
     const qtyInput = this.page.getByRole('textbox').filter({ visible: true });
     await expect(qtyInput.first()).toBeVisible({ timeout: 10000 });
@@ -419,16 +475,24 @@ class WorkOrderComposeSendPage extends WorkOrderAddFromLibraryPage {
     await editor.click({ timeout: 10000 });
     await editor.fill(String(completedQty));
 
-    const confirmBtn = this.page.getByRole('button').filter({ visible: true }).nth(1);
+    const row = table.locator('tbody tr').first();
+    const confirmBtn = row
+      .getByRole('button')
+      .nth(1)
+      .or(this.page.getByRole('button').filter({ visible: true }).nth(1));
     await expect(confirmBtn).toBeVisible({ timeout: 10000 });
     await confirmBtn.click({ timeout: 10000 });
 
     await this.page
-      .locator('h2')
-      .filter({ hasText: /update progress/i })
+      .getByText(/update progress/i)
+      .first()
+      .locator('xpath=ancestor::div[1]')
       .getByRole('button')
+      .first()
       .click({ timeout: 10000 })
-      .catch(() => {});
+      .catch(async () => {
+        await this.page.locator('h2').getByRole('button').first().click({ timeout: 10000 }).catch(() => {});
+      });
 
     // eslint-disable-next-line no-console
     console.log(`[WO update-progress] Filled completed qty=${completedQty} (codegen path).`);
@@ -459,6 +523,16 @@ class WorkOrderComposeSendPage extends WorkOrderAddFromLibraryPage {
       });
       return true;
     };
+
+    const titleClose = this.page
+      .getByText(/update progress/i)
+      .first()
+      .locator('xpath=ancestor::div[1]')
+      .getByRole('button')
+      .first();
+    if (await tryClick(titleClose)) {
+      return this.woUpdateProgressPanelFromTitle();
+    }
 
     // Codegen: close off-canvas via button in h2 header
     const h2Close = this.page
