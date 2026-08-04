@@ -43,24 +43,9 @@ AfterStep(async function ({ pickle, result }) {
   if (!this.page || this.page.isClosed()) return;
 
   const tags = (pickle.tags || []).map((t) => String(t.name || ''));
-  const isScheduleTc = tags.some(
-    (t) =>
-      t === '@schedule' ||
-      /^@TC\d{2}$/i.test(t) ||
-      t === '@TS01' ||
-      t === '@TS02' ||
-      t === '@TS03' ||
-      t === '@TS04' ||
-      t === '@TS06' ||
-      t === '@TS07' ||
-      t === '@TS08' ||
-      t === '@TS10' ||
-      t === '@TS11' ||
-      t === '@TS12' ||
-      t === '@TS13' ||
-      t === '@TS14'
-  );
-  if (!isScheduleTc) return;
+  const isScheduleTc = tags.includes('@schedule');
+  const isTaskTc = tags.includes('@task');
+  if (!isScheduleTc && !isTaskTc) return;
 
   try {
     if (isTaskTc) {
