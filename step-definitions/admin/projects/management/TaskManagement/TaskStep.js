@@ -181,9 +181,32 @@ When('I add a quick task in kanban column {string}', async function (columnName)
   await taskPage.addQuickTaskInColumn(columnName);
 });
 
+When('I add {int} quick tasks in kanban column {string}', async function (count, columnName) {
+  const taskPage = getTaskManagementPage(this);
+  await taskPage.addQuickTasksInKanbanColumn(columnName, count);
+  this.lastCreatedTaskName = 'Quick Task';
+});
+
+When('I add a random quick task with tick in kanban column {string}', async function (columnName) {
+  const taskPage = getTaskManagementPage(this);
+  const name = await taskPage.addRandomQuickTaskInColumnWithTick(columnName);
+  this.lastCreatedTaskName = name;
+});
+
 Then('quick task card should be visible in kanban column {string}', async function (columnName) {
   const taskPage = getTaskManagementPage(this);
   await taskPage.expectQuickTaskCardInKanbanColumn(columnName);
+});
+
+Then('{int} quick task cards should be visible in kanban column {string}', async function (count, columnName) {
+  const taskPage = getTaskManagementPage(this);
+  await taskPage.expectQuickTaskCountInKanbanColumn(columnName, count);
+});
+
+Then('the created quick task should be visible in kanban column {string}', async function (columnName) {
+  const taskPage = getTaskManagementPage(this);
+  const name = this.lastCreatedTaskName || taskPage.lastQuickTaskName;
+  await taskPage.expectCreatedQuickTaskInKanbanColumn(columnName, name);
 });
 
 Then('the task management module should be open', async function () {

@@ -89,6 +89,20 @@ class TaskManagementPage extends BasePage {
     return this.page.getByRole('dialog').filter({ hasText: /add column/i }).filter({ visible: true }).last();
   }
 
+  /** Freshchat iframe can block kanban clicks during headed runs. */
+  async hideFreshchatWidget() {
+    await this.page
+      .locator('#fc_frame, iframe#fc_widget')
+      .evaluateAll((nodes) => {
+        nodes.forEach((node) => {
+          const el = node;
+          el.style.setProperty('pointer-events', 'none', 'important');
+          el.style.setProperty('visibility', 'hidden', 'important');
+        });
+      })
+      .catch(() => {});
+  }
+
   async dismissOpenOverlays() {
     await this.hideFreshchatWidget();
     for (let i = 0; i < 3; i += 1) {
@@ -442,8 +456,82 @@ class TaskManagementPage extends BasePage {
     await this.logStep(`Added quick task in column "${columnName}"`);
   }
 
+  /** TC-07: repeat the default quick-task click flow (creates "Quick Task" cards). */
+  async addQuickTasksInKanbanColumn(columnName, count = 3) {
+    const total = Math.max(1, Number(count) || 1);
+    for (let i = 0; i < total; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await this.addQuickTaskInColumn(columnName);
+    }
+    this.lastQuickTaskName = 'Quick Task';
+    await this.logStep(`Added ${total} quick task(s) in column "${columnName}"`);
+    return total;
+  }
+
+  buildRandomQuickTaskName() {
+    const suffix = Math.random().toString(36).slice(2, 6);
+    return `CR Task ${suffix}`;
+  }
+
+  async addRandomQuickTaskInColumnWithTick(columnName) {
+    await this.switchToKanbanView();
+    const column = await this._resolveKanbanColumn(columnName);
+    const quickBtn = column.getByRole('button', { name: /add quick task/i }).first();
+    await expect(quickBtn).toBeVisible({ timeout: this.uiTimeout });
+    await quickBtn.click({ force: true, timeout: this.uiTimeout });
+
+    const taskName = this.buildRandomQuickTaskName();
+    this.lastQuickTaskName = taskName;
+
+    const input = column
+      .getByPlaceholder(/enter task name|task name|quick task/i)
+      .or(column.getByRole('textbox').filter({ visible: true }).last())
+      .first();
+    await expect(input).toBeVisible({ timeout: this.uiTimeout });
+    await input.fill('');
+    await input.fill(taskName);
+
+    const checkTick = column.locator('button:has(svg[data-testid="CheckIcon"])').filter({ visible: true }).first();
+    if (await checkTick.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await checkTick.click({ force: true, timeout: this.uiTimeout });
+    } else {
+      const quickAddRow = input.locator('xpath=ancestor::*[self::div or self::li][1]');
+      const tick = quickAddRow
+        .locator('.MuiIconButton-root')
+        .first()
+        .or(column.locator('.MuiIconButton-root').filter({ visible: true }).first());
+      await tick.click({ force: true, timeout: this.uiTimeout });
+    }
+
+    await expect(input).toBeHidden({ timeout: this.uiTimeout }).catch(async () => {
+      await input.waitFor({ state: 'detached', timeout: this.uiTimeout }).catch(() => {});
+    });
+    await this._waitTaskSettled();
+    await this.logStep(`Added quick task "${taskName}" in column "${columnName}" with tick`);
+    return taskName;
+  }
+
   async expectQuickTaskCardInKanbanColumn(columnName) {
     await this.expectTaskCardInKanbanColumn(columnName, 'Quick Task');
+  }
+
+  async expectQuickTaskCountInKanbanColumn(columnName, expectedCount) {
+    const total = Math.max(1, Number(expectedCount) || 1);
+    await this.switchToKanbanView();
+    const column = await this._resolveKanbanColumn(columnName);
+    await expect(async () => {
+      const count = await column.getByText(/^quick task$/i).count();
+      expect(count).toBeGreaterThanOrEqual(total);
+    }).toPass({ timeout: 90000, intervals: [1000, 2500, 5000] });
+    await this.logStep(`${total} quick task(s) visible in column "${columnName}"`);
+  }
+
+  async expectCreatedQuickTaskInKanbanColumn(columnName, taskName) {
+    const name = taskName || this.lastQuickTaskName;
+    if (!name) {
+      throw new Error('No quick task name to verify in kanban column.');
+    }
+    await this.expectTaskCardInKanbanColumn(columnName, name);
   }
 }
 

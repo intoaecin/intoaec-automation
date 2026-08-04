@@ -52,7 +52,7 @@ function logScheduleTestCaseStart(pickle) {
 Before(
   {
     tags:
-      '@TC01 or @TC02 or @TC03 or @TC04 or @TC05 or @TC06 or @TC07 or @TC08 or @TC09 or @TC10 or @TC11 or @TC12 or @TC13 or @TC14 or @TC15 or @TC16 or @TC17 or @TC18 or @TC19 or @TC20 or @TC21 or @TC22 or @TC23 or @TC24 or @TC25 or @TC26 or @TC27 or @TC28 or @TC29',
+      '@schedule and (@TC01 or @TC02 or @TC03 or @TC04 or @TC05 or @TC06 or @TC07 or @TC08 or @TC09 or @TC10 or @TC11 or @TC12 or @TC13 or @TC14 or @TC15 or @TC16 or @TC17 or @TC18 or @TC19 or @TC20 or @TC21 or @TC22 or @TC23 or @TC24 or @TC25 or @TC26 or @TC27 or @TC28 or @TC29)',
   },
   async function (scenario) {
     logScheduleTestCaseStart(scenario.pickle);
@@ -513,6 +513,76 @@ When('I enter schedule name quick add field with {string}', async function (name
   const schedulePage = getSchedulePage(this);
   await schedulePage.logStep(`Added name: ${name}`);
   await schedulePage.fillGanttSidebarQuickAddName(name);
+});
+
+When('I enter a random schedule name in the gantt sidebar quick add field', async function () {
+  const schedulePage = getSchedulePage(this);
+  const suffix = Math.random().toString(36).slice(2, 6);
+  const name = `CR Schedule ${suffix}`;
+  this.lastCreatedScheduleName = name;
+  const clientReportPage = this.clientReportPage;
+  if (clientReportPage) {
+    clientReportPage.lastCreatedScheduleName = name;
+  }
+  await schedulePage.logStep(`Added random schedule name: ${name}`);
+  await schedulePage.fillGanttSidebarQuickAddName(name);
+});
+
+Then('the created schedule should be visible in the gantt view', async function () {
+  const schedulePage = getSchedulePage(this);
+  const name = this.lastCreatedScheduleName;
+  if (!name) {
+    throw new Error('No lastCreatedScheduleName stored on world — run random schedule name step first.');
+  }
+  await schedulePage.logStep(`Verify schedule in Gantt view: ${name}`);
+  await schedulePage.expectScheduleInGanttSidebarList(name);
+  await schedulePage.expectScheduleNameVisibleInGanttTimeline(name);
+});
+
+When('I create {int} random schedules from the gantt sidebar quick add with tick', async function (count) {
+  const schedulePage = getSchedulePage(this);
+  const names = [];
+
+  for (let i = 0; i < count; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await schedulePage.logStep(`Creating schedule ${i + 1} of ${count} from Gantt sidebar quick add`);
+    // eslint-disable-next-line no-await-in-loop
+    await schedulePage.clickGanttSidebarAddSchedule();
+    // eslint-disable-next-line no-await-in-loop
+    await schedulePage.expectQuickAddScheduleFieldVisible();
+    const suffix = Math.random().toString(36).slice(2, 6);
+    const name = `CR Schedule ${i + 1}-${suffix}`;
+    names.push(name);
+    // eslint-disable-next-line no-await-in-loop
+    await schedulePage.fillGanttSidebarQuickAddName(name);
+    // eslint-disable-next-line no-await-in-loop
+    await schedulePage.confirmGanttSidebarQuickAddWithTick();
+    // eslint-disable-next-line no-await-in-loop
+    await schedulePage.expectScheduleInGanttSidebarList(name);
+  }
+
+  this.lastCreatedScheduleNames = names;
+  this.lastCreatedScheduleName = names[names.length - 1];
+  await schedulePage.logStep(`Created ${count} random schedules: ${names.join(', ')}`);
+});
+
+Then('{int} created schedules should be visible in the gantt view', async function (count) {
+  const schedulePage = getSchedulePage(this);
+  const names = this.lastCreatedScheduleNames || [];
+  if (names.length < count) {
+    throw new Error(
+      `Expected ${count} created schedule names on world but found ${names.length}. Run the bulk schedule create step first.`
+    );
+  }
+  for (let i = 0; i < count; i += 1) {
+    const name = names[i];
+    // eslint-disable-next-line no-await-in-loop
+    await schedulePage.logStep(`Verify schedule in Gantt view: ${name}`);
+    // eslint-disable-next-line no-await-in-loop
+    await schedulePage.expectScheduleInGanttSidebarList(name);
+    // eslint-disable-next-line no-await-in-loop
+    await schedulePage.expectScheduleNameVisibleInGanttTimeline(name);
+  }
 });
 
 When('I confirm quick add schedule with tick in gantt sidebar', async function () {
