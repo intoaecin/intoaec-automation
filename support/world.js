@@ -1,5 +1,6 @@
 const { setWorldConstructor } = require('@cucumber/cucumber');
 const { chromium } = require('playwright');
+const { resolvePathForWorld } = require('./googleIntegrationStorage');
 
 function isHeadlessRun() {
   return (
@@ -33,9 +34,17 @@ async function ensureSharedSession() {
     args: headless ? [] : ['--start-maximized']
   });
 
-  const context = await browser.newContext({
-    viewport: headless ? { width: 1280, height: 720 } : null
-  });
+  const contextOptions = {
+    viewport: headless ? { width: 1280, height: 720 } : null,
+  };
+
+  const storageStatePath = resolvePathForWorld();
+  if (storageStatePath) {
+    console.log(`[World] Loading browser storage state from ${storageStatePath}`);
+    contextOptions.storageState = storageStatePath;
+  }
+
+  const context = await browser.newContext(contextOptions);
 
   const page = await context.newPage();
   sharedSession = { browser, context, page };
