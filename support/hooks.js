@@ -43,26 +43,26 @@ AfterStep(async function ({ pickle, result }) {
   if (!this.page || this.page.isClosed()) return;
 
   const tags = (pickle.tags || []).map((t) => String(t.name || ''));
-  const isScheduleTc = tags.some(
-    (t) =>
-      t === '@schedule' ||
-      /^@TC\d{2}$/i.test(t) ||
-      t === '@TS01' ||
-      t === '@TS02' ||
-      t === '@TS03' ||
-      t === '@TS04' ||
-      t === '@TS06' ||
-      t === '@TS07' ||
-      t === '@TS08' ||
-      t === '@TS10' ||
-      t === '@TS11' ||
-      t === '@TS12' ||
-      t === '@TS13' ||
-      t === '@TS14'
-  );
-  if (!isScheduleTc) return;
+  const isScheduleTc = tags.includes('@schedule');
+  const isTaskTc = tags.includes('@task');
+  if (!isScheduleTc && !isTaskTc) return;
 
   try {
+    if (isTaskTc) {
+      const TaskManagementPage = require('../pages/admin/projects/management/TaskManagement/TaskManagementPage');
+      const taskPage = this.taskManagementPage || new TaskManagementPage(this.page);
+      const modalOpen = await taskPage.createTaskModal().isVisible({ timeout: 800 }).catch(() => false);
+      const viewOpen = await taskPage.viewTaskModal().isVisible({ timeout: 800 }).catch(() => false);
+      const addColOpen = await taskPage
+        ._addColumnDialog()
+        .isVisible({ timeout: 800 })
+        .catch(() => false);
+      if (!modalOpen && !viewOpen && !addColOpen) return;
+      await taskPage.logStep('Step failed — closing task overlays for next TC');
+      await taskPage.dismissOpenOverlays();
+      return;
+    }
+
     const SchedulePage = require('../pages/admin/projects/management/Schedule/SchedulePage');
     const schedulePage = this.schedulePage || new SchedulePage(this.page);
     const panelOpen = await schedulePage.formPanel().isVisible({ timeout: 800 }).catch(() => false);

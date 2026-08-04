@@ -75,7 +75,6 @@ class ProjectNavigationPage extends BasePage {
     }
 
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-    await this.page.waitForLoadState('networkidle').catch(() => {});
     await expect(async () => {
       const hasRowheader = await this.firstProject.isVisible({ timeout: 500 }).catch(() => false);
       const hasRows = (await this.projectRows.count()) > 0;
@@ -252,19 +251,19 @@ class ProjectNavigationPage extends BasePage {
       await this.openClientsProjectsList();
     }
 
-    await this.page.waitForLoadState('networkidle').catch(() => {});
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
 
     if (await profile.isInsideProjectProfile()) {
       return;
     }
 
-    await expect(this.firstProject).toBeVisible({ timeout: 60000 });
+    await expect(this.firstProject).toBeVisible({ timeout: 30000 });
     await this.firstProject.click({ timeout: 15000 });
 
-    await this.page.waitForLoadState('networkidle').catch(() => {});
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
     await expect(async () => {
       expect(await profile.isInsideProjectProfile()).toBeTruthy();
-    }).toPass({ timeout: 60000, intervals: [500, 1000, 2000, 3000] });
+    }).toPass({ timeout: 30000, intervals: [500, 1000, 2000, 3000] });
   }
 
   async openRfqFromClientMenu() {
