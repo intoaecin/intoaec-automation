@@ -70,6 +70,11 @@ class ProjectProfilePage extends BasePage {
       return;
     }
 
+    if ((name || '').trim().toLowerCase() === 'daily report') {
+      await this.clickDailyReportModuleCard(scope, text);
+      return;
+    }
+
     // Targeted fallback for Estimate card: the UI has multiple "Estimate" text nodes
     // and generic card/container matching can sometimes click the wrong module.
     // This mirrors the stable selector observed in Playwright inspector for this app.
@@ -83,31 +88,10 @@ class ProjectProfilePage extends BasePage {
       }
     }
 
-    // Schedule card: lives in a MUI grid on Project Management; generic card matching often misses it.
-    // Prefer the grid cell from the app (plus stable fallback if the emotion class hash changes, or by label).
+    // Schedule card: prefer exact "Schedule" label — positional nth-child often hits Estimate
+    // when Design & Estimates grid is still visible / overlapping.
     if ((name || '').trim().toLowerCase() === 'schedule') {
-      const scheduleTimeout = 40000;
-      const exactGridCell = scope.locator(
-        "div[class='MuiGrid-root MuiGrid-container MuiGrid-spacing-xs-2 css-isbt42'] div:nth-child(2) div:nth-child(1)"
-      );
-      const stableGridCell = scope
-        .locator('div.MuiGrid-root.MuiGrid-container.MuiGrid-spacing-xs-2')
-        .first()
-        .locator('div:nth-child(2) div:nth-child(1)')
-        .first();
-      // Avoid matching both a wrapper and inner <p>Schedule</p> (strict mode); prefer card-like targets.
-      const scheduleByLabel = scope
-        .locator('div.MuiGrid-root.MuiGrid-container.MuiGrid-spacing-xs-2')
-        .locator('.MuiCard-root, .MuiPaper-root, [role="button"], a')
-        .filter({ hasText: text })
-        .first();
-
-      // .or() can match multiple visible nodes; .first() picks one target for strict assertions/clicks.
-      const scheduleCard = exactGridCell.or(stableGridCell).or(scheduleByLabel).first();
-      await expect(scheduleCard).toBeVisible({ timeout: scheduleTimeout });
-      await scheduleCard.scrollIntoViewIfNeeded().catch(() => {});
-      await scheduleCard.click({ timeout: scheduleTimeout });
-      await this.page.waitForLoadState('domcontentloaded');
+      await this.clickScheduleModuleCard(scope, text);
       return;
     }
 
@@ -174,6 +158,133 @@ class ProjectProfilePage extends BasePage {
     await fallback.scrollIntoViewIfNeeded().catch(() => {});
     await fallback.click({ timeout: 60000, force: true });
     await this.page.waitForLoadState('domcontentloaded');
+  }
+
+  /**
+   * Project Management → Schedule tile.
+   * Never use positional nth-child (that often clicks Estimate under Design & Estimates).
+   */
+  async clickScheduleModuleCard(scope, text) {
+    const scheduleTimeout = 40000;
+    const href = this.page.url();
+
+    if (/tab=Schedule/i.test(href)) {
+      return;
+    }
+
+    // Ensure Project Management section is active so Schedule cards are in view.
+    const pmHeading = this._visibleHeading('Project Management');
+    if (await pmHeading.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await pmHeading.click({ timeout: 10000 }).catch(() => {});
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    }
+
+    const grid = scope
+      .locator('div.MuiGrid-root.MuiGrid-container.MuiGrid-spacing-xs-2')
+      .first();
+
+    const candidates = [
+      // Exact label on a card / box (preferred)
+      grid
+        .locator('.MuiCard-root, .MuiPaper-root, [role="button"], a, div.MuiBox-root')
+        .filter({ has: scope.getByText(/^schedule$/i) })
+        .first(),
+      scope
+        .locator('.MuiCard-root, .MuiPaper-root, [role="button"], a, div.MuiBox-root')
+        .filter({ has: scope.getByText(/^schedule$/i) })
+        .filter({ visible: true })
+        .first(),
+      scope.getByText(/^Schedule$/i).filter({ visible: true }).first(),
+      scope.getByRole('button', { name: /^schedule$/i }).first(),
+      scope.getByRole('tab', { name: /^schedule$/i }).first(),
+      // Last resort: grid cell that contains exact Schedule text (still label-based)
+      grid.locator('div').filter({ has: scope.getByText(/^schedule$/i) }).first(),
+    ];
+
+    let clicked = false;
+    for (const candidate of candidates) {
+      // eslint-disable-next-line no-await-in-loop
+      if (!(await candidate.isVisible({ timeout: 2000 }).catch(() => false))) {
+        continue;
+      }
+
+      // Never click Estimate / Design cards that somehow match loosely
+      // eslint-disable-next-line no-await-in-loop
+      const label = ((await candidate.innerText().catch(() => '')) || '').trim();
+      if (/estimate|design/i.test(label) && !/^schedule$/im.test(label.split('\n')[0] || '')) {
+        continue;
+      }
+
+      // eslint-disable-next-line no-await-in-loop
+      await candidate.scrollIntoViewIfNeeded().catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      const ok = await candidate
+        .click({ timeout: 15000 })
+        .then(() => true)
+        .catch(async () => {
+          await candidate.click({ timeout: 15000, force: true });
+          return true;
+        })
+        .catch(() => false);
+      if (!ok) {
+        continue;
+      }
+
+      // eslint-disable-next-line no-await-in-loop
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      await this.page.waitForTimeout(500).catch(() => {});
+
+      // Reject Estimate landing page
+      // eslint-disable-next-line no-await-in-loop
+      const landedUrl = this.page.url();
+      if (/tab=Estimate|tab=Design/i.test(landedUrl)) {
+        // eslint-disable-next-line no-console
+        console.log('[ProjectProfile] Schedule click landed on Estimate/Design — retrying next candidate.');
+        continue;
+      }
+
+      // Schedule module markers: Gantt + List tabs, or tab=Schedule
+      // eslint-disable-next-line no-await-in-loop
+      const onSchedule =
+        /tab=Schedule/i.test(landedUrl) ||
+        ((await this.page.getByRole('tab', { name: /^gantt$/i }).isVisible({ timeout: 3000 }).catch(() => false)) &&
+          (await this.page.getByRole('tab', { name: /^list$/i }).isVisible({ timeout: 1500 }).catch(() => false)));
+
+      if (onSchedule) {
+        clicked = true;
+        break;
+      }
+    }
+
+    if (!clicked) {
+      // URL fallback when we have project/client ids
+      const projectMatch = href.match(/projectId=([^&]+)/i);
+      const clientMatch = href.match(/clientId=([^&]+)/i);
+      if (projectMatch && clientMatch) {
+        const base = href.split('?')[0];
+        const scheduleUrl = `${base}?projectId=${projectMatch[1]}&isActive=true&tab=Schedule&clientId=${clientMatch[1]}`;
+        await this.page.goto(scheduleUrl, { waitUntil: 'domcontentloaded' });
+        await this.page.waitForURL(/tab=Schedule/i, { timeout: 60000 }).catch(() => {});
+        clicked = true;
+      }
+    }
+
+    if (!clicked) {
+      throw new Error(
+        'Could not open Schedule module. Clicks either missed or opened Estimate/Design instead.'
+      );
+    }
+
+    await expect
+      .poll(
+        async () =>
+          /tab=Schedule/i.test(this.page.url()) ||
+          ((await this.page.getByRole('tab', { name: /^gantt$/i }).isVisible({ timeout: 500 }).catch(() => false)) &&
+            (await this.page.getByRole('tab', { name: /^list$/i }).isVisible({ timeout: 500 }).catch(() => false))),
+        { timeout: scheduleTimeout, intervals: [500, 1000, 2000] }
+      )
+      .toBe(true);
   }
 
   async clickPurchaseOrderModuleCard(scope, text) {
@@ -475,6 +586,92 @@ class ProjectProfilePage extends BasePage {
     }
 
     await expect(createClientReport).toBeVisible({ timeout: 60000 });
+  }
+
+  /** Project Management grid tile — Daily Report (same pattern as Client Report / Assets). */
+  async clickDailyReportModuleCard(scope, text) {
+    const createDailyReport = this.page
+      .getByRole('button', { name: /create daily report/i })
+      .or(this.page.getByRole('button', { name: /^create$/i }))
+      .first();
+
+    if (await createDailyReport.isVisible({ timeout: 1500 }).catch(() => false)) {
+      return;
+    }
+
+    const href = this.page.url();
+    if (
+      (/tab=DailyReport/i.test(href) || /tab=DailyLog/i.test(href)) &&
+      (await createDailyReport.isVisible({ timeout: 3000 }).catch(() => false))
+    ) {
+      return;
+    }
+
+    const grid = scope
+      .locator('div.MuiGrid-root.MuiGrid-container.MuiGrid-spacing-xs-2')
+      .first();
+
+    const candidates = [
+      scope.getByText('Daily report').first(),
+      scope.getByText(/^daily report$/i).first(),
+      grid
+        .locator('div.MuiBox-root')
+        .filter({ hasText: /^daily\s*report$/i })
+        .first(),
+      grid
+        .locator('.MuiCard-root, .MuiPaper-root, [role="button"], a, div')
+        .filter({ hasText: /^daily\s*report$/i })
+        .first(),
+      grid.locator('div').filter({ has: scope.getByText(/^daily\s*report$/i) }).first(),
+      scope.locator('div').filter({ hasText: /^Daily Report$/i }).first(),
+      scope.locator('div').filter({ hasText: /^Daily Report$/i }).nth(1),
+      scope.getByRole('tab', { name: /daily report/i }).first(),
+      scope.getByRole('button', { name: /daily report/i }).first(),
+      scope.getByText(/^Daily Report$/i).first(),
+      scope
+        .locator(
+          '[role="tab"], .MuiTab-root, .MuiCard-root, .MuiPaper-root, [role="button"], button, a, [role="link"], div.MuiBox-root'
+        )
+        .filter({ hasText: text })
+        .first(),
+    ];
+
+    for (const candidate of candidates) {
+      if (!(await candidate.isVisible({ timeout: 2000 }).catch(() => false))) {
+        continue;
+      }
+
+      await candidate.scrollIntoViewIfNeeded().catch(() => {});
+      const clicked = await candidate
+        .click({ timeout: 10000, force: true })
+        .then(() => true)
+        .catch(() => false);
+      if (!clicked) {
+        continue;
+      }
+
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      await this.page
+        .waitForLoadState('networkidle', { timeout: 15000 })
+        .catch(() => {});
+
+      if (await createDailyReport.isVisible({ timeout: 10000 }).catch(() => false)) {
+        return;
+      }
+    }
+
+    const projectMatch = href.match(/projectId=([^&]+)/i);
+    const clientMatch = href.match(/clientId=([^&]+)/i);
+    if (projectMatch && clientMatch) {
+      const base = href.split('?')[0];
+      const dailyReportUrl = `${base}?projectId=${projectMatch[1]}&isActive=true&tab=DailyReport&clientId=${clientMatch[1]}`;
+      await this.page.goto(dailyReportUrl, { waitUntil: 'domcontentloaded' });
+      await this.page
+        .waitForURL(/tab=DailyReport/i, { timeout: 60000 })
+        .catch(() => {});
+    }
+
+    await expect(createDailyReport).toBeVisible({ timeout: 60000 });
   }
 }
 

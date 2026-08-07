@@ -82,7 +82,15 @@ class TaskManagementPage extends BasePage {
   }
 
   createTaskModal() {
-    return this.page.locator('.boqUI.prodandserviceUI').filter({ visible: true }).last();
+    return this.page
+      .locator('.boqUI.prodandserviceUI, aside.offcanvas.show, .offcanvas.show')
+      .filter({
+        has: this.page
+          .locator('input[name="taskName"]')
+          .or(this.page.getByRole('textbox', { name: /Eg\s*:\s*Site Preparation/i })),
+      })
+      .filter({ visible: true })
+      .last();
   }
 
   _addColumnDialog() {
@@ -233,13 +241,22 @@ class TaskManagementPage extends BasePage {
     const modal = this.createTaskModal();
     await expect(modal).toBeVisible({ timeout: this.uiTimeout });
     await expect(modal.getByRole('button', { name: /^create$/i })).toBeVisible({ timeout: this.uiTimeout });
-    await expect(modal.locator('input[name="taskName"]')).toBeVisible({ timeout: this.uiTimeout });
+    const nameInput = modal
+      .getByRole('textbox', { name: /Eg\s*:\s*Site Preparation/i })
+      .or(modal.locator('input[name="taskName"]'))
+      .first();
+    await expect(nameInput).toBeVisible({ timeout: this.uiTimeout });
   }
 
   async fillTaskNameOnCreateForm(taskName) {
     const modal = this.createTaskModal();
-    const input = modal.locator('input[name="taskName"]');
+    // Codegen: getByRole('textbox', { name: 'Eg : Site Preparation' })
+    const input = modal
+      .getByRole('textbox', { name: /Eg\s*:\s*Site Preparation/i })
+      .or(modal.locator('input[name="taskName"]'))
+      .first();
     await expect(input).toBeVisible({ timeout: this.uiTimeout });
+    await input.click({ timeout: this.uiTimeout });
     await input.fill(String(taskName));
     await this.logStep(`Filled task name: ${taskName}`);
   }
@@ -270,14 +287,29 @@ class TaskManagementPage extends BasePage {
   async pickRandomStartDateTimeOnCreateTaskForm() {
     const schedule = this._getScheduleDateHelper();
     const modal = this.createTaskModal();
-    await schedule._prepareCreateFormForDateEntry();
     const start = schedule.randomWeekdayDateTimeBetween(3, 25);
     this._pendingTaskRandomStartMs = start.getTime();
-    await schedule._pickScheduleCreateFormDateTime(modal, start, 'start');
+    await this._pickTaskCreateFormDateTime(modal, start, 'start');
 
-    const endInput = modal.getByLabel(/end date/i);
     await expect(async () => {
-      expect(await endInput.isEnabled().catch(() => false)).toBeTruthy();
+      const enabled = await modal.evaluate((root) => {
+        const isVisible = (el) => {
+          if (!el) return false;
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        };
+        for (const label of [...root.querySelectorAll('label, span, p')]) {
+          if (!/end\s*date/i.test((label.textContent || '').trim())) continue;
+          let container = label;
+          for (let depth = 0; depth < 12 && container; depth += 1) {
+            const input = container.querySelector('input:not([type="hidden"])');
+            if (isVisible(input)) return !input.disabled;
+            container = container.parentElement;
+          }
+        }
+        return false;
+      });
+      expect(enabled).toBeTruthy();
     }).toPass({ timeout: 25000, intervals: [400, 1000, 2000] });
     await this.logStep('Picked random start datetime on task create form');
   }
@@ -296,7 +328,7 @@ class TaskManagementPage extends BasePage {
 
     const base = new Date(this._pendingTaskRandomStartMs || Date.now());
     const end = schedule.endDateTimeCandidatesAfterStart(base)[0];
-    await schedule._pickScheduleCreateFormDateTime(modal, end, 'end');
+    await this._pickTaskCreateFormDateTime(modal, end, 'end');
     this._pendingTaskRandomStartMs = null;
     await this.logStep('Picked random end datetime after start on task create form');
   }

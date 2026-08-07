@@ -283,12 +283,18 @@ class SchedulePage extends BasePage {
       if (tabsReady) return;
     }
     await this.page.waitForLoadState('domcontentloaded');
+    // Require Schedule Gantt/List (never pass on Estimate's Create button alone).
     await expect(async () => {
-      const createVisible = await this.createToolbarButton.isVisible().catch(() => false);
-      const tabVisible =
-        (await this.ganttTab.isVisible().catch(() => false)) || (await this.listTab.isVisible().catch(() => false));
-      const heading = await this.main.getByText(/schedule/i).first().isVisible().catch(() => false);
-      expect(createVisible || tabVisible || heading).toBeTruthy();
+      const onEstimate = /tab=Estimate|tab=Design/i.test(this.page.url());
+      expect(onEstimate).toBeFalsy();
+      const gantt =
+        (await this.ganttTab.isVisible().catch(() => false)) ||
+        (await this.page.getByRole('tab', { name: /^gantt$/i }).isVisible().catch(() => false));
+      const list =
+        (await this.listTab.isVisible().catch(() => false)) ||
+        (await this.page.getByRole('tab', { name: /^list$/i }).isVisible().catch(() => false));
+      const sidebar = await this.ganttSidebar().isVisible().catch(() => false);
+      expect(gantt || list || sidebar || /tab=Schedule/i.test(this.page.url())).toBeTruthy();
     }).toPass({ timeout: this.uiTimeout, intervals: [500, 1500, 3000] });
     await this._waitScheduleSettled();
   }
@@ -681,6 +687,94 @@ class SchedulePage extends BasePage {
     await this.fillScheduleOrMilestoneName(name);
     await this.fillDateLikeFields();
     await this.submitPanelPrimary();
+  }
+
+  /**
+   * Daily Report TC-06: Create → Schedule → random name → default priority →
+   * first assignee → start/end datetimes (start = TODAY) → Create.
+   * Stores `lastDailyReportScheduleName`.
+   */
+  async createScheduleForDailyReportTc06() {
+    const name = `DR Schedule ${this.randomSuffix()}`;
+    this.lastDailyReportScheduleName = name;
+
+    await this.waitForModuleToLoad().catch(() => {});
+    await this.switchToGanttView().catch(() => {});
+    await this.openCreateSchedulePanel();
+    await this.fillScheduleOrMilestoneName(name);
+    // Priority left as default (do not change).
+    await this.selectFirstAssignee();
+    // Use TODAY — not randomWeekdayDateTimeBetween(3,25) which can land on month-end.
+    await this.pickTodayStartDateTimeOnScheduleCreateForm();
+    await this.pickRandomEndDateTimeAfterStartOnScheduleCreateForm();
+    await this.submitScheduleCreateForm();
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+
+    // eslint-disable-next-line no-console
+    console.log(`[Schedule] Created schedule for Daily Report TC-06: ${name}`);
+    return name;
+  }
+
+  /**
+   * Daily Report TC-07: create N schedules using the exact same flow as TC-06
+   * (name → first assignee → start TODAY → end after start → Create), repeated N times.
+   * Stores `lastDailyReportScheduleNames` and `lastDailyReportScheduleName` (last item).
+   */
+  async createSchedulesForDailyReportTc07(count = 3) {
+    const total = Math.max(1, Number(count) || 1);
+    const names = [];
+
+    for (let i = 0; i < total; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await this.dismissOpenOverlays().catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      await this.waitForModuleToLoad().catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      await this.switchToGanttView().catch(() => {});
+
+      // eslint-disable-next-line no-await-in-loop
+      const name = await this.createScheduleForDailyReportTc06();
+      names.push(name);
+      // eslint-disable-next-line no-console
+      console.log(`[Schedule] Daily Report TC-07 — created schedule ${i + 1}/${total}: ${name}`);
+    }
+
+    this.lastDailyReportScheduleNames = names;
+    this.lastDailyReportScheduleName = names[names.length - 1];
+    // eslint-disable-next-line no-console
+    console.log(`[Schedule] Created ${names.length} schedule(s) for Daily Report TC-07 (same as TC-06 × ${total}).`);
+    return names;
+  }
+
+  async expectScheduleCreatedForDailyReport(scheduleName) {
+    const name = scheduleName || this.lastDailyReportScheduleName;
+    if (!name) {
+      throw new Error('Expected a schedule name for Daily Report schedule verification.');
+    }
+
+    // Created in Gantt (same as Schedule TC-05) — verify in Gantt sidebar, not List tab.
+    await this.switchToGanttView().catch(() => {});
+    await this.searchGanttSidebarScheduleIfAvailable(name);
+    await this.expectScheduleInGanttSidebarList(name);
+    // eslint-disable-next-line no-console
+    console.log(`[Schedule] Verified schedule in Gantt sidebar for Daily Report: ${name}`);
+  }
+
+  async expectSchedulesCreatedForDailyReport(scheduleNames) {
+    const names = scheduleNames || this.lastDailyReportScheduleNames || [];
+    if (!names.length) {
+      throw new Error('Expected schedule names for Daily Report schedule verification.');
+    }
+    await this.switchToGanttView().catch(() => {});
+    for (const name of names) {
+      // eslint-disable-next-line no-await-in-loop
+      await this.searchGanttSidebarScheduleIfAvailable(name);
+      // eslint-disable-next-line no-await-in-loop
+      await this.expectScheduleInGanttSidebarList(name);
+    }
+    // eslint-disable-next-line no-console
+    console.log(`[Schedule] Verified ${names.length} schedule(s) in Gantt sidebar for Daily Report.`);
   }
 
   async createMilestoneMandatory(name, { useListView } = { useListView: true }) {
@@ -3055,38 +3149,58 @@ class SchedulePage extends BasePage {
   async _openCreateFormDateTimePicker(panel, kind) {
     await this._prepareCreateFormForDateEntry();
     const isStart = kind === 'start';
-    if (isStart) {
-      const spanChoose = panel
-        .locator('span')
-        .filter({ hasText: /start date/i })
-        .getByLabel('Choose date')
-        .first();
-      if (await spanChoose.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await spanChoose.click({ force: true, timeout: 15000 });
-        await expect(this._scheduleDatePickerPopper()).toBeVisible({ timeout: 15000 });
-        return;
-      }
+    const labelRe = isStart ? /start date/i : /end date/i;
+
+    const assertPopperOpen = async () => {
+      await expect(this._scheduleDatePickerPopper()).toBeVisible({ timeout: 15000 });
+    };
+
+    const spanChoose = panel
+      .locator('span')
+      .filter({ hasText: labelRe })
+      .getByLabel('Choose date')
+      .first();
+    if (await spanChoose.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await spanChoose.scrollIntoViewIfNeeded().catch(() => {});
+      await spanChoose.click({ force: true, timeout: 15000 });
+      await assertPopperOpen();
+      return;
     }
+
+    const idx = isStart ? 0 : 1;
+    const byOrder = panel.getByRole('button', { name: 'Choose date', exact: true }).nth(idx);
+    if (await byOrder.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await byOrder.scrollIntoViewIfNeeded().catch(() => {});
+      await byOrder.click({ force: true, timeout: 15000 });
+      await assertPopperOpen();
+      return;
+    }
+
     const startInput = panel.getByLabel(/start date/i);
     const endInput = panel.getByLabel(/end date/i);
     const input = isStart ? startInput : endInput;
-    await expect(input).toBeVisible({ timeout: 15000 });
-    const formControl = input.locator('xpath=ancestor::div[contains(@class,"MuiFormControl-root")][1]').first();
-    const adornment = formControl
-      .getByLabel('Choose date', { exact: true })
-      .or(formControl.locator('button[aria-label*="Choose" i]'))
-      .or(formControl.locator('.MuiInputAdornment-root button').first())
-      .first();
-    if (await adornment.isVisible({ timeout: 4000 }).catch(() => false)) {
-      await adornment.click({ force: true, timeout: 15000 });
-      await expect(this._scheduleDatePickerPopper()).toBeVisible({ timeout: 15000 });
-      return;
+    if (await input.isVisible({ timeout: 3000 }).catch(() => false)) {
+      const formControl = input
+        .locator('xpath=ancestor::div[contains(@class,"MuiFormControl-root")][1]')
+        .first();
+      const adornment = formControl
+        .getByLabel('Choose date', { exact: true })
+        .or(formControl.locator('button[aria-label*="Choose" i]'))
+        .or(formControl.locator('.MuiInputAdornment-root button').first())
+        .first();
+      if (await adornment.isVisible({ timeout: 4000 }).catch(() => false)) {
+        await adornment.scrollIntoViewIfNeeded().catch(() => {});
+        await adornment.click({ force: true, timeout: 15000 });
+        await assertPopperOpen();
+        return;
+      }
     }
-    const idx = isStart ? 0 : 1;
-    const byOrder = panel.getByRole('button', { name: 'Choose date', exact: true }).nth(idx);
-    await expect(byOrder).toBeVisible({ timeout: 15000 });
-    await byOrder.click({ force: true, timeout: 15000 });
-    await expect(this._scheduleDatePickerPopper()).toBeVisible({ timeout: 15000 });
+
+    const fallbackChoose = panel.getByRole('button', { name: 'Choose date', exact: true }).nth(idx);
+    await expect(fallbackChoose).toBeVisible({ timeout: 15000 });
+    await fallbackChoose.scrollIntoViewIfNeeded().catch(() => {});
+    await fallbackChoose.click({ force: true, timeout: 15000 });
+    await assertPopperOpen();
   }
 
   async _muiClickNextMonth(popper) {
@@ -3391,6 +3505,43 @@ class SchedulePage extends BasePage {
       await this.page.keyboard.press('Escape').catch(() => {});
       await this._scheduleDatePickerPopper().waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
       await this.logStep('Picked milestone start datetime (no end date on form)');
+      return;
+    }
+
+    const endInput = panel.getByLabel(/end date/i);
+    await expect(async () => {
+      expect(await endInput.isEnabled().catch(() => false)).toBeTruthy();
+    }).toPass({ timeout: 25000, intervals: [400, 1000, 2000] });
+  }
+
+  /**
+   * Daily Report TC-06/TC-07: Start = today's calendar date (not a random future/month-end day).
+   * Default time 10:00 AM so End can be later same day.
+   */
+  async pickTodayStartDateTimeOnScheduleCreateForm() {
+    const panel = await this.activeFormPanel();
+    await this._prepareCreateFormForDateEntry();
+    const start = new Date();
+    start.setHours(10, 0, 0, 0);
+    this._pendingScheduleRandomStartMs = start.getTime();
+    this._scheduleCreateFormStartMs = start.getTime();
+    this._scheduleCreateFormRequiresNonZeroDuration = false;
+    await this._pickScheduleCreateFormDateTime(panel, start, 'start');
+    await this.logStep(
+      `Picked TODAY as schedule start datetime: ${start.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      })}`
+    );
+
+    if (await this._isMilestoneScheduleFormWithoutEndDate()) {
+      await this._muiConfirmPickerIfPresent();
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this._scheduleDatePickerPopper().waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
       return;
     }
 
