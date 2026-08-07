@@ -3050,8 +3050,9 @@ class DailyReportPage extends BasePage {
 
   taskSectionLabel() {
     return this.page
-      .getByText(/^task$/i)
-      .or(this.page.getByText(/^tasks$/i))
+      .getByText(/^task progress$/i)
+      .or(this.page.getByText(/^tasks?$/i))
+      .or(this.page.getByText(/task\s*progress/i))
       .first();
   }
 
@@ -3072,12 +3073,12 @@ class DailyReportPage extends BasePage {
 
   async scrollToTaskSection() {
     const label = this.taskSectionLabel();
-    for (let attempt = 0; attempt < 8; attempt += 1) {
+    for (let attempt = 0; attempt < 12; attempt += 1) {
       // eslint-disable-next-line no-await-in-loop
       if (await label.isVisible({ timeout: 500 }).catch(() => false)) {
         // eslint-disable-next-line no-await-in-loop
         await label.scrollIntoViewIfNeeded().catch(() => {});
-        await this.logStep('[Daily Report] Task section is in view.');
+        await this.logStep('[Daily Report] Task / Task Progress section is in view.');
         return;
       }
       // eslint-disable-next-line no-await-in-loop
@@ -3108,20 +3109,38 @@ class DailyReportPage extends BasePage {
     await this.waitForDailyReportCreatePage();
     await this.scrollToTaskSection();
 
+    // Prefer reading listed task names; if empty, open Task Progress edit (checkboxes show names).
+    const visibleDirectly = async () => {
+      if (await this.isTaskNameVisibleOnCreatePage(taskName, this.createPageScope())) return true;
+      const label = this.taskSectionLabel();
+      if (await label.isVisible({ timeout: 400 }).catch(() => false)) {
+        const scope = label.locator(
+          'xpath=ancestor::*[self::div or self::section or self::article][1]'
+        );
+        if (await this.isTaskNameVisibleOnCreatePage(taskName, scope)) return true;
+      }
+      return this.isTaskNameVisibleOnCreatePage(taskName, this.page);
+    };
+
+    if (!(await visibleDirectly())) {
+      await this.clickDailyReportTaskProgressEditIcon().catch(() => {});
+      await this.page.waitForTimeout(800);
+    }
+
     await expect
       .poll(
         async () => {
-          if (await this.isTaskNameVisibleOnCreatePage(taskName, this.createPageScope())) {
-            return true;
+          if (await visibleDirectly()) return true;
+          // Task Progress panel checkboxes / labels
+          const panel = this.page
+            .locator('.MuiPopover-paper, .MuiDialog-paper, .MuiPaper-root, [role="dialog"]')
+            .filter({ visible: true })
+            .filter({ has: this.page.getByRole('checkbox') })
+            .last();
+          if (await panel.isVisible({ timeout: 400 }).catch(() => false)) {
+            return this.isTaskNameVisibleOnCreatePage(taskName, panel);
           }
-          const label = this.taskSectionLabel();
-          if (await label.isVisible({ timeout: 400 }).catch(() => false)) {
-            const scope = label.locator('xpath=ancestor::*[self::div or self::section or self::article][1]');
-            if (await this.isTaskNameVisibleOnCreatePage(taskName, scope)) {
-              return true;
-            }
-          }
-          return this.isTaskNameVisibleOnCreatePage(taskName, this.page);
+          return false;
         },
         { timeout: this.defaultTimeout, intervals: [500, 1000, 2000] }
       )

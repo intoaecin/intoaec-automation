@@ -228,6 +228,27 @@ module.exports = {
     await schedule.hideFreshchatWidget();
     await this.page.keyboard.press('Escape').catch(() => {});
 
+    const isOpen = async () => {
+      if (await schedule._isScheduleAssigneePickerOpen()) return true;
+      if (await schedule._scheduleAssigneePickerPopover().isVisible({ timeout: 300 }).catch(() => false)) {
+        return true;
+      }
+      // Only MuiPopover / MuiMenu — never the create-drawer presentation paper
+      return (
+        (await this.page
+          .locator('.MuiPopover-paper, .MuiMenu-paper')
+          .filter({ visible: true })
+          .filter({
+            has: this.page
+              .getByRole('tab', { name: /users|vendors/i })
+              .or(this.page.locator('#schedule-assignee-tab-users, #schedule-assignee-tab-vendors'))
+              .or(this.page.getByRole('checkbox')),
+          })
+          .count()
+          .catch(() => 0)) >= 1
+      );
+    };
+
     const lbl = panel
       .locator('label, .fw-500, .MuiFormLabel-root, p, span, div')
       .filter({ hasText: fieldLabelRegex })
@@ -235,6 +256,7 @@ module.exports = {
     const candidates = [
       panel.getByPlaceholder(/select assignee|select reporter|select/i).first(),
       panel.locator('[data-edit-field="assignee"]').first(),
+      panel.getByRole('combobox', { name: /assignee|reporter/i }).first(),
       lbl.locator('xpath=following::*[contains(@class,"css-19x37hq")][1]').first(),
       lbl.locator('xpath=following::*[contains(@class,"MuiBox-root")][1]').first(),
       lbl.locator('xpath=following::*[@role="combobox"][1]').first(),
@@ -243,28 +265,12 @@ module.exports = {
       if (!(await candidate.isVisible({ timeout: 1500 }).catch(() => false))) continue;
       await candidate.scrollIntoViewIfNeeded().catch(() => {});
       await candidate.click({ force: true, timeout: 15000 }).catch(() => {});
-      if (await schedule._isScheduleAssigneePickerOpen()) return;
-      if (
-        (await this.page
-          .locator('.MuiPopover-paper, .MuiMenu-paper')
-          .filter({ visible: true })
-          .getByRole('checkbox')
-          .count()
-          .catch(() => 0)) >= 1
-      ) {
-        return;
-      }
+      await this.page.waitForTimeout(400);
+      if (await isOpen()) return;
+      await this.page.keyboard.press('Escape').catch(() => {});
     }
     await expect(async () => {
-      const open =
-        (await schedule._isScheduleAssigneePickerOpen()) ||
-        (await this.page
-          .locator('.MuiPopover-paper, .MuiMenu-paper')
-          .filter({ visible: true })
-          .getByRole('checkbox')
-          .count()
-          .catch(() => 0)) >= 1;
-      expect(open).toBeTruthy();
+      expect(await isOpen()).toBeTruthy();
     }).toPass({ timeout: 20000, intervals: [500, 1000, 2000] });
   },
 
