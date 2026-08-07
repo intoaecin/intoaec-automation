@@ -154,3 +154,32 @@ Mirror the **Schedule** pattern (`Schedule_TestCases.feature`):
 npx cucumber-js features/admin/projects/managements/TaskManagement/Task_TestCases.feature --tags "@TS01 and @TC01"
 ```
 
+---
+
+## Budgeting (`@budgeting`) — incremental TC file
+
+Mirror the **Schedule** / **Task** pattern (`Budgeting_TestCases.feature`):
+
+| Layer | Path |
+|-------|------|
+| Feature | `features/admin/projects/managements/Budgeting/Budgeting_TestCases.feature` |
+| Steps | `step-definitions/admin/projects/management/Budgeting/BudgetingStep.js` |
+| Page | `pages/admin/projects/management/Budgeting/BudgetingPage.js` |
+
+**UI reference:** `intoaec-UI/src/features/projectSchedule/components/` — `BudgetView.tsx`, `ActualBudgetCard.tsx`, `BudgetLinkPlannedCost.tsx`, `ManualBudgetTabContent.tsx`, `EstimatesTabContent.tsx`, `ProposalsTabContent.tsx`, `BudgetTable.tsx`.
+
+**Tags:** `@budgeting` on the feature; `@TS01` / `@TC01` … `@TS07` / `@TC07` per test sheet.
+
+**Background:** login → project → Project Management → `I navigate to the budgeting module` → wait for module load.
+
+**Money / math rule:** amounts used for manual add and for estimate/proposal link validation must be **multiples of 100** (default random range **100–10,000** step 100). Store last linked/deleted amounts on `world` so Actual Budget card total, category breakdown, and unallocated can be asserted with add/subtract.
+
+**Cross-module:** TC-01 reuses Schedule quick-add / add-child steps. TC-04/05 reuse Estimate create+send steps (with controlled amount). TC-06/07 reuse Proposal send + Yopmail accept patterns; budgeting-specific steps live in `BudgetingStep.js` / `BudgetingPage.js`.
+
+**Step cache:** `world.budgetingPage` + `getBudgetingPage(world)` in `BudgetingStep.js`.
+
+**Run one TC:**
+```bash
+npx cucumber-js features/admin/projects/managements/Budgeting/Budgeting_TestCases.feature --tags "@TS01 and @TC01"
+```
+
