@@ -11,7 +11,8 @@
 #
 # Amounts: all money values used for add/link must be multiples of 100
 # so add/subtract totals on Actual Budget card are easy to validate.
-# Default random range (unless overridden): 100–10,000 step 100.
+# Default random range (unless overridden): 100–1,000 step 100.
+# Estimate item amounts: qty 1 + rate multiple of 100 + profit 0.
 #
 # UI reference: intoaec-UI/src/features/projectSchedule/components/
 #   BudgetView, ActualBudgetCard, BudgetLinkPlannedCost, ManualBudgetTabContent,
@@ -129,7 +130,7 @@ Feature: Budgeting — incremental test cases
     And I click Create Estimate
     And I start estimate from scratch and proceed
     And I fill estimate title with "budget estimate 1"
-    And I add estimate section with name "section 1"
+    And I add estimate section "section 1"
     And I add manual estimate item with amount multiple of 100
     And I click estimate action compose email and send
     Then I should see estimate success toast "Estimation created successfully|Email sent successfully"
@@ -162,7 +163,7 @@ Feature: Budgeting — incremental test cases
     And I click Create Estimate
     And I start estimate from scratch and proceed
     And I fill estimate title with "budget estimate 2"
-    And I add estimate section with name "section 2"
+    And I add estimate section "section 2"
     And I add manual estimate item with amount multiple of 100
     And I click estimate action compose email and send
     Then I should see estimate success toast "Estimation created successfully|Email sent successfully"

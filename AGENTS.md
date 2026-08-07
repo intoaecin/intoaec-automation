@@ -172,7 +172,7 @@ Mirror the **Schedule** / **Task** pattern (`Budgeting_TestCases.feature`):
 
 **Background:** login → project → Project Management → `I navigate to the budgeting module` → wait for module load.
 
-**Money / math rule:** amounts used for manual add and for estimate/proposal link validation must be **multiples of 100** (default random range **100–10,000** step 100). Store last linked/deleted amounts on `world` so Actual Budget card total, category breakdown, and unallocated can be asserted with add/subtract.
+**Money / math rule:** amounts used for manual add and for estimate/proposal link validation must be **multiples of 100** (default random range **100–1,000** step 100). Estimate items: qty `1`, rate multiple of 100, profit `0`. Store last linked/deleted amounts on `world` so Actual Budget card total, category breakdown, and unallocated can be asserted with add/subtract. Login user is **Approver** (manual budgets show Approved).
 
 **Cross-module:** TC-01 reuses Schedule quick-add / add-child steps. TC-04/05 reuse Estimate create+send steps (with controlled amount). TC-06/07 reuse Proposal send + Yopmail accept patterns; budgeting-specific steps live in `BudgetingStep.js` / `BudgetingPage.js`.
 
