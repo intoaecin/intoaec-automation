@@ -58,7 +58,7 @@ Given(
   { timeout: 300000 },
   async function () {
     const email = process.env.RFQ_TEST_EMAIL || 'testintoaec@gmail.com';
-    const password = process.env.RFQ_TEST_PASSWORD || 'Courage@10';
+    const password = process.env.RFQ_TEST_PASSWORD || 'Simple@10';
 
     if (isRfqSuiteSessionPrimed()) {
       // eslint-disable-next-line no-console

@@ -75,12 +75,8 @@ function getTaskPage(world) {
 
 When('I wait for the schedule module to load', async function () {
   const schedulePage = getSchedulePage(this);
-  if (await schedulePage.isOnScheduleModule()) {
-    await schedulePage.logStep('Schedule module already loaded — continuing in same tab');
-    return;
-  }
-  await schedulePage.logStep('Schedule module loaded');
   await schedulePage.waitForModuleToLoad();
+  await schedulePage.logStep('Schedule module loaded');
 });
 
 When('I switch schedule to gantt view', async function () {

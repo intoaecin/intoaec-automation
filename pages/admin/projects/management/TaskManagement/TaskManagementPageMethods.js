@@ -7,7 +7,195 @@ module.exports = {
   },
 
   _activeTaskPanel() {
-    return this.page.locator('.boqUI.prodandserviceUI').filter({ visible: true }).last();
+    return this.page
+      .locator('.boqUI.prodandserviceUI, aside.offcanvas.show, .offcanvas.show')
+      .filter({
+        has: this.page
+          .locator('input[name="taskName"]')
+          .or(this.page.getByRole('textbox', { name: /Eg\s*:\s*Site Preparation/i })),
+      })
+      .filter({ visible: true })
+      .last()
+      .or(this.page.locator('.boqUI.prodandserviceUI').filter({ visible: true }).last());
+  },
+
+  _taskDatePickerPopper() {
+    const schedule = this._getScheduleDateHelper();
+    return schedule._scheduleDatePickerPopper();
+  },
+
+  async _scrollTaskCreateFormToDates(panel) {
+    await this._scrollTaskPanel(panel);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      if (await panel.getByText(/start date/i).first().isVisible({ timeout: 400 }).catch(() => false)) {
+        // eslint-disable-next-line no-await-in-loop
+        await panel.getByText(/start date/i).first().scrollIntoViewIfNeeded().catch(() => {});
+        return;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await panel.evaluate((root) => {
+        const nodes = [root, ...root.querySelectorAll('*')];
+        for (const el of nodes) {
+          if (el && el.scrollHeight > el.clientHeight + 20) {
+            el.scrollTop += 400;
+          }
+        }
+      }).catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      await this.page.mouse.wheel(0, 500).catch(() => {});
+    }
+  },
+
+  async _clickTaskCreateFormChooseDate(panel, kind) {
+    const schedule = this._getScheduleDateHelper();
+    const idx = kind === 'start' ? 0 : 1;
+    await this._scrollTaskCreateFormToDates(panel);
+
+    const clicked = await panel.evaluate((root, buttonIndex) => {
+      const isVisible = (el) => {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
+      const labelRe = buttonIndex === 0 ? /start\s*date/i : /end\s*date/i;
+
+      for (const label of [...root.querySelectorAll('label, span, p, .fw-500, .MuiFormLabel-root')]) {
+        if (!labelRe.test((label.textContent || '').trim())) {
+          continue;
+        }
+        let container = label;
+        for (let depth = 0; depth < 12 && container; depth += 1) {
+          const btn = container.querySelector(
+            'button[aria-label="Choose date"], button[aria-label*="Choose" i], .MuiInputAdornment-root button'
+          );
+          if (isVisible(btn)) {
+            btn.scrollIntoView({ block: 'center' });
+            btn.click();
+            return true;
+          }
+          container = container.parentElement;
+        }
+      }
+
+      const buttons = [
+        ...root.querySelectorAll('button[aria-label="Choose date"], button[aria-label*="Choose" i]'),
+      ].filter(isVisible);
+      const target = buttons[buttonIndex] || buttons[0];
+      if (target) {
+        target.scrollIntoView({ block: 'center' });
+        target.click();
+        return true;
+      }
+      return false;
+    }, idx);
+
+    if (!clicked) {
+      return false;
+    }
+
+    await this.page.waitForTimeout(600);
+    return schedule._scheduleDatePickerPopper().isVisible({ timeout: 5000 }).catch(() => false);
+  },
+
+  async _fillTaskFormDateTimeInput(panel, targetDate, kind) {
+    const formatted = targetDate.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+    const isStart = kind === 'start';
+
+    const filled = await panel.evaluate(
+      (root, { text, startKind }) => {
+        const isVisible = (el) => {
+          if (!el) return false;
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        };
+        const labelRe = startKind ? /start\s*date/i : /end\s*date/i;
+        let target = null;
+
+        for (const label of [...root.querySelectorAll('label, span, p, .fw-500')]) {
+          if (!labelRe.test((label.textContent || '').trim())) {
+            continue;
+          }
+          let container = label;
+          for (let depth = 0; depth < 12 && container; depth += 1) {
+            const input = container.querySelector('input:not([type="hidden"])');
+            if (isVisible(input)) {
+              target = input;
+              break;
+            }
+            container = container.parentElement;
+          }
+          if (target) {
+            break;
+          }
+        }
+
+        if (!target) {
+          const inputs = [...root.querySelectorAll('input:not([type="hidden"])')]
+            .filter(isVisible)
+            .filter((input) => (input.getAttribute('name') || '') !== 'taskName');
+          target = inputs[startKind ? 0 : 1] || inputs[0] || null;
+        }
+
+        if (!target) {
+          return false;
+        }
+
+        target.scrollIntoView({ block: 'center' });
+        target.focus();
+        target.value = text;
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      },
+      { text: formatted, startKind: isStart }
+    );
+
+    if (!filled) {
+      throw new Error(`Could not fill task ${kind} date field.`);
+    }
+
+    await this.page.keyboard.press('Tab').catch(() => {});
+    await this.logStep(`Filled task ${kind} date via input: ${formatted}`);
+  },
+
+  async _pickTaskCreateFormDateTime(panel, targetDate, kind) {
+    const schedule = this._getScheduleDateHelper();
+    await schedule._prepareCreateFormForDateEntry();
+    await this.page.keyboard.press('Escape').catch(() => {});
+
+    let opened = await this._clickTaskCreateFormChooseDate(panel, kind);
+    if (!opened) {
+      const idx = kind === 'start' ? 0 : 1;
+      const chooseBtn = panel.getByRole('button', { name: /choose date/i }).nth(idx);
+      if (await chooseBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await chooseBtn.scrollIntoViewIfNeeded().catch(() => {});
+        await chooseBtn.click({ force: true, timeout: 15000 });
+        opened = await schedule._scheduleDatePickerPopper().isVisible({ timeout: 5000 }).catch(() => false);
+      }
+    }
+
+    if (opened) {
+      const popper = schedule._scheduleDatePickerPopper();
+      await expect(popper).toBeVisible({ timeout: 15000 });
+      await schedule._muiNavigatePopperToMonthYear(popper, targetDate);
+      await schedule._muiPickDayInPopper(popper, targetDate);
+      await schedule._muiPickDigitalTimeListboxes(popper, targetDate);
+      await schedule._muiConfirmPickerIfPresent();
+      await popper.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => {});
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.logStep(`[Task] Picked ${kind} date via calendar: ${targetDate.toLocaleString('en-US')}`);
+      return;
+    }
+
+    await this._fillTaskFormDateTimeInput(panel, targetDate, kind);
   },
 
   viewTaskModal() {
@@ -35,29 +223,54 @@ module.exports = {
     await schedule._selectScheduleFormLabeledDropdownOption(fieldLabelRegex, optionRegex, panel);
   },
 
-  async _openTaskFormAssigneePicker(panel, fieldLabelRegex = /^assignee$/i) {
+  async _openTaskFormAssigneePicker(panel, fieldLabelRegex = /assignees?/i) {
     const schedule = this._getScheduleDateHelper();
     await schedule.hideFreshchatWidget();
     await this.page.keyboard.press('Escape').catch(() => {});
 
+    const isOpen = async () => {
+      if (await schedule._isScheduleAssigneePickerOpen()) return true;
+      if (await schedule._scheduleAssigneePickerPopover().isVisible({ timeout: 300 }).catch(() => false)) {
+        return true;
+      }
+      // Only MuiPopover / MuiMenu — never the create-drawer presentation paper
+      return (
+        (await this.page
+          .locator('.MuiPopover-paper, .MuiMenu-paper')
+          .filter({ visible: true })
+          .filter({
+            has: this.page
+              .getByRole('tab', { name: /users|vendors/i })
+              .or(this.page.locator('#schedule-assignee-tab-users, #schedule-assignee-tab-vendors'))
+              .or(this.page.getByRole('checkbox')),
+          })
+          .count()
+          .catch(() => 0)) >= 1
+      );
+    };
+
     const lbl = panel
-      .locator('label, .fw-500, .MuiFormLabel-root, p, span')
+      .locator('label, .fw-500, .MuiFormLabel-root, p, span, div')
       .filter({ hasText: fieldLabelRegex })
       .first();
     const candidates = [
       panel.getByPlaceholder(/select assignee|select reporter|select/i).first(),
+      panel.locator('[data-edit-field="assignee"]').first(),
+      panel.getByRole('combobox', { name: /assignee|reporter/i }).first(),
+      lbl.locator('xpath=following::*[contains(@class,"css-19x37hq")][1]').first(),
       lbl.locator('xpath=following::*[contains(@class,"MuiBox-root")][1]').first(),
       lbl.locator('xpath=following::*[@role="combobox"][1]').first(),
-      panel.locator('[data-edit-field="assignee"]').first(),
     ];
     for (const candidate of candidates) {
       if (!(await candidate.isVisible({ timeout: 1500 }).catch(() => false))) continue;
       await candidate.scrollIntoViewIfNeeded().catch(() => {});
       await candidate.click({ force: true, timeout: 15000 }).catch(() => {});
-      if (await schedule._isScheduleAssigneePickerOpen()) return;
+      await this.page.waitForTimeout(400);
+      if (await isOpen()) return;
+      await this.page.keyboard.press('Escape').catch(() => {});
     }
     await expect(async () => {
-      expect(await schedule._isScheduleAssigneePickerOpen()).toBeTruthy();
+      expect(await isOpen()).toBeTruthy();
     }).toPass({ timeout: 20000, intervals: [500, 1000, 2000] });
   },
 
@@ -698,5 +911,292 @@ module.exports = {
     await this.switchToKanbanView();
     await expect(this.page.locator('[data-kanban-column-id]').first()).toBeVisible({ timeout: this.uiTimeout });
     await this.logStep('New task from template appears on kanban');
+  },
+
+  /**
+   * Codegen (Daily Report TC-08): Choose date → gridcell day → MuiClock-squareMask.
+   * Start uses first Choose date; End uses remaining Choose date + PM.
+   */
+  async _pickTaskCreateFormDateTimeViaCodegen(kind) {
+    const schedule = this._getScheduleDateHelper();
+    const today = new Date();
+    const day = String(today.getDate());
+    const isStart = kind === 'start';
+
+    const chooseDate = isStart
+      ? this.page.getByRole('button', { name: 'Choose date' }).first()
+      : this.page.getByRole('button', { name: 'Choose date', exact: true }).last();
+
+    await expect(chooseDate).toBeVisible({ timeout: this.uiTimeout });
+    await chooseDate.scrollIntoViewIfNeeded().catch(() => {});
+    await chooseDate.click({ timeout: 20000 });
+
+    const popper = schedule._scheduleDatePickerPopper();
+    await expect(popper).toBeVisible({ timeout: 15000 });
+
+    // Codegen: getByRole('gridcell', { name: '6', exact: true })
+    const dayCell = this.page
+      .getByRole('gridcell', { name: day, exact: true })
+      .filter({ visible: true })
+      .first()
+      .or(
+        popper
+          .locator(
+            'button.MuiPickersDay-root:not(.MuiPickersDay-outsideCurrentMonth):not(.Mui-disabled)'
+          )
+          .filter({ hasText: new RegExp(`^\\s*${day}\\s*$`) })
+          .first()
+      );
+    await expect(dayCell).toBeVisible({ timeout: 15000 });
+    await dayCell.click({ timeout: 15000 });
+
+    if (!isStart) {
+      const pm = this.page.getByRole('button', { name: 'PM' }).first();
+      if (await pm.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await pm.click({ timeout: 10000 });
+      }
+    }
+
+    // Codegen: locator('.MuiClock-squareMask').click() × 2
+    const clockMask = this.page.locator('.MuiClock-squareMask').filter({ visible: true }).last();
+    if (await clockMask.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await clockMask.click({ timeout: 10000 }).catch(() => {});
+      await clockMask.click({ timeout: 10000 }).catch(() => {});
+    } else {
+      await schedule._muiPickDigitalTimeListboxes(popper, today).catch(() => {});
+    }
+
+    await schedule._muiConfirmPickerIfPresent();
+    await popper.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => {});
+    await this.page.keyboard.press('Escape').catch(() => {});
+    await this.logStep(`[Task] Codegen-picked ${kind} date (day ${day}${isStart ? '' : ' PM'}).`);
+  },
+
+  /** Daily Report TC-08: today start/end via codegen Choose date + clock. */
+  async pickTodayStartAndEndDateTimeOnCreateTaskForm() {
+    const start = new Date();
+    start.setHours(10, 0, 0, 0);
+    this._pendingTaskRandomStartMs = start.getTime();
+
+    await this._pickTaskCreateFormDateTimeViaCodegen('start');
+    await this.page.waitForTimeout(500);
+    await this._pickTaskCreateFormDateTimeViaCodegen('end');
+
+    this._pendingTaskRandomStartMs = null;
+    await this.logStep('Picked today start and end datetime on task create form (codegen).');
+  },
+
+  /**
+   * Task create assignee (Daily Report TC-08 / TC-09):
+   * Open Assignee dropdown → Users tab → first checkbox → dismiss.
+   * Does NOT treat Create-drawer checkboxes as “dropdown open” (previous false positive).
+   */
+  async selectFirstAssigneeCheckboxOnCreateTaskForm() {
+    const schedule = this._getScheduleDateHelper();
+    await schedule._muiConfirmPickerIfPresent();
+    await this.page.keyboard.press('Escape').catch(() => {});
+    await schedule._scheduleDatePickerPopper().waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+
+    const panel = this.createTaskModal();
+    await expect(panel).toBeVisible({ timeout: this.uiTimeout });
+
+    // Scroll Assignee field into view
+    for (let i = 0; i < 10; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const labelVisible = await panel
+        .getByText(/^assignees?\b/i)
+        .first()
+        .isVisible({ timeout: 400 })
+        .catch(() => false);
+      // eslint-disable-next-line no-await-in-loop
+      const phVisible = await panel
+        .getByPlaceholder(/select assignee|assignee/i)
+        .first()
+        .isVisible({ timeout: 300 })
+        .catch(() => false);
+      if (labelVisible || phVisible) {
+        const anchor = phVisible
+          ? panel.getByPlaceholder(/select assignee|assignee/i).first()
+          : panel.getByText(/^assignees?\b/i).first();
+        // eslint-disable-next-line no-await-in-loop
+        await anchor.scrollIntoViewIfNeeded().catch(() => {});
+        break;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await this._scrollTaskPanel(panel);
+      // eslint-disable-next-line no-await-in-loop
+      await this.page.mouse.wheel(0, 350).catch(() => {});
+    }
+
+    const isRealAssigneePickerOpen = async () => {
+      if (await schedule._isScheduleAssigneePickerOpen()) return true;
+      const popover = schedule._scheduleAssigneePickerPopover();
+      if (await popover.isVisible({ timeout: 400 }).catch(() => false)) return true;
+      // Popover/menu with Users tab text — not the create drawer paper
+      const usersInMenu = this.page
+        .locator('.MuiPopover-paper, .MuiMenu-paper')
+        .filter({ visible: true })
+        .filter({ has: this.page.getByRole('tab', { name: /users/i }).or(this.page.locator('#schedule-assignee-tab-users')) })
+        .first();
+      return usersInMenu.isVisible({ timeout: 400 }).catch(() => false);
+    };
+
+    // Click candidates until the real Users/Vendors assignee picker opens
+    const label = panel
+      .locator('label, .fw-500, .MuiFormLabel-root, p, span, div')
+      .filter({ hasText: /^assignees?\b/i })
+      .first();
+
+    const clickTargets = [
+      panel.getByPlaceholder(/select assignee/i).first(),
+      panel.getByPlaceholder(/assignee/i).first(),
+      panel.locator('[data-edit-field="assignee"]').first(),
+      panel.getByRole('combobox', { name: /assignees?/i }).first(),
+      label.locator('xpath=following::*[contains(@class,"css-19x37hq")][1]').first(),
+      label.locator('xpath=following::*[contains(@class,"MuiBox-root")][1]').first(),
+      label.locator('xpath=following::*[@role="combobox"][1]').first(),
+      label.locator('xpath=ancestor::div[contains(@class,"MuiBox-root") or contains(@class,"MuiFormControl")][1]//*[@role="combobox" or contains(@class,"css-19x37hq")][1]').first(),
+    ];
+
+    let opened = await isRealAssigneePickerOpen();
+    if (!opened) {
+      for (const target of clickTargets) {
+        // eslint-disable-next-line no-await-in-loop
+        if (!(await target.isVisible({ timeout: 1000 }).catch(() => false))) continue;
+        // eslint-disable-next-line no-await-in-loop
+        await target.scrollIntoViewIfNeeded().catch(() => {});
+        // eslint-disable-next-line no-await-in-loop
+        await target.click({ force: true, timeout: 20000 });
+        // eslint-disable-next-line no-await-in-loop
+        await this.page.waitForTimeout(600);
+        // eslint-disable-next-line no-await-in-loop
+        if (await isRealAssigneePickerOpen()) {
+          opened = true;
+          await this.logStep('[Task] Opened Assignee dropdown (Users/Vendors picker).');
+          break;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        await this.page.keyboard.press('Escape').catch(() => {});
+        // eslint-disable-next-line no-await-in-loop
+        await this.page.waitForTimeout(200);
+      }
+    }
+
+    if (!opened) {
+      await this._openTaskFormAssigneePicker(panel, /assignees?/i).catch(() => {});
+      opened = await isRealAssigneePickerOpen();
+    }
+
+    await expect
+      .poll(async () => isRealAssigneePickerOpen(), {
+        timeout: 25000,
+        intervals: [500, 1000, 2000],
+      })
+      .toBe(true);
+
+    // Users tab → first checkbox (Schedule helper — same UI as Task)
+    const usersTab = schedule._scheduleAssigneeTab('users');
+    if (await usersTab.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await usersTab.click({ force: true }).catch(() => {});
+      await this.page.waitForTimeout(300);
+    }
+
+    const selected = await schedule._selectAssigneesFromScheduleAssigneeTab('users', 1);
+    expect(selected).toBeGreaterThan(0);
+    this.lastDailyReportAssigneeSelected = true;
+    await this.logStep('[Task] Checked first user checkbox in Assignee dropdown.');
+
+    await schedule._dismissScheduleAssigneePickerByClickingAway().catch(() => {});
+    await this.page.waitForTimeout(400);
+
+    // Confirm assignee stuck on the form (chip / email / cleared placeholder)
+    const chipCount = await panel.locator('.MuiChip-root').filter({ visible: true }).count().catch(() => 0);
+    const placeholderStillEmpty = await panel
+      .getByPlaceholder(/^select assignee$/i)
+      .first()
+      .isVisible({ timeout: 800 })
+      .catch(() => false);
+
+    if (chipCount < 1 && placeholderStillEmpty) {
+      throw new Error(
+        'Assignee checkbox click did not apply — no assignee chip on the create form. Refusing to Create without assignee.'
+      );
+    }
+
+    await this.logStep(
+      `[Task] Assignee applied on create form (chips=${chipCount}, placeholderEmpty=${placeholderStillEmpty}).`
+    );
+  },
+
+  /**
+   * Daily Report TC-08 (codegen):
+   * Add Task → name → Choose date start/end + clock → assignee email → Create.
+   */
+  async createTaskForDailyReportTc08() {
+    const name = `DR Task ${this.randomSuffix()}`;
+    this.lastDailyReportTaskName = name;
+
+    await this.openCreateTaskModal();
+    await this.fillTaskNameOnCreateForm(name);
+    await this.pickTodayStartAndEndDateTimeOnCreateTaskForm();
+    await this.selectFirstAssigneeCheckboxOnCreateTaskForm();
+    await this.submitCreateTaskForm();
+
+    // eslint-disable-next-line no-console
+    console.log(`[Task] Created task for Daily Report TC-08: ${name}`);
+    return name;
+  },
+
+  async expectTaskCreatedForDailyReport(taskName) {
+    const name = taskName || this.lastDailyReportTaskName;
+    if (!name) {
+      throw new Error('Expected task name for Daily Report task verification.');
+    }
+    await this.switchToKanbanView();
+    await this.expectTaskCardInKanbanColumn('To Do', name);
+    await this.logStep(`[Task] Verified task created for Daily Report: ${name}`);
+  },
+
+  /**
+   * Daily Report TC-09: create N tasks using the exact same flow as TC-08
+   * (random name → today start/end → first assignee → Create), repeated N times.
+   */
+  async createTasksForDailyReportTc09(count = 3) {
+    const total = Math.max(1, Number(count) || 1);
+    const names = [];
+
+    for (let i = 0; i < total; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await this.dismissOpenOverlays().catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      await this.waitForModuleToLoad().catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      await this.switchToKanbanView().catch(() => {});
+
+      // eslint-disable-next-line no-await-in-loop
+      const name = await this.createTaskForDailyReportTc08();
+      names.push(name);
+      // eslint-disable-next-line no-console
+      console.log(`[Task] Daily Report TC-09 — created task ${i + 1}/${total}: ${name}`);
+    }
+
+    this.lastDailyReportTaskNames = names;
+    this.lastDailyReportTaskName = names[names.length - 1];
+    // eslint-disable-next-line no-console
+    console.log(`[Task] Created ${names.length} task(s) for Daily Report TC-09 (same as TC-08 × ${total}).`);
+    return names;
+  },
+
+  async expectTasksCreatedForDailyReport(taskNames) {
+    const names = taskNames || this.lastDailyReportTaskNames || [];
+    if (!names.length) {
+      throw new Error('Expected task names for Daily Report task verification.');
+    }
+    await this.switchToKanbanView();
+    for (const name of names) {
+      // eslint-disable-next-line no-await-in-loop
+      await this.expectTaskCardInKanbanColumn('To Do', name);
+    }
+    await this.logStep(`[Task] Verified ${names.length} task(s) created for Daily Report.`);
   },
 };
