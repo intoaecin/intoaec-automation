@@ -43,8 +43,14 @@ When('I select the {string} heading', { timeout: 120000 }, async function (headi
 When('I click the {string} module card', { timeout: 120000 }, async function (moduleName) {
   const schedulePage = new SchedulePage(this.page);
   if ((moduleName || '').trim().toLowerCase() === 'schedule' && (await schedulePage.isOnScheduleModule())) {
-    console.log('Already on Schedule module — skipping Schedule module card');
-    return;
+    // Only skip when Gantt + List are both present (Budget-only view is not enough).
+    const ganttVisible = await schedulePage.ganttTab.isVisible({ timeout: 1500 }).catch(() => false);
+    const listVisible = await schedulePage.listTab.isVisible({ timeout: 1500 }).catch(() => false);
+    if (ganttVisible && listVisible) {
+      console.log('Already on Schedule module — skipping Schedule module card');
+      return;
+    }
+    console.log('Schedule/Budget without both Gantt+List — re-opening Schedule module card');
   }
   const projectProfilePage = new ProjectProfilePage(this.page);
   await projectProfilePage.clickModuleCard(moduleName);

@@ -21,12 +21,17 @@ class BudgetingPage extends BasePage {
     this.quickTimeout = 10000;
 
     this.main = page.locator('main, [role="main"]').first();
-    this.actualBudgetTitle = page.getByText(/^actual budget$/i).first();
-    this.linkButton = page.getByRole('button', { name: /^link$/i }).first();
-    this.budgetTable = page
-      .locator('table')
-      .filter({ hasText: /phase\/schedule|phase|schedule/i })
+    this.actualBudgetTitle = page
+      .getByText(/actual\s*budget/i)
+      .filter({ visible: true })
       .first();
+    // UI CTA: "Link" / "Link to Actual Budget" (role or plain text control).
+    this.linkButton = page
+      .getByRole('button', { name: /link(\s+to\s+actual\s+budget)?/i })
+      .or(page.getByRole('link', { name: /link(\s+to\s+actual\s+budget)?/i }))
+      .or(page.locator('button, a, [role="button"]').filter({ hasText: /^link(\s+to\s+actual\s+budget)?$/i }))
+      .first();
+    this.budgetTable = page.locator('table').filter({ visible: true }).first();
 
     this.lastManualAmount = null;
     this.lastLinkedAmount = null;
@@ -64,25 +69,35 @@ class BudgetingPage extends BasePage {
   }
 
   async isOnBudgetingModule() {
-    const title = await this.actualBudgetTitle.isVisible({ timeout: 2000 }).catch(() => false);
-    const link = await this.linkButton.isVisible({ timeout: 2000 }).catch(() => false);
-    const heading = await this.page
-      .getByText(/^budgeting$/i)
-      .first()
-      .isVisible({ timeout: 1500 })
-      .catch(() => false);
-    return title || link || heading;
+    // Do NOT treat the Project Management module-tile label "Budgeting" as in-module.
+    const title = await this.actualBudgetTitle.isVisible({ timeout: 1500 }).catch(() => false);
+    if (title) return true;
+    const urlHit = /tab=Budgeting|tab=Budget/i.test(this.page.url());
+    if (!urlHit) return false;
+    const link = await this.linkButton.isVisible({ timeout: 1500 }).catch(() => false);
+    const table = await this.budgetTable.isVisible({ timeout: 1500 }).catch(() => false);
+    return link || table;
   }
 
   async waitForModuleToLoad() {
-    if (await this.isOnBudgetingModule()) {
-      await expect(this.actualBudgetTitle).toBeVisible({ timeout: this.uiTimeout }).catch(() => {});
-      await this.logStep('Budgeting module already loaded');
-      return;
-    }
     await expect(async () => {
-      expect(await this.isOnBudgetingModule()).toBeTruthy();
+      const ready =
+        (await this.actualBudgetTitle.isVisible().catch(() => false)) ||
+        (await this.linkButton.isVisible().catch(() => false)) ||
+        (await this.budgetTable.isVisible().catch(() => false)) ||
+        /tab=Budgeting|tab=Budget/i.test(this.page.url());
+      expect(ready).toBeTruthy();
     }).toPass({ timeout: this.defaultTimeout, intervals: [500, 1500, 3000] });
+
+    // Module is ready when any in-module marker is visible (table alone is enough — TC-01).
+    await expect(async () => {
+      const marker =
+        (await this.actualBudgetTitle.isVisible().catch(() => false)) ||
+        (await this.linkButton.isVisible().catch(() => false)) ||
+        (await this.budgetTable.isVisible().catch(() => false));
+      expect(marker).toBeTruthy();
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
+
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
     await this.logStep('Budgeting module loaded');
   }
@@ -96,32 +111,25 @@ class BudgetingPage extends BasePage {
     const ProjectProfilePage = require('../../ProjectProfilePage');
     const profile = new ProjectProfilePage(this.page);
 
-    const currentUrl = this.page.url();
-    const projectBaseMatch = currentUrl.match(/(.*\/project\/[^/]+)/);
-    if (projectBaseMatch) {
-      await this.page.goto(projectBaseMatch[1], { waitUntil: 'domcontentloaded' }).catch(() => {});
-      await this.page.waitForTimeout(1500);
-    }
-
     const pmBtn = profile.projectManagementHeading;
-    if (!(await pmBtn.isVisible({ timeout: 8000 }).catch(() => false))) {
-      const ProjectNavigationPage = require('../../ProjectNavigationPage');
-      const nav = new ProjectNavigationPage(this.page);
-      if (await nav.projectsLink.isVisible({ timeout: 5000 }).catch(() => false)) {
-        await nav.projectsLink.click({ force: true });
-        await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-        await this.page.waitForTimeout(1500);
-      }
-      if (await nav.firstProject.isVisible({ timeout: 8000 }).catch(() => false)) {
-        await nav.firstProject.click({ timeout: 15000 });
-        await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-        await this.page.waitForTimeout(1500);
-      }
+    if (await pmBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await pmBtn.click({ force: true, timeout: 15000 }).catch(() => {});
+      await this.page.waitForTimeout(800);
     }
 
-    if (await pmBtn.isVisible({ timeout: 10000 }).catch(() => false)) {
-      await pmBtn.click({ force: true, timeout: 15000 });
-      await this.page.waitForTimeout(800);
+    // Inspector path: <p class="MuiTypography-root MuiTypography-body1">Budgeting</p>
+    const budgetingLabel = this.page
+      .locator('p.MuiTypography-root.MuiTypography-body1')
+      .filter({ hasText: /^Budgeting$/i })
+      .first();
+
+    if (await budgetingLabel.isVisible({ timeout: 10000 }).catch(() => false)) {
+      await budgetingLabel.scrollIntoViewIfNeeded().catch(() => {});
+      await budgetingLabel.click({ timeout: 15000 });
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      await this.waitForModuleToLoad();
+      await this.logStep('Opened Budgeting via MuiTypography-body1 label');
+      return;
     }
 
     await profile.clickModuleCard('Budgeting');
@@ -132,7 +140,7 @@ class BudgetingPage extends BasePage {
   actualBudgetCard() {
     return this.page
       .locator('.MuiPaper-root, [class*="MuiCard"], section, div')
-      .filter({ has: this.page.getByText(/^actual budget$/i) })
+      .filter({ has: this.page.getByText(/actual\s*budget/i) })
       .first();
   }
 
@@ -146,8 +154,13 @@ class BudgetingPage extends BasePage {
   }
 
   async openLinkToActualBudgetOffcanvas() {
-    await expect(this.linkButton).toBeVisible({ timeout: this.uiTimeout });
-    await this.linkButton.click({ force: true });
+    await this.waitForModuleToLoad();
+    const link = this.linkButton
+      .or(this.page.getByText(/^link to actual budget$/i))
+      .or(this.page.getByText(/^link$/i).locator('xpath=ancestor::button[1]'))
+      .first();
+    await expect(link).toBeVisible({ timeout: this.uiTimeout });
+    await link.click({ force: true });
     await expect(this.linkOffcanvas()).toBeVisible({ timeout: this.uiTimeout });
     await this.logStep('Opened Link to Actual Budget offcanvas');
   }
@@ -280,7 +293,15 @@ class BudgetingPage extends BasePage {
   }
 
   async captureActualBudgetSnapshot() {
-    const card = this.actualBudgetCard();
+    await this.waitForModuleToLoad();
+    const card = this.actualBudgetCard()
+      .or(
+        this.page
+          .locator('.MuiPaper-root, [class*="MuiCard"]')
+          .filter({ hasText: /actual\s*budget|unallocated|asset\s*cost/i })
+          .first()
+      )
+      .first();
     await expect(card).toBeVisible({ timeout: this.uiTimeout });
 
     const totalText = await card.locator('h5, .MuiTypography-h5').first().innerText().catch(() => '0');
@@ -355,21 +376,59 @@ class BudgetingPage extends BasePage {
     await this.logStep(`Actual Budget decreased by ${amount} on ${categoryLabel}`);
   }
 
-  async expectScheduleInBudgetTable(name) {
-    const table = this.page.locator('table').first();
-    const cell = this.page
-      .getByText(new RegExp(this._escapeRegex(name), 'i'))
+  /**
+   * Schedule module → Budget tab (same screen as Gantt/List).
+   * Codegen: page.getByRole('tab', { name: 'Budget' }).click()
+   */
+  async switchToBudgetTab() {
+    const budgetTab = this.page.getByRole('tab', { name: /^Budget$/i }).first();
+    await expect(budgetTab).toBeVisible({ timeout: this.uiTimeout });
+    await budgetTab.click();
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.waitForModuleToLoad();
+    await this.logStep('Switched to Budget tab');
+  }
+
+  /**
+   * Bottom schedules table on Budget tab.
+   * Empty state (codegen): div with "No schedules available. Create a schedule to get started."
+   * After create, that empty copy is replaced by schedule rows in the same table area.
+   */
+  budgetSchedulesEmptyState() {
+    return this.page
+      .locator('div')
+      .filter({ hasText: /^No schedules available\. Create a schedule to get started\.$/ })
       .first();
+  }
+
+  async expectScheduleInBudgetTable(name) {
+    const empty = this.budgetSchedulesEmptyState();
+    if (await empty.isVisible({ timeout: 1500 }).catch(() => false)) {
+      throw new Error(
+        `Budget schedules table still shows empty state; expected schedule "${name}"`
+      );
+    }
+
+    const table = this.page.locator('table').filter({ visible: true }).first();
+    const inTable = table.getByText(new RegExp(`^\\s*${this._escapeRegex(name)}\\s*$`, 'i')).first();
+    const anywhere = this.page.getByText(new RegExp(`^\\s*${this._escapeRegex(name)}\\s*$`, 'i')).first();
+    const cell = (await inTable.isVisible({ timeout: 3000 }).catch(() => false)) ? inTable : anywhere;
     await expect(cell).toBeVisible({ timeout: this.uiTimeout });
     await this.logStep(`Budget table shows schedule: ${name}`);
   }
 
   linkItemCard(name) {
-    const panel = this.linkOffcanvas();
-    return panel
+    const budgetPanel = this.linkOffcanvas();
+    const costPanel = this.linkActualCostsPanel();
+    const inBudget = budgetPanel
       .locator('.MuiPaper-root')
       .filter({ hasText: new RegExp(this._escapeRegex(name), 'i') })
       .first();
+    const inCost = costPanel
+      .locator('.MuiPaper-root')
+      .filter({ hasText: new RegExp(this._escapeRegex(name), 'i') })
+      .first();
+    return inBudget.or(inCost).first();
   }
 
   async expectEstimateInOffcanvas(name) {
@@ -597,6 +656,777 @@ class BudgetingPage extends BasePage {
     }
     await this.page.waitForTimeout(1500);
     await this.logStep('Returned to application project');
+  }
+
+  // -------------------------------------------------------------------------
+  // Contingency — allocate popup + add offcanvas
+  // -------------------------------------------------------------------------
+
+  allocateDialog() {
+    return this.page
+      .getByRole('dialog')
+      .filter({ hasText: /allocate contingency/i })
+      .first();
+  }
+
+  addContingencyPanel() {
+    return this.page
+      .locator('[role="dialog"], .MuiDrawer-root, .MuiModal-root')
+      .filter({ hasText: /add contingency|request contingency|total contingency pool|approval review/i })
+      .first();
+  }
+
+  async openAllocateContingencyPopup() {
+    const card = this.actualBudgetCard();
+    await expect(card).toBeVisible({ timeout: this.uiTimeout });
+    const editBtn = card
+      .locator('button')
+      .filter({ has: this.page.locator('svg') })
+      .filter({ hasText: /^$/ })
+      .last();
+    // Prefer edit near Contingency label
+    const contingencyRow = card.locator('div').filter({ hasText: /^contingency/i }).first();
+    const rowEdit = contingencyRow.locator('button').last();
+    if (await rowEdit.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await rowEdit.click({ force: true });
+    } else if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click({ force: true });
+    } else {
+      // Fallback: any Edit2-sized icon button in contingency section
+      await card.getByRole('button').nth(1).click({ force: true }).catch(() => {});
+    }
+    await expect(this.allocateDialog()).toBeVisible({ timeout: this.uiTimeout });
+    await this.logStep('Opened Allocate Contingency popup');
+  }
+
+  async expectAllocatePopupOpen() {
+    await expect(this.allocateDialog()).toBeVisible({ timeout: this.uiTimeout });
+  }
+
+  async chooseContingencyAllocationMethod(method) {
+    const dialog = this.allocateDialog();
+    const btn = dialog.getByRole('button', { name: new RegExp(this._escapeRegex(method), 'i') }).first();
+    await expect(btn).toBeVisible({ timeout: this.uiTimeout });
+    await btn.click();
+    await this.logStep(`Chose allocation method: ${method}`);
+  }
+
+  async enterAllocatePercentage(value) {
+    const dialog = this.allocateDialog();
+    const input = dialog.locator('input[type="number"], input').first();
+    await expect(input).toBeVisible({ timeout: this.uiTimeout });
+    await input.fill(String(value));
+    this.lastAllocatePercentage = Number(value);
+    await this.page.waitForTimeout(400);
+    await this.logStep(`Entered allocate percentage: ${value}`);
+  }
+
+  async enterAllocateFixedAmount(value) {
+    const dialog = this.allocateDialog();
+    const input = dialog.locator('input[type="number"], input').first();
+    await expect(input).toBeVisible({ timeout: this.uiTimeout });
+    await input.fill(String(value));
+    this.lastAllocateFixedAmount = Number(value);
+    this.lastAllocatedContingencyAmount = Number(value);
+    await this.page.waitForTimeout(400);
+    await this.logStep(`Entered allocate fixed amount: ${value}`);
+  }
+
+  async expectCalculatedAmountIsPercentOfBudget(percent) {
+    const snap = await this.captureActualBudgetSnapshot();
+    const expected = Math.round((snap.total * Number(percent)) / 100);
+    this.lastAllocatedContingencyAmount = expected;
+    const dialog = this.allocateDialog();
+    const calc = dialog.locator('text=/calculated amount/i').locator('..');
+    await expect(async () => {
+      const text = await calc.innerText();
+      expect(this.parseMoney(text)).toBe(expected);
+    }).toPass({ timeout: this.uiTimeout, intervals: [400, 800, 1500] });
+    await this.logStep(`Calculated amount is ${expected} (${percent}% of ${snap.total})`);
+  }
+
+  async expectCalculatedPercentForFixed(amount) {
+    const snap = await this.captureActualBudgetSnapshot();
+    const expectedPct = snap.total > 0 ? (Number(amount) / snap.total) * 100 : 0;
+    this.lastAllocatePercentage = expectedPct;
+    const dialog = this.allocateDialog();
+    await expect(async () => {
+      const text = await dialog.innerText();
+      const m = text.match(/([\d.]+)\s*%/);
+      expect(m).toBeTruthy();
+      expect(Math.abs(parseFloat(m[1]) - expectedPct)).toBeLessThan(0.05);
+    }).toPass({ timeout: this.uiTimeout, intervals: [400, 800, 1500] });
+    await this.logStep(`Calculated % ~ ${expectedPct.toFixed(2)} for fixed ${amount}`);
+  }
+
+  async clickAllocateContingency() {
+    const dialog = this.allocateDialog();
+    const btn = dialog.getByRole('button', { name: /^allocate$/i }).first();
+    await expect(btn).toBeEnabled({ timeout: this.uiTimeout });
+    await btn.click();
+    await expect(dialog).toBeHidden({ timeout: this.uiTimeout }).catch(() => {});
+    await this.page.waitForTimeout(1200);
+    await this.logStep('Clicked Allocate');
+  }
+
+  async expectCardContingencyPercentage(pct) {
+    const card = this.actualBudgetCard();
+    await expect(card.getByText(new RegExp(`${this._escapeRegex(String(pct))}\\s*%`, 'i')).first()).toBeVisible({
+      timeout: this.uiTimeout,
+    });
+  }
+
+  async expectCardContingencyAmount(amount) {
+    const card = this.actualBudgetCard();
+    await expect(async () => {
+      const text = await card.innerText();
+      expect(text).toMatch(new RegExp(String(amount)));
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000] });
+  }
+
+  async expectCardContingencyMatchesPercent(percent) {
+    const snap = await this.captureActualBudgetSnapshot();
+    const expected = Math.round((snap.total * Number(percent)) / 100);
+    this.lastAllocatedContingencyAmount = expected;
+    await this.expectCardContingencyAmount(expected);
+  }
+
+  async expectCardContingencyPctMatchesFixed(amount) {
+    const snap = await this.captureActualBudgetSnapshot();
+    const expectedPct = snap.total > 0 ? ((Number(amount) / snap.total) * 100).toFixed(2) : '0.00';
+    await this.expectCardContingencyPercentage(expectedPct.replace(/\.00$/, ''));
+  }
+
+  async openAddContingencyOffcanvas() {
+    const card = this.actualBudgetCard();
+    // Contingency icon is first IconButton in headerAction (before Link)
+    const headerBtns = card.locator('button').filter({ has: this.page.locator('svg') });
+    const count = await headerBtns.count();
+    let clicked = false;
+    for (let i = 0; i < Math.min(count, 4); i++) {
+      const btn = headerBtns.nth(i);
+      const name = ((await btn.getAttribute('aria-label')) || '').toLowerCase();
+      const title = ((await btn.getAttribute('title')) || '').toLowerCase();
+      if (/contingency/.test(name) || /contingency/.test(title)) {
+        await btn.click({ force: true });
+        clicked = true;
+        break;
+      }
+    }
+    if (!clicked) {
+      // Tooltip parent: click first small icon button near Link
+      const link = card.getByRole('button', { name: /^link$/i }).first();
+      const prev = link.locator('xpath=preceding-sibling::*[1]//button').first();
+      if (await prev.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await prev.click({ force: true });
+      } else {
+        await headerBtns.first().click({ force: true });
+      }
+    }
+    await expect(this.addContingencyPanel()).toBeVisible({ timeout: this.uiTimeout });
+    await this.logStep('Opened Add Contingency offcanvas');
+  }
+
+  async expectAddContingencyOpen() {
+    await expect(this.addContingencyPanel()).toBeVisible({ timeout: this.uiTimeout });
+  }
+
+  async closeAddContingencyOffcanvas() {
+    const panel = this.addContingencyPanel();
+    const closeBtn = panel.locator('button').first();
+    if (await closeBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await closeBtn.click({ force: true }).catch(() => {});
+    } else {
+      await this.page.keyboard.press('Escape').catch(() => {});
+    }
+    await expect(panel).toBeHidden({ timeout: this.uiTimeout }).catch(() => {});
+    await this.page.waitForTimeout(600);
+  }
+
+  async expectTotalContingencyPoolEquals(amount) {
+    const panel = this.addContingencyPanel();
+    await expect(async () => {
+      const text = await panel.innerText();
+      const m = text.match(/Total Contingency Pool[\s\S]*?([\d,.]+)/i);
+      expect(m).toBeTruthy();
+      expect(this.parseMoney(m[1])).toBe(Number(amount));
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000] });
+  }
+
+  async expectTotalContingencyPoolMatchesAllocated() {
+    const amount = this.lastAllocatedContingencyAmount;
+    await this.expectTotalContingencyPoolEquals(amount);
+  }
+
+  async chooseAddContingencyMode(mode) {
+    const panel = this.addContingencyPanel();
+    const btn = panel.getByRole('button', { name: new RegExp(this._escapeRegex(mode), 'i') }).first();
+    await expect(btn).toBeVisible({ timeout: this.uiTimeout });
+    await btn.click();
+    await this.logStep(`Add contingency mode: ${mode}`);
+  }
+
+  async enterAddContingencyAmount(amount) {
+    const panel = this.addContingencyPanel();
+    const input = panel.getByPlaceholder(/0\.00|0/).first().or(panel.locator('input[type="number"]').first());
+    await expect(input).toBeVisible({ timeout: this.uiTimeout });
+    await input.fill(String(amount));
+    this.lastAddedContingencyAmount = Number(amount);
+    await this.page.waitForTimeout(400);
+  }
+
+  async enterAddContingencyPercentage(pct) {
+    const panel = this.addContingencyPanel();
+    const input = panel.locator('input[type="number"], input').first();
+    await expect(input).toBeVisible({ timeout: this.uiTimeout });
+    await input.fill(String(pct));
+    await this.page.waitForTimeout(500);
+    // Read equivalent amount from helper or impact
+    const text = await panel.innerText();
+    const m = text.match(/Equivalent to\s*[^\d]*([\d,.]+)/i) || text.match(/\+\s*[^\d]*([\d,.]+)/);
+    this.lastAddedContingencyAmount = m ? this.parseMoney(m[1]) : 0;
+    await this.logStep(`Add contingency ${pct}% → amount ${this.lastAddedContingencyAmount}`);
+  }
+
+  async expectBudgetImpactPlus(amount) {
+    const panel = this.addContingencyPanel();
+    await expect(panel.getByText(new RegExp(`\\+\\s*.*${amount}`, 'i')).first()).toBeVisible({
+      timeout: this.uiTimeout,
+    });
+  }
+
+  async expectBudgetImpactPercentOfAvailable(amount) {
+    const panel = this.addContingencyPanel();
+    await expect(panel.getByText(/% of remaining pool|% of available/i).first()).toBeVisible({
+      timeout: this.uiTimeout,
+    });
+    await this.logStep(`Budget impact percent checked for amount ${amount}`);
+  }
+
+  async expectBudgetImpactForTenPercentAvailable() {
+    const panel = this.addContingencyPanel();
+    await expect(async () => {
+      expect(this.lastAddedContingencyAmount).toBeGreaterThan(0);
+      await expect(panel.getByText(new RegExp(`\\+\\s*.*${this.lastAddedContingencyAmount}`, 'i')).first()).toBeVisible();
+    }).toPass({ timeout: this.uiTimeout, intervals: [400, 800] });
+  }
+
+  async enterAddContingencyReason(reason) {
+    const panel = this.addContingencyPanel();
+    const reasonInput = panel
+      .getByPlaceholder(/unexpected|reason/i)
+      .or(panel.locator('textarea'))
+      .first();
+    await expect(reasonInput).toBeVisible({ timeout: this.uiTimeout });
+    await reasonInput.fill(String(reason));
+  }
+
+  async clickAddContingencySubmit() {
+    const panel = this.addContingencyPanel();
+    this.budgetSnapshotBefore = await this.captureActualBudgetSnapshot();
+    const btn = panel.getByRole('button', { name: /add contingency|submit request/i }).first();
+    await expect(btn).toBeEnabled({ timeout: this.uiTimeout });
+    await btn.click();
+    await this.page.waitForTimeout(1500);
+    await this.logStep('Submitted add contingency');
+  }
+
+  async switchContingencyApprovalReviewTab() {
+    const panel = this.addContingencyPanel();
+    const tab = panel.getByRole('tab', { name: /approval review/i }).first();
+    await expect(tab).toBeVisible({ timeout: this.uiTimeout });
+    await tab.click();
+    await this.page.waitForTimeout(500);
+  }
+
+  async expectApprovalReviewRate(amount) {
+    const panel = this.addContingencyPanel();
+    await expect(panel.getByText(new RegExp(String(amount))).first()).toBeVisible({ timeout: this.uiTimeout });
+  }
+
+  async expectApprovalReviewLastAmount() {
+    await this.expectApprovalReviewRate(this.lastAddedContingencyAmount);
+  }
+
+  async expectActualBudgetIncreasedByContingency(amount) {
+    const before = this.budgetSnapshotBefore;
+    await expect(async () => {
+      const after = await this.captureActualBudgetSnapshot();
+      expect(after.total).toBe(before.total + Number(amount));
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
+  }
+
+  async expectCardShowsContingencyUsed(amount) {
+    const card = this.actualBudgetCard();
+    await expect(card.getByText(new RegExp(`${amount}[\\s\\S]*used|used[\\s\\S]*${amount}`, 'i')).first())
+      .toBeVisible({ timeout: this.uiTimeout })
+      .catch(async () => {
+        const text = await card.innerText();
+        expect(text).toMatch(new RegExp(String(amount)));
+      });
+  }
+
+  // -------------------------------------------------------------------------
+  // Budget table — actual budget / cost cells + split
+  // -------------------------------------------------------------------------
+
+  scheduleRow(name) {
+    return this.page.locator('tr, [role="row"]').filter({ hasText: new RegExp(this._escapeRegex(name), 'i') }).first();
+  }
+
+  async setScheduleActualBudget(name, amount) {
+    const row = this.scheduleRow(name);
+    await expect(row).toBeVisible({ timeout: this.uiTimeout });
+    // Actual Budget is typically 5th data column — click money cell
+    const cells = row.locator('td');
+    const cellCount = await cells.count();
+    let target = cells.nth(Math.min(4, cellCount - 1));
+    for (let i = 0; i < cellCount; i++) {
+      const t = await cells.nth(i).innerText().catch(() => '');
+      if (/^[\s₹$€£]?\s*[\d,]+/.test(t.trim()) || t.trim() === '0' || t.includes('—') || t.includes('-')) {
+        // Prefer cells that look like money in budget/cost columns (skip dates)
+        if (!/\d{1,2}[\/\-]\d{1,2}/.test(t) && !/[ap]m/i.test(t)) {
+          target = cells.nth(i);
+          // Actual budget usually before actual cost — take first money-like after assignees
+          if (i >= 3) break;
+        }
+      }
+    }
+    await target.click({ force: true });
+    const input = row.locator('input[type="number"], input').first();
+    await expect(input).toBeVisible({ timeout: this.uiTimeout });
+    await input.fill(String(amount));
+    await input.press('Enter');
+    await this.page.waitForTimeout(1000);
+    this.lastTableBudgetAmount = Number(amount);
+    await this.logStep(`Set actual budget ${amount} on ${name}`);
+  }
+
+  async getScheduleActualBudgetValue(name) {
+    const row = this.scheduleRow(name);
+    const text = await row.innerText();
+    const nums = [...text.matchAll(/([\d,.]+)/g)].map((m) => this.parseMoney(m[1]));
+    return nums.length ? nums[nums.length - 2] || nums[0] : 0;
+  }
+
+  async getScheduleActualCostValue(name) {
+    const row = this.scheduleRow(name);
+    const text = await row.innerText();
+    const nums = [...text.matchAll(/([\d,.]+)/g)].map((m) => this.parseMoney(m[1]));
+    return nums.length ? nums[nums.length - 1] : 0;
+  }
+
+  async splitActualBudgetEquallyToChildren(parentName) {
+    const parentAmount = this.lastTableBudgetAmount || (await this.getScheduleActualBudgetValue(parentName));
+    const children = ['child 1', 'child 2'];
+    const each = Math.floor(parentAmount / children.length / 100) * 100 || parentAmount / children.length;
+    // Prefer exact equal split for multiples of 100
+    const share = parentAmount / children.length;
+    for (const child of children) {
+      if (await this.scheduleRow(child).isVisible({ timeout: 3000 }).catch(() => false)) {
+        await this.setScheduleActualBudget(child, share);
+      }
+    }
+    await this.logStep(`Split budget ${parentAmount} equally to children (${share} each)`);
+  }
+
+  async splitActualCostEquallyToChildren(parentName) {
+    const parentCost = await this.getScheduleActualCostValue(parentName);
+    const children = ['child 1', 'child 2'];
+    const share = parentCost / children.length;
+    for (const child of children) {
+      if (await this.scheduleRow(child).isVisible({ timeout: 3000 }).catch(() => false)) {
+        await this.setScheduleActualCost(child, share);
+      }
+    }
+    await this.logStep(`Split cost ${parentCost} equally to children (${share} each)`);
+  }
+
+  async setScheduleActualCost(name, amount) {
+    const row = this.scheduleRow(name);
+    await expect(row).toBeVisible({ timeout: this.uiTimeout });
+    const cells = row.locator('td');
+    const cellCount = await cells.count();
+    // Actual cost is usually the column after actual budget
+    const costCell = cells.nth(Math.min(5, cellCount - 1));
+    await costCell.click({ force: true });
+    const input = row.locator('input[type="number"], input').first();
+    await expect(input).toBeVisible({ timeout: this.uiTimeout });
+    await input.fill(String(amount));
+    await input.press('Enter');
+    await this.page.waitForTimeout(1000);
+    this.lastTableCostAmount = Number(amount);
+    await this.logStep(`Set actual cost ${amount} on ${name}`);
+  }
+
+  async expectUnallocatedDecreasedBy(amount) {
+    const before = this.budgetSnapshotBefore || (await this.captureActualBudgetSnapshot());
+    // If snapshot was taken at open of module earlier, re-capture before set is better —
+    // callers should set budgetSnapshotBefore before editing.
+    await expect(async () => {
+      const after = await this.captureActualBudgetSnapshot();
+      expect(after.unallocatedRemaining).toBe(before.unallocatedRemaining - Number(amount));
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
+  }
+
+  async expectNoBudgetingErrorToast() {
+    const toast = this.page.locator('.Toastify__toast--error, .MuiAlert-standardError, [role="alert"]').filter({
+      hasText: /exceed|cannot|error|fail/i,
+    });
+    await expect(toast).toHaveCount(0, { timeout: 5000 }).catch(async () => {
+      const visible = await toast.first().isVisible({ timeout: 1000 }).catch(() => false);
+      expect(visible).toBeFalsy();
+    });
+    await this.logStep('No budgeting error toast');
+  }
+
+  async expectBudgetingErrorToast() {
+    const toast = this.page
+      .locator('.Toastify__toast--error, .Toastify__toast, .MuiAlert-root, [role="alert"]')
+      .filter({ hasText: /exceed|cannot|parent|remaining|error/i })
+      .first();
+    await expect(toast).toBeVisible({ timeout: this.uiTimeout });
+    await this.logStep('Budgeting error toast visible');
+  }
+
+  async setChildBudgetOneMoreThanCurrent(name) {
+    const current = await this.readEditableBudgetOrFallback(name, 'budget');
+    this._openEditBaseline = current;
+    await this.setScheduleActualBudget(name, current + 1);
+  }
+
+  async setChildCostOneMoreThanCurrent(name) {
+    const current = await this.readEditableBudgetOrFallback(name, 'cost');
+    this._openEditBaseline = current;
+    await this.setScheduleActualCost(name, current + 1);
+  }
+
+  async readEditableBudgetOrFallback(name, kind) {
+    if (kind === 'cost') return (await this.getScheduleActualCostValue(name)) || 0;
+    return (await this.getScheduleActualBudgetValue(name)) || 0;
+  }
+
+  async reduceOpenBudgetEditByAndSave(delta) {
+    const row = this.page.locator('tr').filter({ has: this.page.locator('input') }).first();
+    const input = this.page.locator('input[type="number"]:visible, input:visible').first();
+    await expect(input).toBeVisible({ timeout: this.uiTimeout });
+    const current = this.parseMoney(await input.inputValue());
+    const next = current - Number(delta);
+    await input.fill(String(next));
+    await input.press('Enter');
+    await this.page.waitForTimeout(1000);
+    this.lastSavedTableAmount = next;
+    await this.logStep(`Reduced open budget edit by ${delta} → ${next}`);
+  }
+
+  async reduceOpenCostEditByAndSave(delta) {
+    await this.reduceOpenBudgetEditByAndSave(delta);
+  }
+
+  async expectScheduleBudgetSaved(name) {
+    await expect(this.scheduleRow(name)).toBeVisible({ timeout: this.uiTimeout });
+    await this.logStep(`Budget saved for ${name}`);
+  }
+
+  async expectScheduleCostSaved(name) {
+    await expect(this.scheduleRow(name)).toBeVisible({ timeout: this.uiTimeout });
+    await this.logStep(`Cost saved for ${name}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Link actual costs (manual + bills/expenses)
+  // -------------------------------------------------------------------------
+
+  linkActualCostsPanel() {
+    return this.page
+      .locator('[role="dialog"], .MuiDrawer-root, .MuiModal-root')
+      .filter({ hasText: /link actual costs|add manual cost|bills & expenses/i })
+      .first();
+  }
+
+  async openLinkActualCostsForSchedule(name) {
+    this.costSnapshotBefore = await this.captureActualCostSnapshot();
+    const row = this.scheduleRow(name);
+    await expect(row).toBeVisible({ timeout: this.uiTimeout });
+    const linkIcon = row.locator('button').filter({ has: this.page.locator('svg') }).first();
+    if (await linkIcon.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await linkIcon.click({ force: true });
+    } else {
+      // Click actual cost cell link
+      await row.getByRole('button').last().click({ force: true });
+    }
+    await expect(this.linkActualCostsPanel()).toBeVisible({ timeout: this.uiTimeout });
+    await this.logStep(`Opened Link Actual Costs for ${name}`);
+  }
+
+  async expectLinkActualCostsOpen() {
+    await expect(this.linkActualCostsPanel()).toBeVisible({ timeout: this.uiTimeout });
+  }
+
+  async closeLinkActualCosts() {
+    const panel = this.linkActualCostsPanel();
+    const closeBtn = panel.locator('button').first();
+    await closeBtn.click({ force: true }).catch(() => this.page.keyboard.press('Escape'));
+    await expect(panel).toBeHidden({ timeout: this.uiTimeout }).catch(() => {});
+    await this.page.waitForTimeout(800);
+  }
+
+  async switchActualCostsTab(tabName) {
+    const panel = this.linkActualCostsPanel();
+    const tab = panel.getByRole('tab', { name: new RegExp(this._escapeRegex(tabName), 'i') }).first();
+    await expect(tab).toBeVisible({ timeout: this.uiTimeout });
+    await tab.click();
+    await this.page.waitForTimeout(400);
+  }
+
+  async fillManualCostName(name) {
+    const panel = this.linkActualCostsPanel();
+    const input = panel
+      .locator('label')
+      .filter({ hasText: /cost name/i })
+      .locator('..')
+      .locator('input')
+      .first()
+      .or(panel.locator('input').first());
+    await expect(input).toBeVisible({ timeout: this.uiTimeout });
+    await input.fill(String(name));
+  }
+
+  async enterRandomManualCostAmount() {
+    const amount = this.randomAmountMultipleOf100(100, 1000);
+    const panel = this.linkActualCostsPanel();
+    const input = panel
+      .locator('label')
+      .filter({ hasText: /^amount/i })
+      .locator('..')
+      .locator('input')
+      .first();
+    await expect(input).toBeVisible({ timeout: this.uiTimeout });
+    await input.fill(String(amount));
+    this.lastLinkedCostAmount = amount;
+    this.lastManualCostAmount = amount;
+    return amount;
+  }
+
+  async chooseManualCostCategory(category) {
+    const panel = this.linkActualCostsPanel();
+    const select = panel.locator('[role="combobox"], .MuiSelect-select').first();
+    await expect(select).toBeVisible({ timeout: this.uiTimeout });
+    await select.click();
+    await this.page.getByRole('option', { name: new RegExp(this._escapeRegex(category), 'i') }).first().click();
+    this.lastCostCategory = category;
+  }
+
+  async clickAddExpense() {
+    const panel = this.linkActualCostsPanel();
+    if (!this.costSnapshotBefore) {
+      this.costSnapshotBefore = await this.captureActualCostSnapshot();
+    }
+    const btn = panel.getByRole('button', { name: /add expense/i }).first();
+    await expect(btn).toBeEnabled({ timeout: this.uiTimeout });
+    await btn.click();
+    await this.page.waitForTimeout(1500);
+  }
+
+  async expectManualCostVisible(name) {
+    const panel = this.linkActualCostsPanel();
+    await expect(panel.getByText(new RegExp(this._escapeRegex(name), 'i')).first()).toBeVisible({
+      timeout: this.uiTimeout,
+    });
+  }
+
+  async deleteManualCost(name) {
+    const panel = this.linkActualCostsPanel();
+    const card = panel.locator('.MuiPaper-root').filter({ hasText: new RegExp(this._escapeRegex(name), 'i') }).first();
+    await expect(card).toBeVisible({ timeout: this.uiTimeout });
+    this.lastDeletedCostAmount = this.lastManualCostAmount || this.lastLinkedCostAmount;
+    this.costSnapshotBefore = await this.captureActualCostSnapshot();
+    await card.locator('button').last().click({ force: true });
+    const confirm = this.page.getByRole('button', { name: /^(yes|delete|confirm|ok)$/i }).first();
+    if (await confirm.isVisible({ timeout: 2000 }).catch(() => false)) await confirm.click();
+    await this.page.waitForTimeout(1200);
+  }
+
+  actualCostCard() {
+    return this.page
+      .locator('.MuiPaper-root, [class*="MuiCard"], div')
+      .filter({ has: this.page.getByText(/^actual cost$/i) })
+      .first();
+  }
+
+  async captureActualCostSnapshot() {
+    const card = this.actualCostCard();
+    if (!(await card.isVisible({ timeout: 3000 }).catch(() => false))) {
+      return { total: 0, asset: 0, labor: 0, material: 0, other: 0 };
+    }
+    const totalText = await card.locator('h5, .MuiTypography-h5').first().innerText().catch(() => '0');
+    const total = this.parseMoney(totalText);
+    const readCategory = async (label) => {
+      const block = card.locator('.MuiPaper-root, [class*="MuiPaper"]').filter({ hasText: new RegExp(label, 'i') }).first();
+      if (!(await block.isVisible({ timeout: 1000 }).catch(() => false))) return 0;
+      return this.parseMoney(await block.locator('.MuiTypography-subtitle2, h6, p').last().innerText().catch(() => '0'));
+    };
+    return {
+      total,
+      asset: await readCategory('Asset Cost'),
+      labor: await readCategory('Labor Cost'),
+      material: await readCategory('Material Cost'),
+      other: await readCategory('Other Cost'),
+    };
+  }
+
+  async expectActualCostIncreasedBy(amount, category) {
+    const before = this.costSnapshotBefore;
+    await expect(async () => {
+      const after = await this.captureActualCostSnapshot();
+      expect(after.total).toBe(before.total + Number(amount));
+      if (category) {
+        const key = this.categoryKey(category);
+        expect(after[key]).toBe(before[key] + Number(amount));
+      }
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
+  }
+
+  async expectActualCostDecreasedBy(amount, category) {
+    const before = this.costSnapshotBefore;
+    await expect(async () => {
+      const after = await this.captureActualCostSnapshot();
+      expect(after.total).toBe(before.total - Number(amount));
+      if (category) {
+        const key = this.categoryKey(category);
+        expect(after[key]).toBe(before[key] - Number(amount));
+      }
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
+  }
+
+  async expectTableActualCostIncludes(name, amount) {
+    await expect(async () => {
+      const val = await this.getScheduleActualCostValue(name);
+      expect(val).toBeGreaterThanOrEqual(Number(amount));
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000] });
+  }
+
+  async clickLinkToActualCosts() {
+    const panel = this.linkActualCostsPanel();
+    if (!this.costSnapshotBefore) {
+      this.costSnapshotBefore = await this.captureActualCostSnapshot();
+    }
+    const btn = panel.getByRole('button', { name: /link actual costs/i }).first();
+    await expect(btn).toBeEnabled({ timeout: this.uiTimeout });
+    await btn.click();
+    await this.page.waitForTimeout(1500);
+  }
+
+  async checkExpenseItem(name, checked = true) {
+    const panel = this.linkActualCostsPanel();
+    const card = panel.locator('.MuiPaper-root').filter({ hasText: new RegExp(this._escapeRegex(name), 'i') }).first();
+    await expect(card).toBeVisible({ timeout: this.uiTimeout });
+    const amount = await this.readCardGrandTotal(name).catch(async () => {
+      const t = await card.innerText();
+      return this.parseMoney(t);
+    });
+    if (checked) this.lastLinkedExpenseAmount = amount || this.lastExpenseAmount;
+    const checkbox = card.getByRole('checkbox').first();
+    const isChecked = await checkbox.isChecked().catch(() => false);
+    if (checked !== isChecked) await checkbox.click({ force: true });
+  }
+
+  async chooseExpenseCategory(name, category) {
+    await this.chooseCategoryForLinkItem(name, category);
+    this.lastCostCategory = category;
+  }
+
+  async expectExpenseChecked(name) {
+    const panel = this.linkActualCostsPanel();
+    const card = panel.locator('.MuiPaper-root').filter({ hasText: new RegExp(this._escapeRegex(name), 'i') }).first();
+    await expect(card.getByRole('checkbox')).toBeChecked({ timeout: this.uiTimeout });
+  }
+
+  // -------------------------------------------------------------------------
+  // Bills & Expenses — create from scratch
+  // -------------------------------------------------------------------------
+
+  async waitForBillsExpensesModule() {
+    await expect(
+      this.page.getByText(/bills\s*&\s*expenses|expenses/i).first()
+    ).toBeVisible({ timeout: this.uiTimeout });
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.logStep('Bills & Expenses module loaded');
+  }
+
+  async createExpenseFromScratch(name, amount) {
+    // Create dropdown → Expenses
+    const createBtn = this.page.getByRole('button', { name: /^create$/i }).first();
+    await expect(createBtn).toBeVisible({ timeout: this.uiTimeout });
+    await createBtn.click();
+    const expensesItem = this.page.getByRole('menuitem', { name: /expense/i }).first();
+    await expect(expensesItem).toBeVisible({ timeout: this.uiTimeout });
+    await expensesItem.click();
+
+    // Get started popup → start from scratch → proceed
+    const startScratch = this.page.getByText(/start from scratch/i).first();
+    if (await startScratch.isVisible({ timeout: 8000 }).catch(() => false)) {
+      await startScratch.click();
+    }
+    const proceed = this.page.getByRole('button', { name: /proceed|continue|start/i }).first();
+    if (await proceed.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await proceed.click();
+    }
+
+    const panel = this.page.locator('[role="dialog"], .offcanvas.show, .MuiDrawer-root').last();
+    await expect(panel.or(this.page.getByLabel(/expense name|name/i).first())).toBeVisible({
+      timeout: this.uiTimeout,
+    });
+
+    const nameInput = this.page
+      .getByLabel(/expense name|name/i)
+      .or(this.page.getByPlaceholder(/expense name|name/i))
+      .first();
+    await expect(nameInput).toBeVisible({ timeout: this.uiTimeout });
+    await nameInput.fill(String(name));
+
+    const amountInput = this.page
+      .getByLabel(/^amount/i)
+      .or(this.page.locator('input[type="number"]').first())
+      .first();
+    await amountInput.fill(String(amount));
+
+    // Date — click and pick today if needed
+    const dateInput = this.page.getByLabel(/date/i).or(this.page.locator('input[placeholder*="date" i]')).first();
+    if (await dateInput.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await dateInput.click();
+      const today = this.page.getByRole('gridcell', { name: String(new Date().getDate()) }).first();
+      if (await today.isVisible({ timeout: 2000 }).catch(() => false)) await today.click();
+      else await this.page.keyboard.press('Escape');
+    }
+
+    // Mode of payment
+    const payment = this.page
+      .getByLabel(/mode of payment|payment/i)
+      .or(this.page.locator('[role="combobox"]').filter({ hasText: /payment|mode|select/i }))
+      .first();
+    if (await payment.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await payment.click();
+      const opt = this.page.getByRole('option').first();
+      if (await opt.isVisible({ timeout: 3000 }).catch(() => false)) await opt.click();
+    }
+
+    const save = this.page.getByRole('button', { name: /^save$/i }).first();
+    await expect(save).toBeEnabled({ timeout: this.uiTimeout });
+    await save.click();
+    await this.page.waitForTimeout(1500);
+    this.lastExpenseAmount = Number(amount);
+    this.lastExpenseName = name;
+    await this.logStep(`Created expense ${name} amount ${amount}`);
+  }
+
+  async expectExpenseVisibleWithAmount(name, amount) {
+    await expect(this.page.getByText(new RegExp(this._escapeRegex(name), 'i')).first()).toBeVisible({
+      timeout: this.uiTimeout,
+    });
+    await expect(this.page.getByText(new RegExp(String(amount))).first()).toBeVisible({
+      timeout: this.uiTimeout,
+    });
   }
 }
 

@@ -1335,6 +1335,24 @@ class SchedulePage extends BasePage {
     }
   }
 
+  async clearGanttSidebarSearchIfAvailable() {
+    const side = this.ganttSidebar();
+    const scopedSearch = side
+      .getByPlaceholder(/search/i)
+      .or(side.getByRole('searchbox'))
+      .or(side.getByRole('textbox', { name: /search/i }))
+      .first();
+    const search = (await scopedSearch.isVisible({ timeout: 1500 }).catch(() => false))
+      ? scopedSearch
+      : this.ganttSidebarSearchInput;
+
+    if (await search.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await search.fill('');
+      await search.press('Escape').catch(() => {});
+      await this._waitScheduleSettled();
+    }
+  }
+
   async openEditForGanttSidebarSchedule(name) {
     await this.switchToGanttView();
     await this.searchGanttSidebarScheduleIfAvailable(name);
@@ -1896,19 +1914,104 @@ class SchedulePage extends BasePage {
   }
 
   async clickGanttMenuItem(nameRegex) {
-    const item = this.page.getByRole('menuitem', { name: nameRegex }).first();
+    const item = this.page
+      .getByRole('menuitem', { name: nameRegex })
+      .or(this.page.getByRole('button', { name: nameRegex }))
+      .or(this.page.getByRole('menu').getByText(nameRegex))
+      .or(this.page.locator('[role="menu"] *').filter({ hasText: nameRegex }))
+      .first();
     await expect(item).toBeVisible({ timeout: 15000 });
-    await item.click();
+    await item.click({ force: true, timeout: this.quickTimeout });
   }
 
+  _addChildMenuItemLocator() {
+    const nameRegex = /add\s*child|child\s*schedule|add\s*sub/i;
+    return this.page
+      .getByRole('menuitem', { name: nameRegex })
+      .or(this.page.getByRole('button', { name: nameRegex }))
+      .or(this.page.getByRole('menu').getByText(nameRegex))
+      .or(this.page.locator('[role="menu"] *').filter({ hasText: nameRegex }))
+      .or(this.page.locator('[role="menuitem"], li, button').filter({ hasText: nameRegex }))
+      .first();
+  }
+
+  async _clickAddChildInOpenActionsMenu() {
+    const addChild = this._addChildMenuItemLocator();
+    await expect(addChild).toBeVisible({ timeout: this.uiTimeout });
+    await addChild.click({ force: true, timeout: this.quickTimeout });
+  }
+
+  async _openAddChildFromGanttChartContextMenu(row) {
+    await expect(async () => {
+      await this._openGanttChartContextMenuAtSidebarRowY(row);
+      await expect(this._addChildMenuItemLocator()).toBeVisible({ timeout: 5000 });
+    }).toPass({ timeout: 20000, intervals: [500, 1000] });
+    await this._clickAddChildInOpenActionsMenu();
+  }
+
+  async _expectChildScheduleFormOpen() {
+    const panel = this.formPanel()
+      .or(
+        this.page
+          .locator(
+            '.offcanvas.show, .MuiDrawer-paper:visible, [role="dialog"] .MuiPaper-root:visible, .MuiDialog-paper:visible'
+          )
+          .filter({ hasText: /schedule|child|name/i })
+          .first()
+      )
+      .or(this.addSchedulePanelHeading())
+      .first();
+    await expect(panel).toBeVisible({ timeout: 15000 });
+    return panel;
+  }
+
+  /**
+   * Budgeting TC-01 / schedule hierarchy: open parent row 3-dot menu → Add Child,
+   * fill name + today start / end (non-zero duration), submit.
+   * Matches Schedule_TestCases sidebar row-menu pattern (edit/delete), not generic right-click.
+   */
   async addChildScheduleMandatory(parentName, childName) {
     await this.switchToGanttView();
-    await this.openContextMenuOnNamedItem(parentName);
-    await this.clickGanttMenuItem(/add child/i);
-    await expect(this.formPanel()).toBeVisible({ timeout: 30000 });
+    await this.dismissOpenOverlays().catch(() => {});
+    await this.clearGanttSidebarSearchIfAvailable().catch(() => {});
+    await this.searchGanttSidebarScheduleIfAvailable(parentName);
+    await this.expectScheduleInGanttSidebarList(parentName);
+
+    const row = await this.findGanttSidebarRowByExactName(parentName);
+    await expect(row).toBeVisible({ timeout: this.uiTimeout });
+    await row.scrollIntoViewIfNeeded().catch(() => {});
+    await this._waitScheduleSettled();
+
+    try {
+      // Same 3-dot path as openEditForGanttSidebarSchedule / deleteNamedItemFromGanttSidebarMenu.
+      await expect(async () => {
+        await this.page.keyboard.press('Escape').catch(() => {});
+        await this.dismissOpenOverlays().catch(() => {});
+        await this._openGanttSidebarRowActionsMenu(row);
+        await this._clickAddChildInOpenActionsMenu();
+        await this._expectChildScheduleFormOpen();
+      }).toPass({ timeout: 30000, intervals: [500, 1000, 2000] });
+    } catch (sidebarErr) {
+      await this.logStep(
+        `Sidebar Add Child failed for "${parentName}" (${sidebarErr?.message || sidebarErr}); trying gantt chart context menu`
+      );
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.dismissOpenOverlays().catch(() => {});
+      await this._selectGanttSidebarScheduleRow(row);
+      await this._openAddChildFromGanttChartContextMenu(row);
+      await this._expectChildScheduleFormOpen();
+    }
+
     await this.fillScheduleOrMilestoneName(childName);
-    await this.fillDateLikeFields();
+    // Child dates must stay inside the parent (quick-add phase is usually today / 1 day).
+    // Far random weekdays (3–25) are disabled in the picker for children.
+    await this.pickTodayStartDateTimeOnScheduleCreateForm();
+    await this.pickRandomEndDateTimeAfterStartOnScheduleCreateForm();
     await this.submitPanelPrimary();
+    await this.clearGanttSidebarSearchIfAvailable().catch(() => {});
+    await this.searchGanttSidebarScheduleIfAvailable(childName);
+    await this.expectScheduleInGanttSidebarList(childName);
+    await this.logStep(`Added child schedule "${childName}" under "${parentName}"`);
   }
 
   async setPausedFromGanttMenu(name, paused) {
