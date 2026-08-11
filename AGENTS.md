@@ -168,7 +168,7 @@ Mirror the **Schedule** / **Task** pattern (`Budgeting_TestCases.feature`):
 
 **UI reference:** `intoaec-UI/src/features/projectSchedule/components/` — `BudgetView.tsx`, `ActualBudgetCard.tsx`, `BudgetLinkPlannedCost.tsx`, `ManualBudgetTabContent.tsx`, `EstimatesTabContent.tsx`, `ProposalsTabContent.tsx`, `BudgetTable.tsx`.
 
-**Tags:** `@budgeting` on the feature; `@TS01` / `@TC01` … `@TS07` / `@TC07` per test sheet.
+**Tags:** `@budgeting` on the feature; `@TS01`…`@TS12` / `@TC01`…`@TC20` per test sheet (`TC04`–`TC07` share `@TS04`; `TC08`–`TC09` share `@TS05`; `TC10`–`TC11` share `@TS06`; `TC14`–`TC15` share `@TS09`; `TC16`–`TC17` share `@TS10`; `TC19`–`TC20` share `@TS12`).
 
 **Background:** login → project → Project Management → `I navigate to the budgeting module` → wait for module load.
 

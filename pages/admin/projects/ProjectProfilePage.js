@@ -135,6 +135,12 @@ class ProjectProfilePage extends BasePage {
       return;
     }
 
+    // Budgeting card: same Project Management grid; generic card matching often misses it after module hops.
+    if ((name || '').trim().toLowerCase() === 'budgeting') {
+      await this.clickBudgetingModuleCard(scope, text);
+      return;
+    }
+
     // PROBLEM: the module label can exist in the DOM but be CSS-hidden (sidebar duplicates).
     // SOLUTION: click a *visible* module card/container within `main` that contains the label text.
     const candidates = scope
@@ -285,6 +291,61 @@ class ProjectProfilePage extends BasePage {
         { timeout: scheduleTimeout, intervals: [500, 1000, 2000] }
       )
       .toBe(true);
+  }
+
+  /**
+   * Project Management → Budgeting tile.
+   * Inspector path: <p class="MuiTypography-root MuiTypography-body1">Budgeting</p>
+   */
+  async clickBudgetingModuleCard(scope, text) {
+    const href = this.page.url();
+
+    if (/tab=Budgeting|tab=Budget/i.test(href)) {
+      return;
+    }
+
+    const pmHeading = this._visibleHeading('Project Management');
+    if (await pmHeading.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await pmHeading.click({ timeout: 10000 }).catch(() => {});
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      await this.page.waitForTimeout(800).catch(() => {});
+    }
+
+    // Exact user path (avoid generated css-* hash). Prefer page-wide so main-scope misses still work.
+    const budgetingLabel = this.page
+      .locator('p.MuiTypography-root.MuiTypography-body1')
+      .filter({ hasText: /^Budgeting$/i })
+      .first();
+
+    await expect(budgetingLabel).toBeVisible({ timeout: 40000 });
+    await budgetingLabel.scrollIntoViewIfNeeded().catch(() => {});
+    await budgetingLabel.click({ timeout: 15000 }).catch(async () => {
+      await budgetingLabel.click({ timeout: 15000, force: true });
+    });
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.page.waitForTimeout(800).catch(() => {});
+
+    const landedUrl = this.page.url();
+    const onBudgeting =
+      /tab=Budgeting|tab=Budget/i.test(landedUrl) ||
+      (await this.page.getByText(/actual\s*budget/i).first().isVisible({ timeout: 8000 }).catch(() => false)) ||
+      (await this.page.locator('table').filter({ visible: true }).first().isVisible({ timeout: 5000 }).catch(() => false));
+
+    if (onBudgeting) {
+      return;
+    }
+
+    const projectMatch = href.match(/projectId=([^&]+)/i) || this.page.url().match(/projectId=([^&]+)/i);
+    const clientMatch = href.match(/clientId=([^&]+)/i) || this.page.url().match(/clientId=([^&]+)/i);
+    if (projectMatch && clientMatch) {
+      const base = this.page.url().split('?')[0];
+      const budgetingUrl = `${base}?projectId=${projectMatch[1]}&isActive=true&tab=Budgeting&clientId=${clientMatch[1]}`;
+      await this.page.goto(budgetingUrl, { waitUntil: 'domcontentloaded' });
+      await this.page.waitForURL(/tab=Budgeting|tab=Budget/i, { timeout: 60000 }).catch(() => {});
+      return;
+    }
+
+    throw new Error('Could not open Budgeting module via p.MuiTypography-body1 "Budgeting".');
   }
 
   async clickPurchaseOrderModuleCard(scope, text) {
