@@ -3,4 +3,7 @@ test-results/
 playwright-report/
 
 reports/
+reports/cucumber-report.html
 screenshots/
+
+fixtures/google-integration/storage-state.json
