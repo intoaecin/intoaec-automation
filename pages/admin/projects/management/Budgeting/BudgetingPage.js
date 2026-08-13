@@ -328,26 +328,7 @@ class BudgetingPage extends BasePage {
       total = categoryTotal;
     }
 
-    let unallocatedRemaining = 0;
-    const unallocRow = card.locator('div').filter({ hasText: /^unallocated$/i }).first();
-    if (await unallocRow.isVisible({ timeout: 2000 }).catch(() => false)) {
-      const parent = unallocRow.locator('xpath=ancestor::div[contains(@class,"MuiBox") or self::div][1]');
-      const moneyLine = await card
-        .locator('text=/\\d[\\d,]*\\.?\\d*\\s*\\//')
-        .first()
-        .innerText()
-        .catch(async () => {
-          const all = await card.innerText();
-          const m = all.match(/([\d,.]+)\s*\/\s*([\d,.]+)/);
-          return m ? m[0] : '0';
-        });
-      const left = String(moneyLine).split('/')[0];
-      unallocatedRemaining = this.parseMoney(left);
-    } else {
-      const allText = await card.innerText().catch(() => '');
-      const m = allText.match(/Unallocated[\s\S]*?([\d,.]+)\s*\/\s*([\d,.]+)/i);
-      if (m) unallocatedRemaining = this.parseMoney(m[1]);
-    }
+    const unallocatedRemaining = await this.readUnallocatedRemaining();
 
     return { total, asset, labor, material, other, unallocatedRemaining };
   }
@@ -368,6 +349,29 @@ class BudgetingPage extends BasePage {
       throw new Error(`Could not read Actual Budget Unallocated values from: ${text}`);
     }
     return this.parseMoney(match[1]);
+  /**
+   * Actual Budget card: Unallocated label sits next to "$remaining / $total".
+   * Inspector: span "Unallocated" → sibling box → span "$3,050 / $3,050"
+   */
+  unallocatedAmountLocator() {
+    return this.page
+      .locator('span, p')
+      .filter({ hasText: /^Unallocated$/i })
+      .locator('xpath=ancestor::div[1]/following-sibling::div[1]')
+      .locator('span')
+      .filter({ hasText: /\d/ })
+      .first();
+  }
+
+  async readUnallocatedRemaining() {
+    const loc = this.unallocatedAmountLocator();
+    if (await loc.isVisible({ timeout: 4000 }).catch(() => false)) {
+      const text = await loc.innerText();
+      return this.parseMoney(String(text).split('/')[0]);
+    }
+    const cardText = await this.actualBudgetCard().innerText().catch(() => '');
+    const m = String(cardText).match(/Unallocated[\s\S]*?([\d,.]+)\s*\/\s*([\d,.]+)/i);
+    return m ? this.parseMoney(m[1]) : 0;
   }
 
   categoryKey(label) {
@@ -1153,8 +1157,16 @@ class BudgetingPage extends BasePage {
   // Budget table — actual budget / cost cells + split
   // -------------------------------------------------------------------------
 
+  budgetSchedulesTable() {
+    return this.page.locator('table').filter({ visible: true }).first();
+  }
+
   scheduleRow(name) {
-    return this.page.locator('tr, [role="row"]').filter({ hasText: new RegExp(this._escapeRegex(name), 'i') }).first();
+    const exactName = new RegExp(`^\\s*${this._escapeRegex(name)}\\s*$`, 'i');
+    return this.budgetSchedulesTable()
+      .locator('tbody tr')
+      .filter({ has: this.page.getByText(exactName) })
+      .first();
   }
 
   async focusBudgetingScheduleTable() {
@@ -1215,13 +1227,72 @@ class BudgetingPage extends BasePage {
           if (i >= 3) break;
         }
       }
+  async _budgetTableColumnIndex(labelRe) {
+    const headers = this.budgetSchedulesTable().locator('thead th, thead td');
+    const count = await headers.count();
+    for (let i = 0; i < count; i++) {
+      const text = (await headers.nth(i).innerText().catch(() => '')).trim();
+      if (labelRe.test(text)) return i;
     }
-    await target.click({ force: true });
-    const input = row.locator('input[type="number"], input').first();
-    await expect(input).toBeVisible({ timeout: this.uiTimeout });
-    await input.fill(String(amount));
-    await input.press('Enter');
-    await this.page.waitForTimeout(1000);
+    return -1;
+  }
+
+  async _openScheduleMoneyCell(name, columnRe, fallbackNth) {
+    const table = this.budgetSchedulesTable();
+    await expect(table).toBeVisible({ timeout: this.uiTimeout });
+    const tableWrap = this.page.locator('.MuiTableContainer-root').first();
+    await tableWrap.scrollIntoViewIfNeeded().catch(() => table.scrollIntoViewIfNeeded().catch(() => {}));
+
+    const row = this.scheduleRow(name);
+    await expect(row).toBeVisible({ timeout: this.uiTimeout });
+    await row.scrollIntoViewIfNeeded().catch(() => {});
+
+    const colIndex = await this._budgetTableColumnIndex(columnRe);
+    const cell = row.locator('td').nth(colIndex >= 0 ? colIndex : fallbackNth);
+
+    // Inspector: <div class="MuiBox-root"><p class="MuiTypography-body2">$0</p></div>
+    // UI opens the editor on click; a rapid dblclick can open then immediately cancel.
+    // force:true so the sticky table header does not intercept.
+    const moneyBox = cell.locator('div').filter({ hasText: /^[₹$€£]?\s*[\d,]+(\.\d+)?$/ }).first();
+    await moneyBox.scrollIntoViewIfNeeded().catch(() => {});
+    await moneyBox.click({ force: true, timeout: this.uiTimeout });
+
+    const spin = this.page.locator('input[type="number"]').first();
+    if (!(await spin.isVisible({ timeout: 2000 }).catch(() => false))) {
+      // Second click (delayed) if the first did not open the placeholder.
+      await moneyBox.click({ force: true, delay: 120 });
+    }
+    await expect(spin).toBeVisible({ timeout: this.uiTimeout });
+    return spin;
+  }
+
+  async _fillSpinbuttonAndClickTick(amount) {
+    const spin = this.page.locator('input[type="number"]').first();
+    await expect(spin).toBeVisible({ timeout: this.uiTimeout });
+    await spin.fill(String(amount));
+
+    // Tick (Check) is the first button in .budget-action-buttons; save shows a spinner for a long time.
+    let tick = this.page.locator('.budget-action-buttons button').first();
+    if (!(await tick.isVisible({ timeout: 4000 }).catch(() => false))) {
+      tick = this.page.locator('button.MuiIconButton-root.MuiIconButton-sizeSmall').first();
+    }
+    await expect(tick).toBeVisible({ timeout: this.uiTimeout });
+    await tick.click();
+    await this._waitForBudgetCellSave();
+  }
+
+  async _waitForBudgetCellSave() {
+    const spinner = this.page.locator('.budget-action-buttons .MuiCircularProgress-root');
+    await spinner.waitFor({ state: 'visible', timeout: 8000 }).catch(() => {});
+    await spinner.waitFor({ state: 'hidden', timeout: this.defaultTimeout }).catch(() => {});
+    await expect(this.page.locator('input[type="number"]')).toHaveCount(0, { timeout: this.defaultTimeout }).catch(() => {});
+    // Project totals / Unallocated card refetch after allocate API.
+    await this.page.waitForTimeout(2500);
+  }
+
+  async setScheduleActualBudget(name, amount) {
+    await this._openScheduleMoneyCell(name, /actual\s*budget/i, 4);
+    await this._fillSpinbuttonAndClickTick(amount);
     this.lastTableBudgetAmount = Number(amount);
     await this.logStep(`Set actual budget ${amount} on ${name}`);
   }
@@ -1267,30 +1338,27 @@ class BudgetingPage extends BasePage {
   }
 
   async setScheduleActualCost(name, amount) {
-    const row = this.scheduleRow(name);
-    await expect(row).toBeVisible({ timeout: this.uiTimeout });
-    const cells = row.locator('td');
-    const cellCount = await cells.count();
-    // Actual cost is usually the column after actual budget
-    const costCell = cells.nth(Math.min(5, cellCount - 1));
-    await costCell.click({ force: true });
-    const input = row.locator('input[type="number"], input').first();
-    await expect(input).toBeVisible({ timeout: this.uiTimeout });
-    await input.fill(String(amount));
-    await input.press('Enter');
-    await this.page.waitForTimeout(1000);
+    await this._openScheduleMoneyCell(name, /actual\s*cost/i, 5);
+    await this._fillSpinbuttonAndClickTick(amount);
     this.lastTableCostAmount = Number(amount);
     await this.logStep(`Set actual cost ${amount} on ${name}`);
   }
 
   async expectUnallocatedDecreasedBy(amount) {
     const before = this.budgetSnapshotBefore || (await this.captureActualBudgetSnapshot());
-    // If snapshot was taken at open of module earlier, re-capture before set is better —
-    // callers should set budgetSnapshotBefore before editing.
+    const expectedRemaining = before.unallocatedRemaining - Number(amount);
+    const formatted = expectedRemaining.toLocaleString('en-US');
+
     await expect(async () => {
-      const after = await this.captureActualBudgetSnapshot();
-      expect(after.unallocatedRemaining).toBe(before.unallocatedRemaining - Number(amount));
-    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
+      const remaining = await this.readUnallocatedRemaining();
+      expect(remaining).toBe(expectedRemaining);
+    }).toPass({ timeout: this.defaultTimeout, intervals: [1000, 2000, 3000] });
+
+    // Same check as codegen: Unallocated "$2,550 / $" (remaining dropped by the allocated amount).
+    await expect(
+      this.page.getByText(new RegExp(`${formatted}\\s*/\\s*`))
+    ).toBeVisible({ timeout: this.uiTimeout });
+    await this.logStep(`Unallocated remaining decreased by ${amount} → ${expectedRemaining}`);
   }
 
   async expectNoBudgetingErrorToast() {

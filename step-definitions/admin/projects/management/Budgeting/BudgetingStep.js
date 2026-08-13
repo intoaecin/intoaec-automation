@@ -640,11 +640,15 @@ When('I set actual budget {string} on schedule {string} in the budgeting table',
   this.budgetSnapshotBefore = {
     unallocatedRemaining: await page.captureActualBudgetUnallocatedRemaining(),
   };
+  this.budgetSnapshotBefore = await page.captureActualBudgetSnapshot();
+  page.budgetSnapshotBefore = this.budgetSnapshotBefore;
   await page.setScheduleActualBudget(name, amount);
 });
 
 Then('the actual budget card unallocated should have decreased by {string}', async function (amount) {
-  await getBudgetingPage(this).expectUnallocatedDecreasedBy(amount);
+  const page = getBudgetingPage(this);
+  page.budgetSnapshotBefore = page.budgetSnapshotBefore || this.budgetSnapshotBefore;
+  await page.expectUnallocatedDecreasedBy(amount);
 });
 
 When('I split schedule {string} actual budget equally to child schedules', async function (name) {
