@@ -6031,23 +6031,58 @@ class SchedulePage extends BasePage {
   }
 
   async clickBackFromProjectModule() {
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+    await this.page.waitForTimeout(1500);
     await this.dismissOpenOverlays();
     await this.hideFreshchatWidget();
 
     const backCandidates = [
       this.page.locator('button:has(svg[data-testid="ChevronLeftIcon"])').filter({ visible: true }).first(),
+      this.page
+        .locator('svg[data-testid="ChevronLeftIcon"]:has(path[d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"])')
+        .locator('xpath=ancestor::button[1]')
+        .first(),
+      this.page
+        .locator('svg[data-testid="ChevronLeftIcon"]:has(path[d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"])')
+        .first(),
       this.page.locator('svg[data-testid="ChevronLeftIcon"]').locator('xpath=ancestor::button[1]').first(),
       this.page.getByRole('button', { name: /^back$/i }).first(),
     ];
 
+    let clickedBack = false;
+    await expect(async () => {
+      const anyVisible = await Promise.all(
+        backCandidates.map((backBtn) => backBtn.isVisible({ timeout: 500 }).catch(() => false))
+      );
+      expect(anyVisible.some(Boolean)).toBeTruthy();
+    })
+      .toPass({ timeout: 30000, intervals: [500, 1000, 2000] })
+      .catch(() => {});
+
     for (const backBtn of backCandidates) {
-      if (!(await backBtn.isVisible({ timeout: 2500 }).catch(() => false))) continue;
+      if (!(await backBtn.isVisible({ timeout: 1000 }).catch(() => false))) continue;
       await backBtn.scrollIntoViewIfNeeded().catch(() => {});
       await backBtn.click({ force: true, timeout: 15000 });
+      clickedBack = true;
       break;
     }
 
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+
+    const ProjectNavigationPage = require('../../ProjectNavigationPage');
+    const ProjectProfilePage = require('../../ProjectProfilePage');
+    const profile = new ProjectProfilePage(this.page);
+
+    if (!clickedBack || !(await profile.isInsideProjectProfile())) {
+      const nav = new ProjectNavigationPage(this.page);
+      await nav.returnToProjectProfile();
+    }
+
+    await expect(async () => {
+      expect(await profile.isInsideProjectProfile()).toBeTruthy();
+    }).toPass({ timeout: this.defaultTimeout, intervals: [500, 1000, 2000] });
+
     this._wasOnScheduleModule = false;
     await this.logStep('Clicked back from project module');
   }

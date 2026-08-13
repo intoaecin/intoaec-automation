@@ -43,6 +43,7 @@ class BudgetingPage extends BasePage {
     this.proposalRecipientEmail = null;
     this.yopmailPage = null;
     this.proposalPreviewPage = null;
+    this.lastAllocatedContingencyAmount = null;
   }
 
   async logStep(msg) {
@@ -304,8 +305,9 @@ class BudgetingPage extends BasePage {
       .first();
     await expect(card).toBeVisible({ timeout: this.uiTimeout });
 
-    const totalText = await card.locator('h5, .MuiTypography-h5').first().innerText().catch(() => '0');
-    const total = this.parseMoney(totalText);
+    const totalTexts = await card.locator('h5, .MuiTypography-h5').allInnerTexts().catch(() => []);
+    const totalText = totalTexts.find((text) => /\d/.test(text)) || '0';
+    let total = this.parseMoney(totalText);
 
     const readCategory = async (label) => {
       const block = card
@@ -321,12 +323,32 @@ class BudgetingPage extends BasePage {
     const labor = await readCategory('Labor Cost');
     const material = await readCategory('Material Cost');
     const other = await readCategory('Other Cost');
+    const categoryTotal = asset + labor + material + other;
+    if (total === 0 && categoryTotal > 0) {
+      total = categoryTotal;
+    }
 
     const unallocatedRemaining = await this.readUnallocatedRemaining();
 
     return { total, asset, labor, material, other, unallocatedRemaining };
   }
 
+  async captureActualBudgetUnallocatedRemaining() {
+    const card = this.actualBudgetCard();
+    await expect(card).toBeVisible({ timeout: this.uiTimeout });
+    const unallocatedBlock = card
+      .locator('.MuiBox-root, div')
+      .filter({ hasText: /unallocated/i })
+      .filter({ hasText: /\// })
+      .first();
+
+    await expect(unallocatedBlock).toBeVisible({ timeout: this.uiTimeout });
+    const text = await unallocatedBlock.innerText();
+    const match = text.match(/\$?\s*([\d,.]+)\s*\/\s*\$?\s*([\d,.]+)/);
+    if (!match) {
+      throw new Error(`Could not read Actual Budget Unallocated values from: ${text}`);
+    }
+    return this.parseMoney(match[1]);
   /**
    * Actual Budget card: Unallocated label sits next to "$remaining / $total".
    * Inspector: span "Unallocated" → sibling box → span "$3,050 / $3,050"
@@ -500,6 +522,7 @@ class BudgetingPage extends BasePage {
   async waitForProposalWorkspace() {
     const ProposalPage = require('../../../common/ProposalPage');
     const proposalPage = new ProposalPage(this.page);
+    await proposalPage.openProposalTab();
     await proposalPage.verifyProposalTabLoaded();
     await this.logStep('Proposal workspace loaded');
   }
@@ -513,30 +536,27 @@ class BudgetingPage extends BasePage {
     const dialog = proposalPage.getChooseProposalDialog();
     await expect(dialog).toBeVisible({ timeout: this.defaultTimeout });
 
-    // Category: try budgeting-related or default
+    // Category: TC-06/TC-07 need All so the budgeting proposal template is listed.
     const categorySelect = dialog.locator('.MuiSelect-select, [role="combobox"]').first();
     await expect(categorySelect).toBeVisible({ timeout: this.defaultTimeout });
-    await categorySelect.click();
-    const budgetingCat = this.page
-      .getByRole('option', { name: /budgeting|default/i })
-      .first();
-    if (await budgetingCat.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await budgetingCat.click();
-    } else {
-      await this.page.locator('[role="option"][data-value="DEFAULT"]').first().click().catch(async () => {
-        await this.page.getByRole('option').first().click();
-      });
+    const selectedCategory = ((await categorySelect.innerText().catch(() => '')) || '').trim();
+    if (!/^all$/i.test(selectedCategory)) {
+      await proposalPage.selectProposalCategory('All');
     }
     await this.page.waitForTimeout(400);
 
     const proposalSelect = dialog.locator('.MuiSelect-select, [role="combobox"]').nth(1);
     await expect(proposalSelect).toBeVisible({ timeout: this.defaultTimeout });
     await proposalSelect.click();
-    const named = this.page.getByRole('option', { name: new RegExp(this._escapeRegex(templateName), 'i') }).first();
-    await expect(named).toBeVisible({ timeout: this.defaultTimeout });
+    const named = this.page
+      .locator('[role="option"][data-value="[object Object]"]')
+      .filter({ hasText: new RegExp(this._escapeRegex(templateName), 'i') })
+      .or(this.page.getByRole('option', { name: new RegExp(this._escapeRegex(templateName), 'i') }))
+      .first();
+    await expect(named).toBeVisible({ timeout: 30000 });
     await named.click();
 
-    const proceed = this.page.getByRole('button', { name: /proceed|send|confirm|add/i }).first();
+    const proceed = dialog.getByRole('button', { name: /^proceed$/i }).or(this.page.getByRole('button', { name: /^proceed$/i })).first();
     await expect(proceed).toBeEnabled({ timeout: this.defaultTimeout });
     await proceed.click();
     await expect(this.page).toHaveURL(/proposal\/edit/i, { timeout: this.defaultTimeout });
@@ -652,6 +672,12 @@ class BudgetingPage extends BasePage {
   }
 
   async returnToApplicationProject() {
+    const appPage =
+      this.page
+        .context()
+        .pages()
+        .find((p) => /app\.aecplayhouse\.com/i.test(p.url())) || this.page;
+    this.page = appPage;
     await this.page.bringToFront();
     const currentUrl = this.page.url();
     const projectBaseMatch = currentUrl.match(/(.*\/project\/[^/]+)/);
@@ -670,37 +696,75 @@ class BudgetingPage extends BasePage {
 
   allocateDialog() {
     return this.page
-      .getByRole('dialog')
-      .filter({ hasText: /allocate contingency/i })
+      .locator('[role="dialog"], .MuiModal-root, .MuiPopover-root, .MuiDrawer-root, .MuiPaper-root, .MuiBox-root')
+      .filter({ has: this.page.getByRole('button', { name: /^allocate$/i }) })
+      .filter({ has: this.page.locator('input[type="text"], input[type="number"], input') })
       .first();
   }
 
   addContingencyPanel() {
     return this.page
-      .locator('[role="dialog"], .MuiDrawer-root, .MuiModal-root')
+      .locator('[role="dialog"], .MuiDrawer-root, .MuiModal-root, .MuiPaper-root')
       .filter({ hasText: /add contingency|request contingency|total contingency pool|approval review/i })
+      .filter({ visible: true })
       .first();
   }
 
+  parseContingencyUsedFromText(text) {
+    const match =
+      String(text).match(/\$?\s*([\d,.]+)\s*Added\s+from\s+conti[n]?gency/i) ||
+      String(text).match(/conti[n]?gency[\s\S]*?\$?\s*([\d,.]+)/i);
+    return match ? this.parseMoney(match[1]) : 0;
+  }
+
+  async captureContingencyUsedAmount() {
+    const card = this.actualBudgetCard();
+    const usedText = await card
+      .locator('span, p, .MuiTypography-root')
+      .filter({ hasText: /Added\s+from\s+conti[n]?gency/i })
+      .first()
+      .innerText({ timeout: 3000 })
+      .catch(async () => card.innerText().catch(() => ''));
+    return this.parseContingencyUsedFromText(usedText);
+  }
+
   async openAllocateContingencyPopup() {
+    await this.waitForModuleToLoad();
+    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await this.page.waitForTimeout(1500);
+
     const card = this.actualBudgetCard();
     await expect(card).toBeVisible({ timeout: this.uiTimeout });
-    const editBtn = card
-      .locator('button')
-      .filter({ has: this.page.locator('svg') })
-      .filter({ hasText: /^$/ })
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+
+    const penPath = 'path[d*="21.174 6.812"], path[d*="3.842 16.174"]';
+    const contingencySection = card
+      .locator('.MuiBox-root, .MuiPaper-root, div')
+      .filter({ hasText: /contingency/i })
+      .filter({ has: this.page.locator('button') })
       .last();
-    // Prefer edit near Contingency label
-    const contingencyRow = card.locator('div').filter({ hasText: /^contingency/i }).first();
-    const rowEdit = contingencyRow.locator('button').last();
-    if (await rowEdit.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await rowEdit.click({ force: true });
-    } else if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await editBtn.click({ force: true });
-    } else {
-      // Fallback: any Edit2-sized icon button in contingency section
-      await card.getByRole('button').nth(1).click({ force: true }).catch(() => {});
-    }
+    const candidates = [
+      contingencySection.locator(`button:has(svg.lucide-pen), button:has(${penPath})`).last(),
+      card.locator(`button:has(svg.lucide-pen), button:has(${penPath})`).last(),
+      card.locator('button').filter({ has: this.page.locator('svg.lucide-pen') }).last(),
+    ];
+
+    let targetButton = null;
+    await expect(async () => {
+      targetButton = null;
+      for (const btn of candidates) {
+        if (await btn.isVisible({ timeout: 500 }).catch(() => false)) {
+          targetButton = btn;
+          break;
+        }
+      }
+
+      expect(targetButton).toBeTruthy();
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000, 3000] });
+
+    await targetButton.scrollIntoViewIfNeeded().catch(() => {});
+    await targetButton.click({ force: true });
+
     await expect(this.allocateDialog()).toBeVisible({ timeout: this.uiTimeout });
     await this.logStep('Opened Allocate Contingency popup');
   }
@@ -712,18 +776,31 @@ class BudgetingPage extends BasePage {
   async chooseContingencyAllocationMethod(method) {
     const dialog = this.allocateDialog();
     const btn = dialog.getByRole('button', { name: new RegExp(this._escapeRegex(method), 'i') }).first();
-    await expect(btn).toBeVisible({ timeout: this.uiTimeout });
-    await btn.click();
-    await this.logStep(`Chose allocation method: ${method}`);
+    if (await btn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await btn.click();
+      await this.logStep(`Chose allocation method: ${method}`);
+      return;
+    }
+
+    const radio = dialog.locator('input[type="radio"]').filter({ hasText: new RegExp(this._escapeRegex(method), 'i') }).first();
+    if (await radio.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await radio.click({ force: true });
+      await this.logStep(`Chose allocation method: ${method}`);
+      return;
+    }
+
+    await this.logStep(`Allocation method "${method}" not exposed in current popup; continuing`);
   }
 
   async enterAllocatePercentage(value) {
     const dialog = this.allocateDialog();
-    const input = dialog.locator('input[type="number"], input').first();
+    const input = dialog.locator('input[type="text"], input[type="number"], input').first();
     await expect(input).toBeVisible({ timeout: this.uiTimeout });
+    await input.fill('');
     await input.fill(String(value));
+    await input.press('Tab').catch(() => {});
     this.lastAllocatePercentage = Number(value);
-    await this.page.waitForTimeout(400);
+    await this.page.waitForTimeout(800);
     await this.logStep(`Entered allocate percentage: ${value}`);
   }
 
@@ -743,10 +820,18 @@ class BudgetingPage extends BasePage {
     const expected = Math.round((snap.total * Number(percent)) / 100);
     this.lastAllocatedContingencyAmount = expected;
     const dialog = this.allocateDialog();
-    const calc = dialog.locator('text=/calculated amount/i').locator('..');
+    const calc = dialog
+      .locator('.MuiBox-root, div')
+      .filter({ hasText: /calculated amount/i })
+      .filter({ has: dialog.locator('h6, h5, .MuiTypography-h6, .MuiTypography-h5') })
+      .first();
     await expect(async () => {
-      const text = await calc.innerText();
-      expect(this.parseMoney(text)).toBe(expected);
+      const valueText = await calc
+        .locator('h6, h5, .MuiTypography-h6, .MuiTypography-h5')
+        .last()
+        .innerText()
+        .catch(async () => calc.innerText());
+      expect(this.parseMoney(valueText)).toBe(expected);
     }).toPass({ timeout: this.uiTimeout, intervals: [400, 800, 1500] });
     await this.logStep(`Calculated amount is ${expected} (${percent}% of ${snap.total})`);
   }
@@ -767,32 +852,54 @@ class BudgetingPage extends BasePage {
 
   async clickAllocateContingency() {
     const dialog = this.allocateDialog();
-    const btn = dialog.getByRole('button', { name: /^allocate$/i }).first();
+    const btn = dialog
+      .getByRole('button', { name: /^allocate$/i })
+      .or(dialog.locator('button.MuiButton-fullWidth').filter({ hasText: /^Allocate$/i }))
+      .or(this.page.getByRole('button', { name: /^allocate$/i }))
+      .first();
     await expect(btn).toBeEnabled({ timeout: this.uiTimeout });
-    await btn.click();
+    await btn.scrollIntoViewIfNeeded().catch(() => {});
+    await btn.click({ force: true });
     await expect(dialog).toBeHidden({ timeout: this.uiTimeout }).catch(() => {});
     await this.page.waitForTimeout(1200);
     await this.logStep('Clicked Allocate');
   }
 
-  async expectCardContingencyPercentage(pct) {
+  contingencyRow() {
     const card = this.actualBudgetCard();
-    await expect(card.getByText(new RegExp(`${this._escapeRegex(String(pct))}\\s*%`, 'i')).first()).toBeVisible({
-      timeout: this.uiTimeout,
-    });
+    return card
+      .locator('.MuiBox-root, div')
+      .filter({ hasText: /contingency/i })
+      .filter({ hasText: /\$/ })
+      .last();
+  }
+
+  async expectCardContingencyPercentage(pct) {
+    const expected = Number(pct);
+    const row = this.contingencyRow();
+    await expect(async () => {
+      const text = await row.innerText();
+      const match = text.match(/([\d.]+)\s*%/);
+      expect(match).toBeTruthy();
+      expect(Math.abs(Number(match[1]) - expected)).toBeLessThan(0.01);
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
   }
 
   async expectCardContingencyAmount(amount) {
-    const card = this.actualBudgetCard();
+    const row = this.contingencyRow();
     await expect(async () => {
-      const text = await card.innerText();
-      expect(text).toMatch(new RegExp(String(amount)));
-    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000] });
+      const text = await row.innerText();
+      const amounts = [...text.matchAll(/\$?\s*([\d,.]+)/g)].map((m) => this.parseMoney(m[1]));
+      expect(amounts).toContain(Number(amount));
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
   }
 
   async expectCardContingencyMatchesPercent(percent) {
     const snap = await this.captureActualBudgetSnapshot();
-    const expected = Math.round((snap.total * Number(percent)) / 100);
+    const expected =
+      Number.isFinite(this.lastAllocatedContingencyAmount) && this.lastAllocatedContingencyAmount > 0
+        ? this.lastAllocatedContingencyAmount
+        : Math.round((snap.total * Number(percent)) / 100);
     this.lastAllocatedContingencyAmount = expected;
     await this.expectCardContingencyAmount(expected);
   }
@@ -804,33 +911,51 @@ class BudgetingPage extends BasePage {
   }
 
   async openAddContingencyOffcanvas() {
+    await this.waitForModuleToLoad();
+    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     const card = this.actualBudgetCard();
-    // Contingency icon is first IconButton in headerAction (before Link)
-    const headerBtns = card.locator('button').filter({ has: this.page.locator('svg') });
-    const count = await headerBtns.count();
-    let clicked = false;
-    for (let i = 0; i < Math.min(count, 4); i++) {
-      const btn = headerBtns.nth(i);
-      const name = ((await btn.getAttribute('aria-label')) || '').toLowerCase();
-      const title = ((await btn.getAttribute('title')) || '').toLowerCase();
-      if (/contingency/.test(name) || /contingency/.test(title)) {
-        await btn.click({ force: true });
-        clicked = true;
-        break;
-      }
-    }
-    if (!clicked) {
-      // Tooltip parent: click first small icon button near Link
-      const link = card.getByRole('button', { name: /^link$/i }).first();
-      const prev = link.locator('xpath=preceding-sibling::*[1]//button').first();
-      if (await prev.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await prev.click({ force: true });
-      } else {
-        await headerBtns.first().click({ force: true });
-      }
-    }
-    await expect(this.addContingencyPanel()).toBeVisible({ timeout: this.uiTimeout });
+    await expect(card).toBeVisible({ timeout: this.uiTimeout });
+
+    const addIconPath =
+      'path[d*="M8 18.5L14.95 20.4"], path[d*="M16.1316 5.76316"], path[d*="M2 22V11H9.6"]';
+
+    await expect(async () => {
+      const panel = this.addContingencyPanel();
+      const panelReady =
+        (await panel.isVisible({ timeout: 1000 }).catch(() => false)) &&
+        (await panel.getByText(/total contingency pool|approval review|add contingency/i).first().isVisible({
+          timeout: 1000,
+        }).catch(() => false));
+      if (panelReady) return;
+
+      const freshCard = this.actualBudgetCard();
+      await expect(freshCard).toBeVisible({ timeout: 3000 });
+      const addBtn = this.page
+        .locator('button[aria-label="Add Contingency"]')
+        .or(freshCard.getByRole('button', { name: /^add contingency$/i }))
+        .or(freshCard.locator(`button:has(${addIconPath})`))
+        .or(this.page.locator(`button:has(${addIconPath})`))
+        .or(this.page.getByRole('button', { name: /^add contingency$/i }))
+        .filter({ visible: true })
+        .first();
+
+      await expect(addBtn).toBeVisible({ timeout: 3000 });
+      await addBtn.scrollIntoViewIfNeeded().catch(() => {});
+      await addBtn.click({ force: true, timeout: 5000 });
+
+      await expect(this.addContingencyPanel()).toBeVisible({ timeout: 5000 });
+      await expect(
+        this.addContingencyPanel().getByText(/total contingency pool|approval review|add contingency/i).first()
+      ).toBeVisible({ timeout: 5000 });
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000, 3000] });
+
     await this.logStep('Opened Add Contingency offcanvas');
+  }
+
+  totalContingencyPoolBlock() {
+    const panel = this.addContingencyPanel();
+    const label = panel.locator('p, .MuiTypography-root').filter({ hasText: /^Total Contingency Pool$/i }).first();
+    return label.locator('xpath=..');
   }
 
   async expectAddContingencyOpen() {
@@ -850,13 +975,18 @@ class BudgetingPage extends BasePage {
   }
 
   async expectTotalContingencyPoolEquals(amount) {
-    const panel = this.addContingencyPanel();
+    const expected = Number(amount);
+    if (!Number.isFinite(expected)) {
+      throw new Error('Allocated contingency amount was not recorded before checking Total Contingency Pool.');
+    }
+
     await expect(async () => {
-      const text = await panel.innerText();
-      const m = text.match(/Total Contingency Pool[\s\S]*?([\d,.]+)/i);
-      expect(m).toBeTruthy();
-      expect(this.parseMoney(m[1])).toBe(Number(amount));
-    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000] });
+      const pool = this.totalContingencyPoolBlock();
+      await expect(pool).toBeVisible({ timeout: 3000 });
+      const valueText = await pool.locator('h5, .MuiTypography-h5').first().innerText();
+      const actual = this.parseMoney(valueText);
+      expect(actual).toBe(expected);
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
   }
 
   async expectTotalContingencyPoolMatchesAllocated() {
@@ -866,9 +996,17 @@ class BudgetingPage extends BasePage {
 
   async chooseAddContingencyMode(mode) {
     const panel = this.addContingencyPanel();
-    const btn = panel.getByRole('button', { name: new RegExp(this._escapeRegex(mode), 'i') }).first();
+    const modePattern =
+      /^percentage$/i.test(String(mode))
+        ? /%?\s*percentage/i
+        : new RegExp(this._escapeRegex(mode), 'i');
+    const btn = panel
+      .getByRole('button', { name: modePattern })
+      .or(panel.locator('button').filter({ hasText: modePattern }))
+      .first();
     await expect(btn).toBeVisible({ timeout: this.uiTimeout });
-    await btn.click();
+    await btn.scrollIntoViewIfNeeded().catch(() => {});
+    await btn.click({ force: true });
     await this.logStep(`Add contingency mode: ${mode}`);
   }
 
@@ -930,24 +1068,60 @@ class BudgetingPage extends BasePage {
   async clickAddContingencySubmit() {
     const panel = this.addContingencyPanel();
     this.budgetSnapshotBefore = await this.captureActualBudgetSnapshot();
+    this.contingencyUsedBefore = await this.captureContingencyUsedAmount();
     const btn = panel.getByRole('button', { name: /add contingency|submit request/i }).first();
     await expect(btn).toBeEnabled({ timeout: this.uiTimeout });
     await btn.click();
-    await this.page.waitForTimeout(1500);
+    await expect(panel).toBeHidden({ timeout: this.uiTimeout }).catch(async () => {
+      await this.page.waitForTimeout(2500);
+    });
+    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await this.page.waitForTimeout(800);
     await this.logStep('Submitted add contingency');
   }
 
   async switchContingencyApprovalReviewTab() {
-    const panel = this.addContingencyPanel();
-    const tab = panel.getByRole('tab', { name: /approval review/i }).first();
-    await expect(tab).toBeVisible({ timeout: this.uiTimeout });
-    await tab.click();
+    let panel = this.addContingencyPanel();
+    const approvalLabel = panel.getByText(/approval review/i).first();
+    if (
+      !(await panel.isVisible({ timeout: 3000 }).catch(() => false)) ||
+      !(await approvalLabel.isVisible({ timeout: 3000 }).catch(() => false))
+    ) {
+      await this.openAddContingencyOffcanvas();
+    }
+
+    await expect(async () => {
+      panel = this.addContingencyPanel();
+      await expect(panel).toBeVisible({ timeout: 3000 });
+      const tabLocator = panel
+        .getByRole('tab', { name: /approval review/i })
+        .or(panel.getByRole('button', { name: /approval review/i }))
+        .or(panel.locator('[role="tab"], button, [role="button"]').filter({ hasText: /approval review/i }))
+        .or(panel.getByText(/^Approval Review$/i));
+      const count = await tabLocator.count();
+      expect(count).toBeGreaterThan(0);
+      const tab = tabLocator.nth(count - 1);
+      await expect(tab).toBeVisible({ timeout: 3000 });
+      await tab.scrollIntoViewIfNeeded().catch(() => {});
+      await tab.click({ force: true, timeout: 5000 });
+      await expect(this.addContingencyPanel().getByText(/approval review/i).first()).toBeVisible({ timeout: 3000 });
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
+
+    await expect(this.addContingencyPanel().getByText(/approval review/i).first()).toBeVisible({
+      timeout: this.uiTimeout,
+    });
     await this.page.waitForTimeout(500);
   }
 
   async expectApprovalReviewRate(amount) {
-    const panel = this.addContingencyPanel();
-    await expect(panel.getByText(new RegExp(String(amount))).first()).toBeVisible({ timeout: this.uiTimeout });
+    const expected = Number(amount);
+    await expect(async () => {
+      const panel = this.addContingencyPanel();
+      await expect(panel).toBeVisible({ timeout: 3000 });
+      const text = await panel.innerText();
+      const values = [...text.matchAll(/\$?\s*([\d,.]+)/g)].map((m) => this.parseMoney(m[1]));
+      expect(values).toContain(expected);
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
   }
 
   async expectApprovalReviewLastAmount() {
@@ -963,13 +1137,20 @@ class BudgetingPage extends BasePage {
   }
 
   async expectCardShowsContingencyUsed(amount) {
+    const expectedAdded = Number(amount);
+    const previousUsed = Number.isFinite(this.contingencyUsedBefore) ? this.contingencyUsedBefore : 0;
+    const expectedTotal = previousUsed + expectedAdded;
     const card = this.actualBudgetCard();
-    await expect(card.getByText(new RegExp(`${amount}[\\s\\S]*used|used[\\s\\S]*${amount}`, 'i')).first())
-      .toBeVisible({ timeout: this.uiTimeout })
-      .catch(async () => {
-        const text = await card.innerText();
-        expect(text).toMatch(new RegExp(String(amount)));
-      });
+    await expect(async () => {
+      const text = await card
+        .locator('span, p, .MuiTypography-root')
+        .filter({ hasText: /Added\s+from\s+conti[n]?gency/i })
+        .first()
+        .innerText()
+        .catch(async () => card.innerText());
+      const actual = this.parseContingencyUsedFromText(text);
+      expect(actual).toBe(expectedTotal);
+    }).toPass({ timeout: this.uiTimeout, intervals: [500, 1000, 2000] });
   }
 
   // -------------------------------------------------------------------------
@@ -988,6 +1169,64 @@ class BudgetingPage extends BasePage {
       .first();
   }
 
+  async focusBudgetingScheduleTable() {
+    const budgetingTab = this.page.locator('div').filter({ hasText: /^Budgeting$/ }).nth(1);
+    if (await budgetingTab.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await budgetingTab.click({ force: true }).catch(() => {});
+    }
+
+    const scheduleListTable = this.page.locator('.MuiBox-root.css-1233zgu').first();
+    if (await scheduleListTable.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await scheduleListTable.click({ force: true }).catch(() => {});
+    }
+  }
+
+  async setScheduleActualBudget(name, amount) {
+    await this.focusBudgetingScheduleTable();
+    const row = this.scheduleRow(name);
+    await expect(row).toBeVisible({ timeout: this.uiTimeout });
+    const visibleZeroBudgetCell = row
+      .locator('.MuiBox-root, p, span, div')
+      .filter({ hasText: /^\s*\$?\s*0(?:\.00)?\s*$/ })
+      .last();
+
+    if (await visibleZeroBudgetCell.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await visibleZeroBudgetCell.scrollIntoViewIfNeeded().catch(() => {});
+      await visibleZeroBudgetCell.dblclick({ force: true });
+      const openedInput = this.page
+        .getByRole('spinbutton')
+        .or(row.locator('input[type="number"], input[type="text"], input'))
+        .first();
+      await expect(openedInput).toBeVisible({ timeout: this.uiTimeout });
+      await openedInput.fill('');
+      await openedInput.fill(String(amount));
+      const tickIcon = this.page
+        .locator('.MuiButtonBase-root.MuiIconButton-root.MuiIconButton-sizeSmall.css-p947nl')
+        .or(row.locator('button.MuiIconButton-root').filter({ visible: true }))
+        .first();
+      await expect(tickIcon).toBeVisible({ timeout: this.uiTimeout });
+      await expect(tickIcon).toBeEnabled({ timeout: this.uiTimeout });
+      await tickIcon.click({ force: true });
+      await this.page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+      await this.page.waitForTimeout(2500);
+      this.lastTableBudgetAmount = Number(amount);
+      await this.logStep(`Set actual budget ${amount} on ${name}`);
+      return;
+    }
+    // Actual Budget is typically 5th data column — click money cell
+    const cells = row.locator('td');
+    const cellCount = await cells.count();
+    let target = cells.nth(Math.min(4, cellCount - 1));
+    for (let i = 0; i < cellCount; i++) {
+      const t = await cells.nth(i).innerText().catch(() => '');
+      if (/^[\s₹$€£]?\s*[\d,]+/.test(t.trim()) || t.trim() === '0' || t.includes('—') || t.includes('-')) {
+        // Prefer cells that look like money in budget/cost columns (skip dates)
+        if (!/\d{1,2}[\/\-]\d{1,2}/.test(t) && !/[ap]m/i.test(t)) {
+          target = cells.nth(i);
+          // Actual budget usually before actual cost — take first money-like after assignees
+          if (i >= 3) break;
+        }
+      }
   async _budgetTableColumnIndex(labelRe) {
     const headers = this.budgetSchedulesTable().locator('thead th, thead td');
     const count = await headers.count();

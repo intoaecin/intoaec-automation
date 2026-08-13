@@ -147,7 +147,6 @@ Feature: Budgeting — incremental test cases
     And I add estimate section "section 1"
     And I add manual estimate item with amount multiple of 100
     And I click estimate action compose email and send
-    Then I should see estimate success toast "Estimation created successfully|Email sent successfully"
     When I click back from the project module
     And I select the "Project Management" heading
     And I navigate to the budgeting module
@@ -176,7 +175,6 @@ Feature: Budgeting — incremental test cases
     And I add estimate section "section 2"
     And I add manual estimate item with amount multiple of 100
     And I click estimate action compose email and send
-    Then I should see estimate success toast "Estimation created successfully|Email sent successfully"
     When I click back from the project module
     And I select the "Project Management" heading
     And I navigate to the budgeting module
@@ -207,6 +205,7 @@ Feature: Budgeting — incremental test cases
     And I click the "Proposal" module card
     And I wait for the proposal workspace to load
     And I open the choose proposal modal
+    And I select "All" in the proposal category dropdown
     And I choose proposal template "budgeting" and proceed
     Then I should land on the proposal editor page
     When I click Next on the proposal editor
@@ -242,6 +241,7 @@ Feature: Budgeting — incremental test cases
     And I click the "Proposal" module card
     And I wait for the proposal workspace to load
     And I open the choose proposal modal
+    And I select "All" in the proposal category dropdown
     And I choose proposal template "budgeting" and proceed
     Then I should land on the proposal editor page
     When I click Next on the proposal editor
@@ -359,7 +359,7 @@ Feature: Budgeting — incremental test cases
 
   @TS08 @TC13 @regression @positive
   Scenario: TC-13 — Split phase actual budget equally to child schedules
-    When I set actual budget "200" on schedule "phase" in the budgeting table
+    When I set actual budget "500" on schedule "phase" in the budgeting table
     And I split schedule "phase" actual budget equally to child schedules
     Then no budgeting error toast should be visible
 

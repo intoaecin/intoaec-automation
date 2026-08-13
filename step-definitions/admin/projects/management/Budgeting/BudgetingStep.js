@@ -377,9 +377,7 @@ When('I choose budget category {string} for estimate {string}', async function (
 
 When('I click link cost on the link offcanvas', async function () {
   const budgetingPage = getBudgetingPage(this);
-  if (!this.budgetSnapshotBefore) {
-    this.budgetSnapshotBefore = await budgetingPage.captureActualBudgetSnapshot();
-  }
+  this.budgetSnapshotBefore = await budgetingPage.captureActualBudgetSnapshot();
   await budgetingPage.clickLinkCost();
 });
 
@@ -455,6 +453,7 @@ When(
 When('I return to the application project', { timeout: 120000 }, async function () {
   const budgetingPage = getBudgetingPage(this);
   await budgetingPage.returnToApplicationProject();
+  this.page = budgetingPage.page;
 });
 
 Then('I should see proposal {string} in the link offcanvas', async function (name) {
@@ -638,6 +637,9 @@ Then('the actual budget card should show contingency used equal to the last adde
 
 When('I set actual budget {string} on schedule {string} in the budgeting table', async function (amount, name) {
   const page = getBudgetingPage(this);
+  this.budgetSnapshotBefore = {
+    unallocatedRemaining: await page.captureActualBudgetUnallocatedRemaining(),
+  };
   this.budgetSnapshotBefore = await page.captureActualBudgetSnapshot();
   page.budgetSnapshotBefore = this.budgetSnapshotBefore;
   await page.setScheduleActualBudget(name, amount);

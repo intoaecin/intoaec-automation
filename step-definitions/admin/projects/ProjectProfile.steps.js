@@ -27,12 +27,14 @@ When('I click on the first project in the list', { timeout: 120000 }, async func
 When('I select the {string} heading', { timeout: 120000 }, async function (headingName) {
   const projectProfilePage = new ProjectProfilePage(this.page);
   const schedulePage = new SchedulePage(this.page);
+  const projectNavigationPage = new ProjectNavigationPage(this.page);
 
   // Being inside the project profile does NOT mean this heading is active
   // (e.g. Design & Estimates may still be selected). Always select the requested heading
   // so Schedule / Daily Report / etc. cards come from the correct section.
   if (await schedulePage.isOnScheduleModule()) {
-    const projectNavigationPage = new ProjectNavigationPage(this.page);
+    await projectNavigationPage.returnToProjectProfile();
+  } else if (!(await projectProfilePage.isInsideProjectProfile())) {
     await projectNavigationPage.returnToProjectProfile();
   }
 
