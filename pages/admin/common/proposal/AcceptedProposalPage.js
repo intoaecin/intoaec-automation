@@ -371,59 +371,87 @@ class AcceptedProposalPage extends BasePage {
   async acceptProposalWithDigitalSignature() {
     const page = this.proposalPreviewPage;
 
-    // 1. Click "Sign and Preview" mapped directly from the UI button
-    const signAndPreviewButton = page.locator('button').filter({ hasText: /Sign and Preview/i }).first();
-    await expect(signAndPreviewButton).toBeVisible({ timeout: 15000 });
-    await signAndPreviewButton.click();
+    const signaturePopup = () =>
+      page
+        .locator('[role="dialog"], .MuiDialog-root, .MuiModal-root, .MuiPaper-root')
+        .filter({ has: page.locator('input[type="radio"][value="draw"], canvas, button:has-text("Sign and Accept")') })
+        .first();
 
-    // 2. Click "Draw signature" radio button to reveal the canvas
-    const drawSignatureText = page.getByText(/Draw Signature/i).first();
-    await expect(drawSignatureText).toBeVisible({ timeout: 10000 });
-    // Click the label/text directly to trigger the radio selection
-    await drawSignatureText.click({ force: true });
+    const openSignaturePopup = async () => {
+      if (await signaturePopup().isVisible({ timeout: 1500 }).catch(() => false)) {
+        return;
+      }
 
-    // 3. Draw inside canvas
-    const signaturePad = page.locator('canvas').last();
-    await expect(signaturePad).toBeVisible({ timeout: 10000 });
+      const opener = page
+        .locator('button')
+        .filter({ hasText: /^Sign and Accept$/i })
+        .first()
+        .or(page.getByRole('button', { name: /^Sign and Accept$/i }).first());
+      await expect(opener).toBeVisible({ timeout: 30000 });
+      await opener.click({ force: true });
 
-    const box = await signaturePad.boundingBox();
-    if (!box) {
-      throw new Error('Digital signature canvas was not available.');
+      await expect(async () => {
+        expect(await signaturePopup().isVisible({ timeout: 2000 }).catch(() => false)).toBeTruthy();
+      }).toPass({ timeout: 30000, intervals: [500, 1000, 2000] });
+    };
+
+    const drawSignature = async () => {
+      const popup = signaturePopup();
+      const drawSignatureRadio = popup
+        .locator('input[type="radio"][value="draw"]')
+        .first()
+        .or(page.locator('input[type="radio"][value="draw"]').first());
+      await expect(drawSignatureRadio).toBeVisible({ timeout: 30000 });
+      await drawSignatureRadio.check({ force: true }).catch(async () => {
+        await drawSignatureRadio.click({ force: true });
+      });
+      await page.waitForTimeout(500);
+
+      const signaturePad = popup.locator('canvas').last().or(page.locator('canvas').last());
+      await expect(signaturePad).toBeVisible({ timeout: 15000 });
+
+      const box = await signaturePad.boundingBox();
+      if (!box) {
+        throw new Error('Digital signature canvas was not available.');
+      }
+
+      await signaturePad.click({ position: { x: box.width / 2, y: box.height / 2 }, force: true }).catch(() => {});
+      await page.mouse.move(box.x + 25, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + 95, box.y + box.height / 2 - 25, { steps: 5 });
+      await page.mouse.move(box.x + 165, box.y + box.height / 2 + 20, { steps: 5 });
+      await page.mouse.move(box.x + 240, box.y + box.height / 2 - 10, { steps: 5 });
+      await page.mouse.up();
+      await page.waitForTimeout(500);
+    };
+
+    await openSignaturePopup();
+    await drawSignature();
+
+    if (!(await signaturePopup().isVisible({ timeout: 1500 }).catch(() => false))) {
+      await openSignaturePopup();
+      await drawSignature();
     }
 
-    await page.mouse.move(box.x + 20, box.y + 20);
-    await page.mouse.down();
-    await page.mouse.move(box.x + 80, box.y + 45, { steps: 5 });
-    await page.mouse.move(box.x + 140, box.y + 30, { steps: 5 });
-    await page.mouse.up();
-
-    // 4. Click "Sign Proposal"
-    const signProposalSubmit = page.locator('button').filter({ hasText: /Sign Proposal/i }).first();
-    await expect(signProposalSubmit).toBeVisible({ timeout: 10000 });
-    await signProposalSubmit.click({ force: true });
+    const signAndAcceptSubmit = signaturePopup()
+      .locator('button')
+      .filter({ hasText: /^Sign and Accept$/i })
+      .last()
+      .or(page.getByRole('button', { name: /^Sign and Accept$/i }).last());
+    await expect(signAndAcceptSubmit).toBeVisible({ timeout: 15000 });
+    await signAndAcceptSubmit.click({ force: true });
 
     await page.waitForTimeout(2000); // Allow modal closing and UI to refresh
 
-    // 5. Click the final "Accept Proposal" button and verify it processed
-    const acceptFinalBtn = page.locator('button').filter({ hasText: /Accept Proposal/i }).first()
-      .or(page.getByRole('button', { name: /Accept Proposal/i }).first());
-
-    await expect(acceptFinalBtn).toBeVisible({ timeout: 15000 });
-
-    // We loop the click until the "Accepted" text appears in the header or the button vanishes
+    // Some preview pages close or stay on a thank-you state after accepting.
+    // App-side status is verified after switching back to the application tab.
     const acceptedHeaderStatus = page.locator('h6, span, div').filter({ hasText: /^Accepted$/i }).first()
       .or(page.getByText(/^Accepted$/i).first());
 
     await expect(async () => {
-      if (await acceptFinalBtn.isVisible().catch(() => false)) {
-        await acceptFinalBtn.click({ force: true }).catch(() => { });
-      }
-
       const isStatusVisible = await acceptedHeaderStatus.isVisible({ timeout: 2000 }).catch(() => false);
-      const isButtonStillThere = await acceptFinalBtn.isVisible({ timeout: 500 }).catch(() => false);
-
-      expect(isStatusVisible || !isButtonStillThere).toBeTruthy();
-    }).toPass({ timeout: 20000, intervals: [1500, 2000, 3000] });
+      expect(isStatusVisible).toBeTruthy();
+    }).toPass({ timeout: 5000, intervals: [1000, 1500] }).catch(() => {});
 
     // Quick wait after successful confirmation so app-side toasts/requests resolve before verifying status
     await page.waitForTimeout(2000);

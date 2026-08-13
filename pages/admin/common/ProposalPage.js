@@ -157,6 +157,31 @@ class ProposalPage extends BasePage {
     await this.waitForStableUi();
   }
 
+  async selectProposalCategory(categoryName) {
+    const dialog = this.getChooseProposalDialog();
+    await expect(dialog).toBeVisible({ timeout: this.defaultTimeout });
+
+    const categorySelect = dialog.locator('.MuiSelect-select, [role="combobox"]').first();
+    await expect(categorySelect).toBeVisible({ timeout: this.defaultTimeout });
+    const selected = ((await categorySelect.innerText().catch(() => '')) || '').trim();
+    if (new RegExp(`^${String(categoryName || '').trim()}$`, 'i').test(selected)) {
+      return;
+    }
+
+    await categorySelect.click();
+
+    const escaped = String(categoryName || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const dataValue = String(categoryName || '').trim().toUpperCase();
+    const option = this.page
+      .locator(`[role="option"][data-value="${dataValue}"]`)
+      .or(dataValue === 'ALL' ? this.page.locator('[role="option"][data-value="ALL"]') : this.page.locator('[role="option"]').filter({ hasText: new RegExp(`^\\s*${escaped}\\s*$`, 'i') }))
+      .or(this.page.getByRole('option', { name: new RegExp(escaped, 'i') }))
+      .first();
+    await expect(option).toBeVisible({ timeout: 30000 });
+    await option.click();
+    await this.page.waitForTimeout(500);
+  }
+
   async selectDefaultProposalOption() {
     const dialog = this.getChooseProposalDialog();
     await expect(dialog).toBeVisible({ timeout: this.defaultTimeout });

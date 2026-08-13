@@ -21,6 +21,13 @@ class ProjectProfilePage extends BasePage {
     let heading = this._visibleHeading(name);
 
     if (!(await heading.isVisible({ timeout: 3000 }).catch(() => false))) {
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      await this.page.waitForLoadState('networkidle', { timeout: 12000 }).catch(() => {});
+      await this.page.waitForTimeout(1200);
+      heading = this._visibleHeading(name);
+    }
+
+    if (!(await heading.isVisible({ timeout: 3000 }).catch(() => false))) {
       const ProjectNavigationPage = require('./ProjectNavigationPage');
       const nav = new ProjectNavigationPage(this.page);
       if (!(await nav.returnToProjectProfile())) {
@@ -72,6 +79,13 @@ class ProjectProfilePage extends BasePage {
 
     if ((name || '').trim().toLowerCase() === 'daily report') {
       await this.clickDailyReportModuleCard(scope, text);
+      return;
+    }
+
+    if ((name || '').trim().toLowerCase() === 'proposal') {
+      const ProposalPage = require('../common/ProposalPage');
+      const proposalPage = new ProposalPage(this.page);
+      await proposalPage.openProposalTab();
       return;
     }
 
