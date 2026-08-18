@@ -183,3 +183,44 @@ Mirror the **Schedule** / **Task** pattern (`Budgeting_TestCases.feature`):
 npx cucumber-js features/admin/projects/managements/Budgeting/Budgeting_TestCases.feature --tags "@TS01 and @TC01"
 ```
 
+---
+
+## Vendor Portal Login (`@vendor` / `@vendor-login`) — incremental TC file
+
+Mirror the **Warehouse** / **Services** pattern (`VendorLogin_TestCases.feature`):
+
+| Layer | Path |
+|-------|------|
+| Feature | `features/vendor/auth/VendorLogin_TestCases.feature` |
+| Steps | `step-definitions/vendor/auth/VendorLoginStep.js` |
+| Page | `pages/vendor/auth/VendorLoginPage.js`, `pages/vendor/profile/VendorProfilePage.js`, `pages/vendor/organization/VendorOrganizationPage.js`, `pages/vendor/products/VendorProductsPage.js`, `pages/vendor/services/VendorServicesPage.js` |
+
+**Tags:** `@vendor-portal` is the unique tag to run this file alone (`@vendor` also matches purchase-order vendor features). Feature also has `@vendor` `@vendor-login`; scenarios use `@TS01` / `@TC01` … per test sheet.
+
+**URL:** `https://vendor.aecplayhouse.com/auth/signIn` (`config/env.js` → `vendor`).
+
+**TC-01** is the vendor sign-in flow. **TC-02** uses `Given I am logged in to the vendor portal` then Account Settings → **My Profile** → Edit → Save. **TC-03** uses My Profile → **Security** → change password (`Simple@10` → `Courage@10`) → logout → login with the new password. After TC-03 the original password is restored so TC-01 / TC-02 keep working. **TC-04** uses Account Settings → **My Organization** → **Company Info** → Edit → registration number + category → Update. **TC-05** uses My Organization → **Business Info** → Edit → address line 1/2, city, state, country, ZIP → Update. **TC-06** uses My Organization → **Social Media** → Edit → Facebook/Twitter/LinkedIn/Instagram/Public Profile/Website URLs → Save → refresh → verify. **TC-07** uses My Organization → **E-Signature** → Draw a signature → Update → refresh → verify Existing Digital Signature. **TC-08** uses My Organization → **E-Signature** → Upload `sample_signature.png` → Update → verify Existing Digital Signature. **TC-09** uses **Products** → **Add Product** → **Start From Scratch** → Product Information (name/category/subcategory/qty/brand/description) → Save → Product List. **TC-10** uses **Services** → **Create New** → Service Name/Category/Type/Description → Fixed Price / 2500 / Taxable → Save → Service List.
+
+**Vendor My Profile fields:** the live form exposes core contact/address fields (First/Last Name, Email, Mobile, Organization, Job Title/Designation, Address, City, State, Country, Zip). Optional TC fields (Experience, Expertise, Skills, Industry, Website, Profile Description) are attempted when present and skipped otherwise.
+
+**Step cache:** `world.vendorLoginPage` + `getVendorLoginPage(world)`; `world.vendorProfilePage` + `getVendorProfilePage(world)`; `world.vendorOrganizationPage` + `getVendorOrganizationPage(world)`; `world.vendorProductsPage` + `getVendorProductsPage(world)`; `world.vendorServicesPage` + `getVendorServicesPage(world)` in `VendorLoginStep.js`.
+
+**Run all vendor portal TCs** (PowerShell: use `npx.cmd` / `npm.cmd` if `npx.ps1` is blocked by execution policy):
+```bash
+npx.cmd cucumber-js --tags "@vendor-portal"
+```
+
+**Run one TC:**
+```bash
+npx.cmd cucumber-js --tags "@vendor-portal and @TC01"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC02"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC03"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC04"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC05"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC06"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC07"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC08"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC09"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC10"
+```
+

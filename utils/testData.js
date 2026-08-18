@@ -5,7 +5,7 @@ const testData = {
     invalidUser: { email: 'wrong@gmail.com',       password: 'wrongpass' }
   },
   vendor: {
-    validUser:   { email: 'vendor@gmail.com',      password: 'Vendor@10' }
+    validUser:   { email: 'testintoaec@gmail.com', password: 'Simple@10' }
   },
   client: {
     validUser:   { email: 'client@gmail.com',      password: 'Client@10' }
