@@ -1,6 +1,6 @@
 const { Before, After, AfterStep, AfterAll, setDefaultTimeout } = require('@cucumber/cucumber');
 const path = require('path');
-const { closeSharedSession } = require('./world');
+const { closeSharedSession, shouldKeepBrowserOpen } = require('./world');
 const { captureScreenshot, getScreenshotDir } = require('./screenshots');
 
 /** Default step/scenario timeout (ms) — see AGENTS.md; 120s for slow login/navigation between scenarios */
@@ -39,6 +39,11 @@ Before(async function () {
  * Failure screenshots: disabled by default. Set SCREENSHOTS_ENABLED=true to write PNGs under screenshots/.
  */
 AfterStep(async function ({ pickle, result }) {
+  const delayMs = getStepDelayMs();
+  if (delayMs > 0 && this.page && !this.page.isClosed()) {
+    await this.page.waitForTimeout(delayMs).catch(() => {});
+  }
+
   if (result.status !== 'FAILED') return;
   if (!this.page || this.page.isClosed()) return;
 
@@ -110,6 +115,36 @@ After(async function (scenario) {
   await this.cleanup();
 });
 
-AfterAll(async function () {
+function waitForEnterToKeepBrowser() {
+  return new Promise((resolve) => {
+    console.log('\n[Browser] Left open so you can inspect the page.');
+    console.log('[Browser] Press ENTER here when you want to close it.\n');
+
+    if (!process.stdin.isTTY) {
+      console.log('[Browser] No interactive terminal — leaving the browser open until you stop the process (Ctrl+C).');
+      return;
+    }
+
+    // Prefer readline over raw-mode stdin — Cursor/PowerShell often drops Enter in raw mode.
+    try {
+      const readline = require('readline');
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+      rl.question('', () => {
+        rl.close();
+        resolve();
+      });
+    } catch {
+      resolve();
+    }
+  });
+}
+
+AfterAll({ timeout: 24 * 60 * 60 * 1000 }, async function () {
+  if (shouldKeepBrowserOpen()) {
+    await waitForEnterToKeepBrowser();
+  }
   await closeSharedSession();
 });
