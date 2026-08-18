@@ -83,6 +83,11 @@ class CustomWorld {
     this.myAccountPage = null;
     this.warehousePage = null;
     this.servicesPage = null;
+    this.vendorLoginPage = null;
+    this.vendorProfilePage = null;
+    this.vendorOrganizationPage = null;
+    this.vendorProductsPage = null;
+    this.vendorServicesPage = null;
   }
 
   async cleanup() {
