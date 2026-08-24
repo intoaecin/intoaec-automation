@@ -19,6 +19,8 @@ Given('I am logged in', { timeout: 120000 }, async function () {
   const url = this.page.url();
   if (url && url !== 'about:blank' && !url.includes('signIn')) {
     console.log('Already logged in — continuing in same tab');
+    const loginPage = new LoginPage(this.page);
+    await loginPage.waitForPostLoginShell();
     return;
   }
   await ensureLoggedIn(this);

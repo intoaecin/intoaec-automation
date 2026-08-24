@@ -58,17 +58,18 @@ class CustomWorld {
   }
 
   async cleanup() {
-    if (this.page && !this.page.isClosed()) {
-      try {
-        const SchedulePage = require('../pages/admin/projects/management/Schedule/SchedulePage');
-        const schedulePage = this.schedulePage || new SchedulePage(this.page);
-        if (await schedulePage.isOnScheduleModule()) {
-          await schedulePage.dismissOpenOverlays();
-        }
-      } catch {
-        await this.page.keyboard.press('Escape').catch(() => {});
-        await this.page.keyboard.press('Escape').catch(() => {});
+    if (!this.page || this.page.isClosed()) return;
+    if (!/schedule/i.test(this.page.url())) return;
+
+    try {
+      const SchedulePage = require('../pages/admin/projects/management/Schedule/SchedulePage');
+      const schedulePage = this.schedulePage || new SchedulePage(this.page);
+      if (await schedulePage.isOnScheduleModule()) {
+        await schedulePage.dismissOpenOverlays();
       }
+    } catch {
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.keyboard.press('Escape').catch(() => {});
     }
   }
 }

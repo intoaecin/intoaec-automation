@@ -1,5 +1,6 @@
 const { Given, AfterAll } = require('@cucumber/cucumber');
 const LoginPage = require('../../../../../pages/admin/auth/LoginPage');
+const testData = require('../../../../../utils/testData');
 const ProjectNavigationPage = require('../../../../../pages/admin/projects/ProjectNavigationPage');
 const ProjectProfilePage = require('../../../../../pages/admin/projects/ProjectProfilePage');
 const RFQPage = require('../../../../../pages/admin/projects/procurement/rfq/RFQPage');
@@ -57,8 +58,8 @@ Given(
   'the RFQ suite is ready with login and Procurement RFQ module open',
   { timeout: 300000 },
   async function () {
-    const email = process.env.RFQ_TEST_EMAIL || 'testintoaec@gmail.com';
-    const password = process.env.RFQ_TEST_PASSWORD || 'Simple@10';
+    const email = process.env.RFQ_TEST_EMAIL || testData.admin.validUser.email;
+    const password = process.env.RFQ_TEST_PASSWORD || testData.admin.validUser.password;
 
     if (isRfqSuiteSessionPrimed()) {
       // eslint-disable-next-line no-console

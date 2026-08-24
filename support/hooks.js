@@ -32,7 +32,13 @@ function getStepDelayMs() {
 }
 
 Before(async function () {
+  // eslint-disable-next-line no-console
+  console.log(
+    `[run] launching browser (${isHeadlessRun() ? 'headless' : 'headed'})`
+  );
   await this.init();
+  // eslint-disable-next-line no-console
+  console.log('[run] browser ready');
 });
 
 /**

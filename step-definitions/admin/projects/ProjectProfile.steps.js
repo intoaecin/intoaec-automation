@@ -2,7 +2,11 @@
 const { When } = require('@cucumber/cucumber');
 const ProjectNavigationPage = require('../../../pages/admin/projects/ProjectNavigationPage');
 const ProjectProfilePage = require('../../../pages/admin/projects/ProjectProfilePage');
-const SchedulePage = require('../../../pages/admin/projects/management/Schedule/SchedulePage');
+
+function getSchedulePage(page) {
+  const SchedulePage = require('../../../pages/admin/projects/management/Schedule/SchedulePage');
+  return new SchedulePage(page);
+}
 
 When('I navigate to the Projects page', { timeout: 120000 }, async function () {
   const projectProfilePage = new ProjectProfilePage(this.page);
@@ -12,6 +16,7 @@ When('I navigate to the Projects page', { timeout: 120000 }, async function () {
   }
   const projectNavigationPage = new ProjectNavigationPage(this.page);
   await projectNavigationPage.navigateToProjects();
+  console.log('Opened Clients/Projects list');
 });
 
 When('I click on the first project in the list', { timeout: 120000 }, async function () {
@@ -22,18 +27,18 @@ When('I click on the first project in the list', { timeout: 120000 }, async func
   }
   const projectNavigationPage = new ProjectNavigationPage(this.page);
   await projectNavigationPage.clickFirstProject();
+  console.log('Opened first client/project from Clients/Projects list');
 });
 
 When('I select the {string} heading', { timeout: 120000 }, async function (headingName) {
   const projectProfilePage = new ProjectProfilePage(this.page);
-  const schedulePage = new SchedulePage(this.page);
 
-  // Being inside the project profile does NOT mean this heading is active
-  // (e.g. Design & Estimates may still be selected). Always select the requested heading
-  // so Schedule / Daily Report / etc. cards come from the correct section.
-  if (await schedulePage.isOnScheduleModule()) {
-    const projectNavigationPage = new ProjectNavigationPage(this.page);
-    await projectNavigationPage.returnToProjectProfile();
+  if (/schedule/i.test(this.page.url())) {
+    const schedulePage = getSchedulePage(this.page);
+    if (await schedulePage.isOnScheduleModule()) {
+      const projectNavigationPage = new ProjectNavigationPage(this.page);
+      await projectNavigationPage.returnToProjectProfile();
+    }
   }
 
   await projectProfilePage.selectHeading(headingName);
@@ -41,10 +46,15 @@ When('I select the {string} heading', { timeout: 120000 }, async function (headi
 });
 
 When('I click the {string} module card', { timeout: 120000 }, async function (moduleName) {
-  const schedulePage = new SchedulePage(this.page);
-  if ((moduleName || '').trim().toLowerCase() === 'schedule' && (await schedulePage.isOnScheduleModule())) {
-    console.log('Already on Schedule module — skipping Schedule module card');
-    return;
+  if (
+    (moduleName || '').trim().toLowerCase() === 'schedule' &&
+    /schedule/i.test(this.page.url())
+  ) {
+    const schedulePage = getSchedulePage(this.page);
+    if (await schedulePage.isOnScheduleModule()) {
+      console.log('Already on Schedule module — skipping Schedule module card');
+      return;
+    }
   }
   const projectProfilePage = new ProjectProfilePage(this.page);
   await projectProfilePage.clickModuleCard(moduleName);

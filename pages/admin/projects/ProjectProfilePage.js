@@ -35,9 +35,15 @@ class ProjectProfilePage extends BasePage {
     await heading.click();
   }
 
-  /** True when the project profile hub is open (Project Management tab visible). */
+  /** True when the project profile hub is open (section headings as button or tab). */
   async isInsideProjectProfile() {
-    return this._visibleHeading('Project Management')
+    const nameRe =
+      /^(Project Management|Procurement|Design & Estimates|Financial|Communication & Docs)$/;
+    return this.page
+      .getByRole('button', { name: nameRe })
+      .or(this.page.getByRole('tab', { name: nameRe }))
+      .filter({ visible: true })
+      .first()
       .isVisible({ timeout: 2000 })
       .catch(() => false);
   }
@@ -311,25 +317,22 @@ class ProjectProfilePage extends BasePage {
     ];
 
     for (const candidate of candidates) {
-      if (!(await candidate.isVisible({ timeout: 3000 }).catch(() => false))) {
+      if (!(await candidate.isVisible({ timeout: 800 }).catch(() => false))) {
         continue;
       }
 
       await candidate.scrollIntoViewIfNeeded().catch(() => {});
-      await candidate.click({ timeout: 30000 }).catch(async () => {
-        await candidate.click({ timeout: 30000, force: true });
+      await candidate.click({ timeout: 15000 }).catch(async () => {
+        await candidate.click({ timeout: 15000, force: true });
       });
-      await this.page.waitForLoadState('domcontentloaded');
-      await this.page
-        .waitForLoadState('networkidle', { timeout: 20000 })
-        .catch(() => {});
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
 
-      if (await createPurchaseOrder.isVisible({ timeout: 15000 }).catch(() => false)) {
+      if (await createPurchaseOrder.isVisible({ timeout: 8000 }).catch(() => false)) {
         return;
       }
     }
 
-    await expect(createPurchaseOrder).toBeVisible({ timeout: 60000 });
+    await expect(createPurchaseOrder).toBeVisible({ timeout: 30000 });
   }
 
   async clickWorkOrderModuleCard(scope, text) {

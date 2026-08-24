@@ -6,13 +6,10 @@ const { expect } = require('@playwright/test');
 /**
  * List → Create PO → Get Started → Upload PDF → Proceed.
  *
- * Mode: `@po-import-pdf` / `PO_IMPORT_PDF_MANUAL=1` force a headed browser (see hooks.js).
- * Manual: no `waitForEvent('filechooser')` — Playwright only intercepts the picker when a listener exists;
- * without it, Windows Explorer opens. Then wait for Proceed → click.
- * Automated: `waitForEvent` + `setFiles` (no Explorer — fully programmatic).
- * - `PO_IMPORT_PDF_PATH` set and file exists → automated `setFiles` / `setInputFiles`.
- * - `PO_IMPORT_PDF_PATH` set but missing → manual (no crash; warns in console).
- * - No path env → bundled sample PDF if present, else manual.
+ * Default (TC-16 headed): wait for the Get Started popup, upload PDF manually in the
+ * browser, press ENTER in the terminal, then the test clicks Proceed and continues.
+ *
+ * Automated (CI): set `PO_IMPORT_PDF_AUTO=1` and optionally `PO_IMPORT_PDF_PATH`.
  */
 class PurchaseOrderImportPdfPage extends PurchaseOrderCreatePoPage {
   bundledImportPdfPath() {
@@ -22,47 +19,35 @@ class PurchaseOrderImportPdfPage extends PurchaseOrderCreatePoPage {
     );
   }
 
-  isManualPdfImport() {
-    const v = process.env.PO_IMPORT_PDF_MANUAL;
+  isAutomatedPdfImport() {
+    const v = process.env.PO_IMPORT_PDF_AUTO;
     return v === '1' || /^true$/i.test(String(v || ''));
   }
 
-  /**
-   * @returns {{ manual: boolean, automatedPath: string | null }}
-   */
-  resolveImportModeAndPath() {
-    if (this.isManualPdfImport()) {
-      return { manual: true, automatedPath: null };
-    }
-
+  resolveAutomatedPdfPath() {
     const raw = process.env.PO_IMPORT_PDF_PATH;
     if (raw && String(raw).trim()) {
       const resolved = path.resolve(String(raw).trim());
       if (fs.existsSync(resolved)) {
-        return { manual: false, automatedPath: resolved };
+        return resolved;
       }
       console.warn(
-        `[PO import] PO_IMPORT_PDF_PATH not found (${resolved}). Opening the file dialog — select your PDF, then the test will click Proceed when it is enabled.`
+        `[PO import] PO_IMPORT_PDF_PATH not found (${resolved}). Falling back to manual upload.`
       );
-      return { manual: true, automatedPath: null };
+      return null;
     }
 
     const bundled = this.bundledImportPdfPath();
     if (fs.existsSync(bundled)) {
-      return { manual: false, automatedPath: bundled };
+      return bundled;
     }
 
     console.warn(
-      `[PO import] Bundled sample missing (${bundled}). Opening the file dialog — select your PDF manually.`
+      `[PO import] Bundled sample missing (${bundled}). Falling back to manual upload.`
     );
-    return { manual: true, automatedPath: null };
+    return null;
   }
 
-  /**
-   * Clicks the control that opens the native file picker. Prefer the MUI card (app wires onClick → input.click());
-   * fall back to the “Upload PDF” label.
-   * @param {{ clickTimeout?: number }} [opts] — use a long `clickTimeout` in manual mode (click may block until the dialog closes).
-   */
   async clickUploadPdfToOpenNativeFileDialog(dlg, opts = {}) {
     const clickTimeout = opts.clickTimeout ?? 15000;
     const label = dlg.getByText(/^Upload PDF$/i).first();
@@ -78,9 +63,67 @@ class PurchaseOrderImportPdfPage extends PurchaseOrderCreatePoPage {
     await label.click({ timeout: clickTimeout });
   }
 
-  async uploadPdfInGetStartedDialogAndProceed() {
-    const { manual, automatedPath } = this.resolveImportModeAndPath();
+  async _clickProceedInGetStartedDialog(dlg) {
+    const proceed = dlg.getByRole('button', { name: /^proceed$/i });
+    await expect(proceed).toBeVisible({ timeout: 30000 });
+    await expect(proceed).toBeEnabled({ timeout: 600000 });
+    await proceed.click();
 
+    const uploading = this.page.getByText(/uploading file/i).first();
+    if (await uploading.isVisible({ timeout: 8000 }).catch(() => false)) {
+      await uploading.waitFor({ state: 'hidden', timeout: 180000 });
+    }
+  }
+
+  async _waitForPurchaseOrderCreateFormAfterImport() {
+    await expect
+      .poll(
+        async () => {
+          if (/purchase-order\/create/i.test(this.page.url())) {
+            return true;
+          }
+          return this.page
+            .locator('input[name="estimation name"]')
+            .first()
+            .isVisible({ timeout: 500 })
+            .catch(() => false);
+        },
+        { timeout: 120000, intervals: [500, 1000, 2000, 3000] }
+      )
+      .toBe(true);
+
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.waitForNetworkSettled();
+
+    const titleInput = this.page.locator('input[name="estimation name"]').first();
+    await titleInput.waitFor({ state: 'visible', timeout: 120000 });
+  }
+
+  async waitForManualPdfUploadInGetStartedDialog() {
+    const dlg = this.purchaseOrderStartDialog();
+    await expect(dlg).toBeVisible({ timeout: 30000 });
+    await expect(dlg.getByText(/^Upload PDF$/i).first()).toBeVisible({
+      timeout: 15000,
+    });
+
+    // eslint-disable-next-line no-console
+    console.log(
+      '\n[PO import] Create PO popup is open.\n' +
+        '            → Upload your PDF in the browser.\n' +
+        '            → Press ENTER in this terminal when the PDF is selected (test will click Proceed).\n'
+    );
+
+    await this.waitForEnterInTerminal(
+      'Press ENTER after PDF upload — the test will click Proceed for you.'
+    );
+
+    // eslint-disable-next-line no-console
+    console.log('[PO import] Clicking Proceed…');
+    await this._clickProceedInGetStartedDialog(dlg);
+    await this._waitForPurchaseOrderCreateFormAfterImport();
+  }
+
+  async uploadPdfAutomatedInGetStartedDialog(automatedPath) {
     const dlg = this.purchaseOrderStartDialog();
     await expect(dlg).toBeVisible({ timeout: 30000 });
 
@@ -92,41 +135,32 @@ class PurchaseOrderImportPdfPage extends PurchaseOrderCreatePoPage {
 
     const proceed = dlg.getByRole('button', { name: /^proceed$/i });
 
-    if (manual) {
-      await this.clickUploadPdfToOpenNativeFileDialog(dlg, {
-        clickTimeout: 600000,
-      });
-      await expect(proceed).toBeEnabled({ timeout: 600000 });
-    } else {
-      try {
-        const [fileChooser] = await Promise.all([
-          this.page.waitForEvent('filechooser', { timeout: 25000 }),
-          this.clickUploadPdfToOpenNativeFileDialog(dlg),
-        ]);
-        await fileChooser.setFiles(automatedPath);
-      } catch {
-        await fileInput.setInputFiles(automatedPath);
-      }
-      await expect(proceed).toBeEnabled({ timeout: 60000 });
+    try {
+      const [fileChooser] = await Promise.all([
+        this.page.waitForEvent('filechooser', { timeout: 25000 }),
+        this.clickUploadPdfToOpenNativeFileDialog(dlg),
+      ]);
+      await fileChooser.setFiles(automatedPath);
+    } catch {
+      await fileInput.setInputFiles(automatedPath);
     }
 
-    await proceed.click();
+    await expect(proceed).toBeEnabled({ timeout: 60000 });
+    await this._clickProceedInGetStartedDialog(dlg);
+    await this._waitForPurchaseOrderCreateFormAfterImport();
+  }
 
-    const uploading = this.page.getByText(/uploading file/i).first();
-    if (
-      await uploading.isVisible({ timeout: 8000 }).catch(() => false)
-    ) {
-      await uploading.waitFor({ state: 'hidden', timeout: 180000 });
+  async uploadPdfInGetStartedDialogAndProceed() {
+    const automatedPath = this.isAutomatedPdfImport()
+      ? this.resolveAutomatedPdfPath()
+      : null;
+
+    if (automatedPath) {
+      await this.uploadPdfAutomatedInGetStartedDialog(automatedPath);
+      return;
     }
 
-    await this.page.waitForURL(/purchase-order\/create/, {
-      timeout: 180000,
-    });
-    await this.page.waitForLoadState('domcontentloaded');
-    await this.waitForNetworkSettled();
-
-    const titleInput = this.page.locator('input[name="estimation name"]').first();
-    await titleInput.waitFor({ state: 'visible', timeout: 120000 });
+    await this.waitForManualPdfUploadInGetStartedDialog();
   }
 
   async expectPurchaseOrderCreateFormAfterPdfImport() {
