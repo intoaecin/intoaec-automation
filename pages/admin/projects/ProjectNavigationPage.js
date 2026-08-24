@@ -1,6 +1,7 @@
 // pages/admin/projects/ProjectNavigationPage.js
 const BasePage = require('../../BasePage');
 const { expect } = require('@playwright/test');
+const env = require('../../../config/env');
 
 class ProjectNavigationPage extends BasePage {
   constructor(page) {
@@ -16,6 +17,12 @@ class ProjectNavigationPage extends BasePage {
       .first();
     this.firstProject = page.getByRole('rowheader').first();
     this.projectRows = page.locator('tbody tr');
+    // Clients/Projects table: client name cell (Time Tracking / Proposal flows).
+    this.firstClientName = page.locator('th[scope="row"] span.text-dark').first();
+    this.addClientButton = page
+      .getByRole('button', { name: /^add client$/i })
+      .or(page.locator('button').filter({ hasText: /^add client$/i }))
+      .first();
   }
 
   async tryClick(locator, timeout = 5000) {
@@ -27,6 +34,41 @@ class ProjectNavigationPage extends BasePage {
     return true;
   }
 
+  _main() {
+    return this.page.locator('main, [role="main"]').first();
+  }
+
+  _isDeepModuleUrl() {
+    // Only real module screens — not the Clients/Projects list (`/client/profile` without projectId).
+    return /purchase-order|work[-_]?order|\/rfq|indent|tab=RFQAndPO|tab=Schedule/i.test(
+      this.page.url()
+    );
+  }
+
+  _clientsListRow() {
+    return this.page
+      .locator('th[scope="row"] span.text-dark')
+      .or(this.page.getByRole('rowheader'))
+      .or(this.page.locator('tbody tr'))
+      .filter({ visible: true })
+      .first();
+  }
+
+  async _isClientsProjectsListVisible() {
+    if (await this.firstClientName.isVisible({ timeout: 800 }).catch(() => false)) return true;
+    if (await this.addClientButton.isVisible({ timeout: 500 }).catch(() => false)) return true;
+    if (
+      await this.page
+        .getByPlaceholder(/search client name or project name/i)
+        .first()
+        .isVisible({ timeout: 400 })
+        .catch(() => false)
+    ) {
+      return true;
+    }
+    return this._clientsListRow().isVisible({ timeout: 400 }).catch(() => false);
+  }
+
   _profilePage() {
     const ProjectProfilePage = require('./ProjectProfilePage');
     return new ProjectProfilePage(this.page);
@@ -36,58 +78,130 @@ class ProjectNavigationPage extends BasePage {
     const url = this.page.url();
     if (/activity[-_ ]?tracker/i.test(url)) return true;
 
-    const main = this.page.locator('main, [role="main"]').first();
-    if (await main.getByRole('heading', { name: /activity tracker/i }).isVisible({ timeout: 1500 }).catch(() => false)) {
+    const main = this._main();
+    if (await main.getByRole('heading', { name: /^activity tracker$/i }).isVisible({ timeout: 800 }).catch(() => false)) {
       return true;
     }
-    if (await main.getByText(/^activity tracker$/i).isVisible({ timeout: 1500 }).catch(() => false)) {
-      return true;
-    }
-
-    const pmVisible = await this._profilePage().isInsideProjectProfile();
-    if (pmVisible) return false;
-
-    return main
-      .getByText(/created a schedule|updated a schedule|deleted a schedule|created a milestone|updated a milestone|updated working days/i)
-      .first()
-      .isVisible({ timeout: 1500 })
-      .catch(() => false);
+    return main.getByText(/^activity tracker$/i).isVisible({ timeout: 500 }).catch(() => false);
   }
 
   async openClientsProjectsList() {
-    const candidates = [
-      this.projectsLink,
-      this.page.getByRole('link', { name: /clients\/projects|clients|projects/i }).first(),
-      this.page.getByRole('button', { name: /clients\/projects|clients|projects/i }).first(),
-    ];
+    if (await this._isClientsProjectsListVisible()) {
+      // eslint-disable-next-line no-console
+      console.log('[nav] Clients/Projects list already visible');
+      return;
+    }
+
+    await this._waitForClientsProjectsNav().catch(() => {});
+
+    const candidates = this._clientsProjectsNavCandidates();
 
     let clicked = false;
     for (const candidate of candidates) {
-      if (await this.tryClick(candidate)) {
+      if (await this.tryClick(candidate, 8000)) {
         clicked = true;
         break;
       }
     }
 
     if (!clicked) {
-      await expect(this.projectsLink).toBeVisible({ timeout: this.defaultTimeout });
-      await this.projectsLink.click();
+      const navVisible = await this._anyClientsProjectsNavVisible(3000);
+      if (navVisible) {
+        for (const candidate of candidates) {
+          await candidate.scrollIntoViewIfNeeded().catch(() => {});
+          const forced = await candidate
+            .click({ timeout: 15000, force: true })
+            .then(() => true)
+            .catch(() => false);
+          if (forced) {
+            clicked = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!clicked) {
+      // eslint-disable-next-line no-console
+      console.log('[nav] Clients/Projects nav not found — opening list URL directly');
+      await this._gotoClientsProjectsListByUrl();
     }
 
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-    await expect(async () => {
-      const hasRowheader = await this.firstProject.isVisible({ timeout: 500 }).catch(() => false);
-      const hasRows = (await this.projectRows.count()) > 0;
-      expect(hasRowheader || hasRows).toBeTruthy();
-    }).toPass({ timeout: this.defaultTimeout, intervals: [500, 1000, 2000, 3000] });
+
+    await expect
+      .poll(
+        async () => {
+          const url = this.page.url();
+          if (/\/(purchase-order|work-order|rfq)\/(create|edit)/i.test(url)) return false;
+          // Accept /client page URL as success even before list elements render.
+          if (/\/client(\?|$)/i.test(url)) return true;
+          return this._isClientsProjectsListVisible();
+        },
+        { timeout: 30000, intervals: [400, 800, 1500, 2500] }
+      )
+      .toBe(true);
+
+    // eslint-disable-next-line no-console
+    console.log(`[nav] Clients/Projects list ready. URL=${this.page.url()}`);
   }
 
-  async _waitForProjectProfile() {
+  _clientsProjectsNavCandidates() {
+    const sidebar = this._sidebarScopes().first();
+    return [
+      this.page
+        .getByLabel('Clients/Projects')
+        .getByRole('button', { name: /clients\/projects/i })
+        .first(),
+      this.projectsLink,
+      this.page
+        .getByLabel('Clients/Projects')
+        .getByRole('link', { name: /clients\/projects/i })
+        .first(),
+      this.page.getByRole('link', { name: /clients\/projects/i }).first(),
+      this.page.getByRole('button', { name: /clients\/projects/i }).first(),
+      sidebar.getByRole('button', { name: /clients\/projects/i }).first(),
+      sidebar.getByRole('link', { name: /clients\/projects/i }).first(),
+    ];
+  }
+
+  async _anyClientsProjectsNavVisible(timeout = 1500) {
+    for (const candidate of this._clientsProjectsNavCandidates()) {
+      if (await candidate.isVisible({ timeout }).catch(() => false)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async _waitForClientsProjectsNav(timeout = 60000) {
+    await expect
+      .poll(
+        async () => {
+          if (await this._isClientsProjectsListVisible()) return true;
+          return this._anyClientsProjectsNavVisible(800);
+        },
+        { timeout, intervals: [500, 1000, 2000, 3000] }
+      )
+      .toBe(true);
+  }
+
+  async _gotoClientsProjectsListByUrl() {
+    const base = String(env.admin || '').replace(/\/$/, '');
+    await this.page
+      .goto(`${base}/client/profile`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+      .catch(async () => {
+        await this.page.goto(base, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      });
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+  }
+
+  async _waitForProjectProfile(timeout = 15000) {
     const profile = this._profilePage();
     try {
       await expect(async () => {
         expect(await profile.isInsideProjectProfile()).toBeTruthy();
-      }).toPass({ timeout: 15000, intervals: [500, 1000, 2000, 3000] });
+      }).toPass({ timeout, intervals: [400, 800, 1500] });
       return true;
     } catch {
       return false;
@@ -224,46 +338,210 @@ class ProjectNavigationPage extends BasePage {
     if (await profile.isInsideProjectProfile()) {
       return;
     }
+    await this.openClientsProjectsList();
+  }
 
-    if (await this._isActivityTrackerView()) {
-      if (await this.returnToProjectProfile()) {
+  _clientNameCells() {
+    return this.page.locator('th[scope="row"] span.text-dark').filter({ visible: true });
+  }
+
+  async _clickVisible(locator, timeout = 15000) {
+    await locator.scrollIntoViewIfNeeded().catch(() => {});
+    await locator.click({ timeout }).catch(async () => {
+      await locator.click({ timeout: Math.min(timeout, 10000), force: true });
+    });
+  }
+
+  async _clickFirstClientName() {
+    // Wait for the page to settle so the list has time to render.
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+
+    const candidates = [
+      // Scoped cell span (table layout).
+      this._clientNameCells().first(),
+      // Table rowheader.
+      this.page.locator('table th[scope="row"], table [role="rowheader"]').filter({ visible: true }).first(),
+      // Any <a> inside a table row.
+      this.page.locator('table tbody tr td a, table tbody tr th a').filter({ visible: true }).first(),
+      // First clickable table row cell (no link).
+      this.page.locator('table tbody tr td').filter({ visible: true }).first(),
+      // Card / list item layout.
+      this.page.locator('[class*="card"], [class*="Card"]').filter({ visible: true }).first(),
+      // Generic: first clickable row in main content area.
+      this.page.locator('main tr, [role="main"] tr, #root tr').filter({ visible: true }).first(),
+    ];
+
+    for (const candidate of candidates) {
+      if (await candidate.isVisible({ timeout: 5000 }).catch(() => false)) {
+        const label = ((await candidate.innerText().catch(() => '')) || '').trim().slice(0, 80);
+        await candidate.scrollIntoViewIfNeeded().catch(() => {});
+        await candidate.click({ timeout: 15000 }).catch(async () => {
+          await candidate.click({ timeout: 10000, force: true });
+        });
+        // eslint-disable-next-line no-console
+        console.log(`[nav] Clicked first client: ${label || '(unnamed)'}`);
+        await this.page.waitForLoadState('domcontentloaded').catch(() => {});
         return;
       }
-      await this.openClientsProjectsList();
-      return;
     }
 
-    await this.openClientsProjectsList();
+    throw new Error('[nav] Could not find any client name to click in the clients list.');
+  }
+
+  async _clickFirstProjectUnderClient(nameCountBefore, urlBefore) {
+    if (await this._profilePage().isInsideProjectProfile()) {
+      return true;
+    }
+
+    let nameCountAfter = nameCountBefore;
+    try {
+      await expect
+        .poll(
+          async () => {
+            if (await this._profilePage().isInsideProjectProfile()) {
+              return true;
+            }
+            nameCountAfter = await this._clientNameCells().count();
+            return nameCountAfter > nameCountBefore;
+          },
+          { timeout: 1500, intervals: [200, 400, 700] }
+        )
+        .toBe(true);
+    } catch {
+      nameCountAfter = await this._clientNameCells().count().catch(() => nameCountBefore);
+    }
+
+    if (await this._profilePage().isInsideProjectProfile()) {
+      return true;
+    }
+
+    if (nameCountAfter > nameCountBefore) {
+      const projectName = this._clientNameCells().nth(1);
+      const visible = await projectName.isVisible({ timeout: 1200 }).catch(() => false);
+      if (visible) {
+        const clicked = await projectName
+          .click({ timeout: 4000, force: true })
+          .then(() => true)
+          .catch(() => false);
+        if (clicked) {
+          const label = ((await projectName.innerText().catch(() => '')) || '').trim().slice(0, 80);
+          // eslint-disable-next-line no-console
+          console.log(`[nav] Clicked first project under client${label ? `: ${label}` : ''}`);
+          await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+          return true;
+        }
+      }
+      // eslint-disable-next-line no-console
+      console.log('[nav] Nested project row disappeared or was not clickable — continuing');
+    }
+
+    const urlAfter = this.page.url();
+    if (
+      urlAfter !== urlBefore &&
+      (await this._clientNameCells().first().isVisible({ timeout: 1500 }).catch(() => false)) &&
+      !(await this._profilePage().isInsideProjectProfile())
+    ) {
+      const projectName = this._clientNameCells().first();
+      const clicked = await projectName
+        .click({ timeout: 4000, force: true })
+        .then(() => true)
+        .catch(() => false);
+      if (clicked) {
+        // eslint-disable-next-line no-console
+        console.log('[nav] Clicked first project on client detail page');
+        await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  async _clickSelectedRowProfileIcon() {
+    const selected = this.page
+      .locator('tbody tr.Mui-selected, tbody tr[aria-selected="true"]')
+      .filter({ visible: true })
+      .first();
+    const row = (await selected.isVisible({ timeout: 800 }).catch(() => false))
+      ? selected
+      : this.page.locator('tbody tr').filter({ visible: true }).first();
+    const iconBtn = row
+      .locator('button.MuiIconButton-root.MuiIconButton-sizeSmall, button.MuiIconButton-root')
+      .filter({ visible: true })
+      .first();
+    const rowLink = row.locator('a').filter({ visible: true }).first();
+
+    if (await iconBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      const clicked = await iconBtn
+        .click({ timeout: 5000, force: true })
+        .then(() => true)
+        .catch(() => false);
+      if (clicked) {
+        // eslint-disable-next-line no-console
+        console.log('[nav] Clicked client/project row profile icon');
+        await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+        return true;
+      }
+    }
+    if (await rowLink.isVisible({ timeout: 1500 }).catch(() => false)) {
+      const clicked = await rowLink
+        .click({ timeout: 4000, force: true })
+        .then(() => true)
+        .catch(() => false);
+      if (clicked) {
+        // eslint-disable-next-line no-console
+        console.log('[nav] Clicked client/project row link');
+        await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+        return true;
+      }
+    }
+    return false;
   }
 
   async clickFirstProject() {
     const profile = this._profilePage();
     if (await profile.isInsideProjectProfile()) {
+      // eslint-disable-next-line no-console
+      console.log('[nav] Already on project profile hub — skip client/project click');
       return;
     }
 
-    if (await this._isActivityTrackerView()) {
-      if (await this.returnToProjectProfile()) {
+    const listVisible = await this._isClientsProjectsListVisible();
+    if (!listVisible) {
+      if (this._isDeepModuleUrl() && (await this.returnToProjectProfile())) {
         return;
       }
       await this.openClientsProjectsList();
-    } else {
-      await this.openClientsProjectsList();
     }
-
-    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
 
     if (await profile.isInsideProjectProfile()) {
       return;
     }
 
-    await expect(this.firstProject).toBeVisible({ timeout: 30000 });
-    await this.firstProject.click({ timeout: 15000 });
+    const urlBefore = this.page.url();
+    const nameCountBefore = await this._clientNameCells().count().catch(() => 0);
 
-    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this._clickFirstClientName();
+    if (await this._waitForProjectProfile(5000)) {
+      return;
+    }
+
+    await this._clickFirstProjectUnderClient(nameCountBefore, urlBefore);
+    if (await this._waitForProjectProfile(4000)) {
+      return;
+    }
+
+    await this._clickSelectedRowProfileIcon();
+    if (await this._waitForProjectProfile()) {
+      return;
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(`[nav] First client/project did not open hub. URL=${this.page.url()}`);
     await expect(async () => {
       expect(await profile.isInsideProjectProfile()).toBeTruthy();
-    }).toPass({ timeout: 30000, intervals: [500, 1000, 2000, 3000] });
+    }).toPass({ timeout: 20000, intervals: [500, 1000, 2000] });
   }
 
   async openRfqFromClientMenu() {

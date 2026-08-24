@@ -144,9 +144,31 @@ class LoginPage extends BasePage {
   async ensureAuthenticated(email, password) {
     await this.goto();
     if (await this._isAppReady()) {
+      await this.waitForPostLoginShell();
       return;
     }
     await this.login(email, password);
+    await this.waitForPostLoginShell();
+  }
+
+  /** Wait until the post-login shell exposes navigation or the clients list. */
+  async waitForPostLoginShell() {
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await Promise.race([
+      this.page
+        .getByLabel(/clients\/projects/i)
+        .first()
+        .waitFor({ state: 'visible', timeout: 60000 }),
+      this.page
+        .getByRole('button', { name: /clients\/projects/i })
+        .first()
+        .waitFor({ state: 'visible', timeout: 60000 }),
+      this.page
+        .getByPlaceholder(/search client name or project name/i)
+        .first()
+        .waitFor({ state: 'visible', timeout: 60000 }),
+      this.page.waitForURL((url) => !url.toString().includes('signIn'), { timeout: 60000 }),
+    ]).catch(() => {});
   }
 
   /** True when the app is already past the sign-in screen (reused session / same browser run). */

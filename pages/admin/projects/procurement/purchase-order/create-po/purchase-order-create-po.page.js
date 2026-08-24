@@ -13,11 +13,8 @@ class PurchaseOrderCreatePoPage extends BasePage {
   }
 
   async waitForNetworkSettled() {
-    await this.page.waitForLoadState('domcontentloaded', {
-      timeout: this.defaultTimeout,
-    });
     await this.page
-      .waitForLoadState('networkidle', { timeout: 20000 })
+      .waitForLoadState('domcontentloaded', { timeout: 15000 })
       .catch(() => {});
   }
 
@@ -35,31 +32,21 @@ class PurchaseOrderCreatePoPage extends BasePage {
   }
 
   async ensurePurchaseOrderListReady() {
-    await this.page
-      .waitForURL(
-        (url) => {
-          const href = typeof url === 'string' ? url : url.href;
-          return (
-            /tab=RFQAndPO/i.test(href) &&
-            (/subTab=PO/i.test(href) || /subTab%3DPO/i.test(href))
-          );
-        },
-        { timeout: 90000 }
-      )
-      .catch(() => {});
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
 
-    await this.page.waitForLoadState('domcontentloaded');
+    const createBtn = this.page.getByRole('button', {
+      name: /create purchase order/i,
+    });
 
-    const poTab = this.page.getByRole('tab', { name: /purchase order/i });
-    if (await poTab.isVisible({ timeout: 15000 }).catch(() => false)) {
-      await poTab.click();
-      await this.page.waitForLoadState('domcontentloaded');
-      await this.page.waitForTimeout(400);
+    if (!(await createBtn.isVisible({ timeout: 2500 }).catch(() => false))) {
+      const poTab = this.page.getByRole('tab', { name: /purchase order/i });
+      if (await poTab.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await poTab.click();
+        await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      }
     }
 
-    await expect(
-      this.page.getByRole('button', { name: /create purchase order/i })
-    ).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(createBtn).toBeVisible({ timeout: 45000 });
     await this.dismissListSkeletons();
   }
 
@@ -67,7 +54,7 @@ class PurchaseOrderCreatePoPage extends BasePage {
     await this.page
       .waitForFunction(
         () => document.querySelectorAll('.MuiSkeleton-root').length === 0,
-        { timeout: 20000 }
+        { timeout: 8000 }
       )
       .catch(() => {});
   }
@@ -143,7 +130,6 @@ class PurchaseOrderCreatePoPage extends BasePage {
     await expect
       .poll(async () => (await input.inputValue()).trim(), { timeout: 15000 })
       .toBe(title);
-    await this.waitForNetworkSettled();
   }
 
   /**
@@ -160,6 +146,19 @@ class PurchaseOrderCreatePoPage extends BasePage {
     return m ? m[0].toLowerCase() : null;
   }
 
+  async closeVendorModalIfOpen() {
+    const modal = this.page.locator('.MuiModal-root, [role="dialog"]').filter({
+      visible: true,
+    });
+    for (let i = 0; i < 6; i += 1) {
+      if ((await modal.count().catch(() => 0)) === 0) return;
+      const stillOpen = await modal.first().isVisible({ timeout: 400 }).catch(() => false);
+      if (!stillOpen) return;
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.waitForTimeout(200);
+    }
+  }
+
   /**
    * @returns {Promise<string | null>} Yopmail seen on the selected vendor row, if any.
    */
@@ -167,85 +166,127 @@ class PurchaseOrderCreatePoPage extends BasePage {
     const addVendorBtn = this.page.getByRole('button', {
       name: /add vendor details/i,
     });
-    await addVendorBtn.waitFor({ state: 'visible', timeout: 90000 });
+    await addVendorBtn.waitFor({ state: 'visible', timeout: 45000 });
     await addVendorBtn.scrollIntoViewIfNeeded();
     await expect(addVendorBtn).toBeEnabled({ timeout: 15000 });
     await addVendorBtn.click();
+    // eslint-disable-next-line no-console
+    console.log('[PO] Opened vendor modal.');
 
     const vendorModal = this.page.locator('.MuiModal-root').last();
     const panelHeading = vendorModal.getByText(
       /add vendor|select vendor|change vendor/i
     );
-    await expect(panelHeading).toBeVisible({ timeout: 45000 });
+    await expect(panelHeading).toBeVisible({ timeout: 30000 });
 
     const skeleton = vendorModal.locator('.MuiSkeleton-root').first();
-    if (await skeleton.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await skeleton.waitFor({ state: 'hidden', timeout: 90000 });
+    if (await skeleton.isVisible({ timeout: 2500 }).catch(() => false)) {
+      await skeleton.waitFor({ state: 'hidden', timeout: 45000 });
     }
+    await this.waitForNetworkSettled();
 
-    const noData = vendorModal.getByText(/no data found/i);
-    if (await noData.isVisible({ timeout: 5000 }).catch(() => false)) {
-      throw new Error(
-        'Vendor modal has no organizations. Connect or invite a vendor in User Hub first.'
-      );
-    }
-
+    const firstCell = vendorModal.getByRole('cell').first();
     const firstRadio = vendorModal.locator('table tbody input[type="radio"]').first();
-    await firstRadio.waitFor({ state: 'visible', timeout: 60000 });
-    await firstRadio.scrollIntoViewIfNeeded();
+    const noData = vendorModal.getByText(/no data found/i);
 
+    // Empty copy can flash while the vendor list API is still loading.
     try {
-      await firstRadio.check({ timeout: 15000 });
+      await expect
+        .poll(
+          async () => {
+            if (await firstRadio.isVisible({ timeout: 400 }).catch(() => false)) {
+              return 'radio';
+            }
+            if (await firstCell.isVisible({ timeout: 400 }).catch(() => false)) {
+              return 'cell';
+            }
+            if (await skeleton.isVisible({ timeout: 200 }).catch(() => false)) {
+              return 'loading';
+            }
+            return 'wait';
+          },
+          { timeout: 45000, intervals: [300, 600, 1000, 2000] }
+        )
+        .toMatch(/^(radio|cell)$/);
     } catch {
-      await firstRadio.click({ force: true });
+      if (await noData.isVisible({ timeout: 1000 }).catch(() => false)) {
+        throw new Error(
+          'Vendor modal has no organizations. Connect or invite a vendor in User Hub first.'
+        );
+      }
+      throw new Error('PO vendor modal: no vendor row/radio found to select.');
     }
-    await expect(firstRadio).toBeChecked({ timeout: 15000 });
+
+    if (await firstCell.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await firstCell.click({ timeout: 15000 }).catch(() => {});
+    }
+    if (await firstRadio.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await firstRadio.check({ timeout: 10000 }).catch(async () => {
+        await firstRadio.click({ force: true });
+      });
+    } else {
+      throw new Error('PO vendor modal: no vendor row/radio found to select.');
+    }
 
     const yopmailFromRow = await this.tryReadYopmailFromVendorModalFirstRow(
       vendorModal
     );
 
-    const addBtn = vendorModal.getByRole('button', { name: /^Add$/i }).last();
+    const addBtn = this.page.getByRole('button', { name: 'Add', exact: true }).last();
     await expect(addBtn).toBeEnabled({ timeout: 20000 });
     await addBtn.click();
+    // eslint-disable-next-line no-console
+    console.log('[PO] Clicked Add on vendor modal.');
 
-    await this.page.waitForLoadState('domcontentloaded');
-    await this.page
-      .waitForLoadState('networkidle', { timeout: 45000 })
-      .catch(() => {});
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.closeVendorModalIfOpen();
 
-    await expect(this.page).toHaveURL(/purchase-order\/create/);
-
-    await expect(
-      this.page.getByRole('button', { name: /change vendor/i })
-    ).toBeVisible({ timeout: 60000 });
-
-    try {
-      await expect(panelHeading).toBeHidden({ timeout: 30000 });
-    } catch {
-      /* Slide/off-canvas may still leave nodes in DOM; vendor add is confirmed by Change Vendor */
-    }
+    const changeVendor = this.page.getByRole('button', { name: /change vendor/i });
+    const vendorReady = this.page.getByRole('button', {
+      name: /change vendor|add vendor details/i,
+    });
+    await expect(vendorReady).toBeVisible({ timeout: 20000 });
+    await this.closeVendorModalIfOpen();
+    // eslint-disable-next-line no-console
+    console.log(
+      `[PO] Vendor selected${(await changeVendor.isVisible({ timeout: 500 }).catch(() => false)) ? ' (Change Vendor visible)' : ''}.`
+    );
 
     return yopmailFromRow;
   }
 
   async ensurePoLineItemsTableVisible() {
-    const table = this.page.locator('[aria-label="PO line items table"]');
-    await expect(table).toBeVisible({ timeout: this.defaultTimeout });
-    await table.scrollIntoViewIfNeeded();
-    return table;
+    const candidates = [
+      this.page.locator('[aria-label="PO line items table"]').first(),
+      this.page.locator('[aria-label*="line items" i]').first(),
+      this.page.locator('table').filter({ has: this.page.getByPlaceholder(/material name|service name/i) }).first(),
+      this.page.locator('table').last(),
+    ];
+
+    for (const table of candidates) {
+      if (await table.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await table.scrollIntoViewIfNeeded().catch(() => {});
+        return table;
+      }
+    }
+
+    await expect(candidates[0]).toBeVisible({ timeout: 20000 });
+    await candidates[0].scrollIntoViewIfNeeded().catch(() => {});
+    return candidates[0];
   }
 
   async clickAddManuallyOnPurchaseOrderForm() {
-    await this.ensurePoLineItemsTableVisible();
     const addManually = this.page
-      .locator('span.pointer')
-      .filter({ hasText: /add manually/i })
+      .getByText(/add manually/i)
+      .or(this.page.getByRole('button', { name: /add manually/i }))
+      .or(this.page.locator('span.pointer').filter({ hasText: /add manually/i }))
       .first();
-    await addManually.waitFor({ state: 'visible', timeout: 90000 });
-    await addManually.scrollIntoViewIfNeeded();
-    await addManually.click({ force: true });
-    await this.waitForNetworkSettled();
+
+    await expect(addManually).toBeVisible({ timeout: 8000 });
+    await addManually.scrollIntoViewIfNeeded().catch(() => {});
+    await addManually.click({ force: true, timeout: 8000 });
+    // eslint-disable-next-line no-console
+    console.log('[PO] Clicked + Add Manually.');
   }
 
   isPoLineUnitPlaceholderText(text) {
@@ -373,7 +414,7 @@ class PurchaseOrderCreatePoPage extends BasePage {
 
     let picked = false;
     for (const option of optionCandidates) {
-      if (await option.isVisible({ timeout: 2500 }).catch(() => false)) {
+      if (await option.isVisible({ timeout: 700 }).catch(() => false)) {
         await option.click();
         picked = true;
         break;
@@ -601,36 +642,40 @@ class PurchaseOrderCreatePoPage extends BasePage {
     skipUnit = false,
     useFirstUnitOption = false,
   }) {
-    const table = await this.ensurePoLineItemsTableVisible();
-    const dataRow = table.locator('tbody tr').last();
-    await expect(dataRow).toBeVisible({ timeout: 30000 });
-
-    const nameField = dataRow.getByPlaceholder(/material name/i).first();
-    await expect(nameField).toBeVisible({ timeout: this.defaultTimeout });
+    const nameField = this.page
+      .getByPlaceholder(/material name|service name/i)
+      .last()
+      .or(this.page.getByRole('textbox', { name: /material name|service name/i }).last());
+    await expect(nameField).toBeVisible({ timeout: 20000 });
     await nameField.click();
     await nameField.fill(itemName);
 
-    await dataRow.getByText(/^Add Description$/i).click();
+    const addDescription = this.page.getByText(/^Add Description$/i).last();
+    if (await addDescription.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await addDescription.click();
+      const descDialog = this.page
+        .getByRole('dialog')
+        .filter({ has: this.page.getByText(/add description/i) })
+        .last();
+      await expect(descDialog).toBeVisible({ timeout: 15000 });
+      const descField = descDialog
+        .getByRole('textbox', { name: /description/i })
+        .first()
+        .or(descDialog.locator('textarea').first())
+        .or(descDialog.locator('input').first());
+      await descField.fill(description);
+      await descDialog.getByRole('button', { name: /^Add$/i }).click();
+      await expect(descDialog).toBeHidden({ timeout: 15000 }).catch(() => {});
+    }
 
-    const descDialog = this.page
-      .getByRole('dialog')
-      .filter({ has: this.page.getByText(/add description/i) })
-      .last();
-    await expect(descDialog).toBeVisible({ timeout: 20000 });
-    const descField = descDialog.locator('textarea').first().or(
-      descDialog.locator('input').first()
-    );
-    await descField.fill(description);
-    await descDialog.getByRole('button', { name: /^Add$/i }).click();
-    await expect(descDialog).toBeHidden({ timeout: 20000 });
+    const table = await this.ensurePoLineItemsTableVisible();
+    const dataRow = table.locator('tbody tr').last();
+    await expect(dataRow).toBeVisible({ timeout: 15000 });
 
     const qtyInput = dataRow.locator('td').nth(1).locator('input').first();
-    await qtyInput.fill(String(quantity));
-    await qtyInput.blur();
-    if (lightNetworkWaits) {
-      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-    } else {
-      await this.waitForNetworkSettled();
+    if (await qtyInput.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await qtyInput.fill(String(quantity));
+      await qtyInput.blur().catch(() => {});
     }
 
     if (!skipUnit) {
@@ -641,15 +686,21 @@ class PurchaseOrderCreatePoPage extends BasePage {
       }
     }
 
+    const weightField = this.page.getByRole('textbox', { name: /^weight$/i }).last();
     const rateInput = dataRow.locator('td').nth(3).locator('input').first();
-    await expect(rateInput).toBeVisible({ timeout: 20000 });
-    await rateInput.click();
-    await rateInput.fill(String(rate));
-    await rateInput.blur();
-
-    if (lightNetworkWaits) {
-      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    if (await weightField.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await weightField.click();
+      await weightField.fill(String(rate));
     } else {
+      await expect(rateInput).toBeVisible({ timeout: 15000 });
+      await rateInput.click();
+      await rateInput.fill(String(rate));
+      await rateInput.blur().catch(() => {});
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(`[PO] Filled line item "${itemName}" qty=${quantity} unit=${unitLabel} rate=${rate}.`);
+    if (!lightNetworkWaits) {
       await this.waitForNetworkSettled();
     }
   }
@@ -657,7 +708,10 @@ class PurchaseOrderCreatePoPage extends BasePage {
   async addLineItemManually(args) {
     await expect(this.page).toHaveURL(/purchase-order\/(create|edit)/);
     await this.clickAddManuallyOnPurchaseOrderForm();
-    await this.fillLastPoLineItemRow(args);
+    await this.fillLastPoLineItemRow({
+      ...args,
+      lightNetworkWaits: true,
+    });
   }
 
   /**

@@ -167,7 +167,15 @@ class PurchaseOrderDefaultTermsTemplatePoPage extends PurchaseOrderCreatePoPage 
     await addBtn.click();
 
     await expect(modal).toBeHidden({ timeout: 45000 }).catch(() => {});
+    await this.page
+      .locator('.MuiModal-root, .MuiDialog-root, [role="dialog"]')
+      .filter({ visible: true })
+      .first()
+      .waitFor({ state: 'hidden', timeout: 15000 })
+      .catch(() => {});
+    await this.dismissOpenMenusAndPopovers().catch(() => {});
     await this.waitForNetworkSettled();
+    await this.scrollPurchaseOrderPageToRevealTermsSection(heading);
   }
 }
 

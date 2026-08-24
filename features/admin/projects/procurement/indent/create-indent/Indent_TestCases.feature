@@ -89,7 +89,7 @@ Feature: Indent — create indent incremental test cases
     When I click convert indent on the first indent card
     And I select PO from the convert indent options
     And I add vendor details with the first vendor on the purchase order from indent
-    And I fill rate "10000" on the first purchase order line item from indent
+    And I fill rate "10000" on the first purchase order line item from indent 
     And I open compose email on the purchase order from indent
     And I send the purchase order email from the indent convert compose dialog
     Then I should see the purchase order email sent successfully from indent convert

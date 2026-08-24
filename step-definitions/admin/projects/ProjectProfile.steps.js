@@ -2,7 +2,11 @@
 const { When } = require('@cucumber/cucumber');
 const ProjectNavigationPage = require('../../../pages/admin/projects/ProjectNavigationPage');
 const ProjectProfilePage = require('../../../pages/admin/projects/ProjectProfilePage');
-const SchedulePage = require('../../../pages/admin/projects/management/Schedule/SchedulePage');
+
+function getSchedulePage(page) {
+  const SchedulePage = require('../../../pages/admin/projects/management/Schedule/SchedulePage');
+  return new SchedulePage(page);
+}
 
 When('I navigate to the Projects page', { timeout: 120000 }, async function () {
   const projectProfilePage = new ProjectProfilePage(this.page);
@@ -12,6 +16,7 @@ When('I navigate to the Projects page', { timeout: 120000 }, async function () {
   }
   const projectNavigationPage = new ProjectNavigationPage(this.page);
   await projectNavigationPage.navigateToProjects();
+  console.log('Opened Clients/Projects list');
 });
 
 When('I click on the first project in the list', { timeout: 120000 }, async function () {
@@ -22,11 +27,12 @@ When('I click on the first project in the list', { timeout: 120000 }, async func
   }
   const projectNavigationPage = new ProjectNavigationPage(this.page);
   await projectNavigationPage.clickFirstProject();
+  console.log('Opened first client/project from Clients/Projects list');
 });
 
 When('I select the {string} heading', { timeout: 120000 }, async function (headingName) {
   const projectProfilePage = new ProjectProfilePage(this.page);
-  const schedulePage = new SchedulePage(this.page);
+  const schedulePage = getSchedulePage(this.page);
   const projectNavigationPage = new ProjectNavigationPage(this.page);
 
   // Being inside the project profile does NOT mean this heading is active
@@ -43,8 +49,11 @@ When('I select the {string} heading', { timeout: 120000 }, async function (headi
 });
 
 When('I click the {string} module card', { timeout: 120000 }, async function (moduleName) {
-  const schedulePage = new SchedulePage(this.page);
-  if ((moduleName || '').trim().toLowerCase() === 'schedule' && (await schedulePage.isOnScheduleModule())) {
+  const schedulePage = getSchedulePage(this.page);
+  if (
+    (moduleName || '').trim().toLowerCase() === 'schedule' &&
+    (await schedulePage.isOnScheduleModule())
+  ) {
     // Only skip when Gantt + List are both present (Budget-only view is not enough).
     const ganttVisible = await schedulePage.ganttTab.isVisible({ timeout: 1500 }).catch(() => false);
     const listVisible = await schedulePage.listTab.isVisible({ timeout: 1500 }).catch(() => false);

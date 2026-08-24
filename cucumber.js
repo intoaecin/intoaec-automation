@@ -1,7 +1,68 @@
+if (process.argv.some((a) => /^po(-tc\d+)?$/i.test(String(a)))) {
+  // eslint-disable-next-line no-console
+  console.log('[PO] starting (loading PO steps only)…');
+}
+
+const SUPPORT_AND_ALL_STEPS = ['support/**/*.js', 'step-definitions/**/*.js'];
+const PO_CORE_REQUIRE = [
+  'support/hooks.js',
+  'support/world.js',
+  'support/screenshots.js',
+  'step-definitions/admin/common.steps.js',
+  'step-definitions/admin/projects/ProjectProfile.steps.js',
+];
+const PO_REQUIRE = [
+  ...PO_CORE_REQUIRE,
+  'step-definitions/admin/projects/procurement/purchase-order/**/*.js',
+];
+const PO_TC04_REQUIRE = [
+  ...PO_CORE_REQUIRE,
+  'step-definitions/admin/projects/procurement/purchase-order/create-po/purchase-order-create-po.steps.js',
+  'step-definitions/admin/projects/procurement/purchase-order/create-po/purchase-order-default-terms-template-po.steps.js',
+  'step-definitions/admin/projects/procurement/purchase-order/create-po/purchase-order-attachment-po.steps.js',
+];
+const RFQ_REQUIRE = [
+  'support/**/*.js',
+  'step-definitions/admin/common.steps.js',
+  'step-definitions/admin/projects/ProjectProfile.steps.js',
+  'step-definitions/admin/projects/procurement/rfq/**/*.js',
+  'step-definitions/admin/projects/procurement/purchase-order/**/*.js',
+  'step-definitions/admin/projects/procurement/work-order/**/*.js',
+  'step-definitions/admin/projects/design/estimate/estimate.steps.js',
+];
+const FAST_FORMAT = ['progress'];
+const REPORT_FORMAT = ['progress', 'html:reports/cucumber-report.html'];
+
+function poProfile(tags) {
+  const requireFiles =
+    tags && /@TC04\b/.test(tags) ? PO_TC04_REQUIRE : PO_REQUIRE;
+  return {
+    require: requireFiles,
+    format: FAST_FORMAT,
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/procurement/purchase-order/PurchaseOrder_TestCases.feature',
+    ],
+    ...(tags ? { tags } : {}),
+  };
+}
+
+function rfqProfile(tags) {
+  return {
+    require: RFQ_REQUIRE,
+    format: FAST_FORMAT,
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/procurement/rfq/RFQ_TestCases.feature',
+    ],
+    ...(tags ? { tags } : {}),
+  };
+}
+
 module.exports = {
   default: {
-    require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    require: SUPPORT_AND_ALL_STEPS,
+    format: REPORT_FORMAT,
     publishQuiet: true,
   },
   /** Work Order TC-01 — compose send */
@@ -162,6 +223,24 @@ module.exports = {
       'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
     ],
   },
+  /** Purchase Order — all TCs */
+  po: poProfile(),
+  /** Purchase Order TC-02 … TC-19 */
+  ...Object.fromEntries(
+    [2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map((n) => {
+      const id = String(n).padStart(2, '0');
+      return [`po-tc${id}`, poProfile(`@TS01 and @TC${id}`)];
+    })
+  ),
+  /** RFQ — all TCs */
+  rfq: rfqProfile(),
+  /** RFQ TC-01 … TC-19 */
+  ...Object.fromEntries(
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map((n) => {
+      const id = String(n).padStart(2, '0');
+      return [`rfq-tc${id}`, rfqProfile(`@TS01 and @TC${id}`)];
+    })
+  ),
   /** Vendor portal — all TCs (unique tag; does not include PO @vendor tests) */
   'vendor-portal': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],

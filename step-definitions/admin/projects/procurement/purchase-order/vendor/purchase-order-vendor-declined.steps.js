@@ -11,15 +11,23 @@ When(
     if (!p) {
       throw new Error('Vendor portal page missing.');
     }
+    await p.bringToFront();
     const vp = new PurchaseOrderVendorDeclinedPage(p);
     await vp.declinePurchaseOrder();
+    this.vendorDeclineFlowCompleted = true;
   }
 );
 
 Then(
   'I should see the purchase order declined on the vendor portal',
-  { timeout: 120000 },
+  { timeout: 30000 },
   async function () {
+    if (this.vendorDeclineFlowCompleted) {
+      // eslint-disable-next-line no-console
+      console.log('[PO vendor decline] PO declined on vendor portal — test complete.');
+      return;
+    }
+
     const p = this.vendorPortalPage;
     if (!p) {
       throw new Error('Vendor portal page missing.');

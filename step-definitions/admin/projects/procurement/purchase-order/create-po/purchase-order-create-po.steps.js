@@ -42,6 +42,8 @@ When(
   async function (title) {
     const po = getPurchaseOrderCreatePoPage(this);
     await po.fillPurchaseOrderTitle(title);
+    this.lastPoTitle = title;
+    this.poYopmailSubjectHint = title;
   }
 );
 
@@ -110,6 +112,7 @@ When(
       this.vendorYopmailEmail = await po.readYopmailAddressFromComposeDialog();
     }
     await po.sendEmailFromComposeModal();
+    this.poEmailSentAt = Date.now();
   }
 );
 
