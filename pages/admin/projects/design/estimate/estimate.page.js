@@ -881,8 +881,9 @@ class EstimatePage extends BasePage {
 
     // (OPTION 1: I completely removed the code that intentionally clicked the description)
 
-    // 5. Handle Grid Cells safely (Qty, Unit, Rate)
+    // 5. Handle Grid Cells safely (Qty, Unit, Rate) — skip when not provided
     const fillGridCell = async (placeholder, value) => {
+      if (value === undefined || value === null) return;
       const input = row
         .locator(`input[placeholder*="${placeholder}"], input[name*="${placeholder.toLowerCase()}"]`)
         .first();
@@ -1154,14 +1155,117 @@ class EstimatePage extends BasePage {
     await this.addCustomColumn('', 'Link');
   }
 
+  /**
+   * Fill Qty / Unit / Rate / Profit on an estimate item row via cell dblclick
+   * (same approach as fillSecondSectionItemCostsRandom / 05_second_section flow).
+   */
+  async fillItemQtyUnitRateProfit(sectionIndex, manualIndex, { qty, unit, rate, profit } = {}) {
+    const itemNameContainer = this.itemNameFieldForSectionRow(sectionIndex, manualIndex);
+    await expect(itemNameContainer).toBeVisible({ timeout: this.defaultTimeout });
+    const itemRow = itemNameContainer.locator('xpath=ancestor::tr[1]');
+    await expect(itemRow).toBeVisible({ timeout: this.defaultTimeout });
+
+    const td = itemRow.locator('td');
+    const qtyCell = td.nth(1);
+    const unitCell = td.nth(2);
+    const rateCell = td.nth(3);
+    const profitCell = td.nth(4);
+
+    const fillCellNumber = async (cell, value) => {
+      await cell.scrollIntoViewIfNeeded().catch(() => {});
+      await cell.dblclick({ force: true }).catch(() => cell.click({ force: true }));
+      const input = cell.locator('input').first();
+      if (await input.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await input.fill(String(value));
+        await input.press('Enter').catch(() => this.page.keyboard.press('Enter'));
+      } else {
+        await this.page.keyboard.press('Control+A').catch(() => {});
+        await this.page.keyboard.type(String(value), { delay: 10 });
+        await this.page.keyboard.press('Enter').catch(() => this.page.keyboard.press('Tab'));
+      }
+      await this.page.waitForTimeout(250);
+    };
+
+    if (qty !== undefined) {
+      await fillCellNumber(qtyCell, qty);
+    }
+
+    if (unit !== undefined) {
+      await unitCell.dblclick({ force: true });
+      const unitMenu = this.page.locator(
+        '.MuiPaper-root.MuiMenu-paper, [role="listbox"], .MuiPopover-paper'
+      ).last();
+      const optionsRoot = (await unitMenu.isVisible({ timeout: 2000 }).catch(() => false))
+        ? unitMenu
+        : this.page.getByRole('listbox').first();
+      const option = optionsRoot
+        .getByRole('option', { name: new RegExp(`^${String(unit).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') })
+        .or(optionsRoot.getByText(new RegExp(`^${String(unit)}$`, 'i')))
+        .first();
+      if (await option.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await option.click();
+      } else {
+        const options = optionsRoot.getByRole('option');
+        if (await options.first().isVisible({ timeout: 2000 }).catch(() => false)) {
+          await options.first().click();
+        } else {
+          await this.page.keyboard.type(String(unit), { delay: 20 });
+          await this.page.keyboard.press('Enter').catch(() => {});
+        }
+      }
+      await this.page.waitForTimeout(250);
+    }
+
+    if (rate !== undefined) {
+      await fillCellNumber(rateCell, rate);
+    }
+    if (profit !== undefined) {
+      await fillCellNumber(profitCell, profit);
+    }
+  }
+
+  /**
+   * Budgeting estimate setup: add item name, then Qty/Unit/Rate (rate multiple of 100), profit 0.
+   * Reuses the 05_second_section Qty/Unit/Rate cell interaction pattern.
+   */
+  async addManualItemWithQtyUnitRateMultipleOf100({ name, qty = 1, unit = 'Nos', rate, profit = 0 } = {}) {
+    const itemName = name || `bgt${this.randomLetters(4)}`;
+    const finalRate = rate != null ? rate : 100 + Math.floor(Math.random() * 10) * 100;
+
+    await this.addManualItem(
+      {
+        name: itemName,
+        // Skip unreliable placeholder fills; cell method below sets costs.
+        qty: undefined,
+        unit: undefined,
+        rate: undefined,
+        profit: undefined,
+      },
+      { manualIndex: 0 }
+    );
+    await this.fillItemQtyUnitRateProfit(0, 0, {
+      qty,
+      unit,
+      rate: finalRate,
+      profit,
+    });
+
+    return { name: itemName, qty, unit, rate: finalRate, profit, amount: Number(qty) * Number(finalRate) };
+  }
+
   async composeAndSendEmail() {
     const actionBtn = this.page.getByRole('button', { name: 'Action', exact: true }).first();
     await expect(actionBtn).toBeVisible({ timeout: this.defaultTimeout });
     await actionBtn.click();
 
-    const composeMenuItem = this.page.getByRole('menuitem', { name: /compose email/i }).first();
+    const composeMenuItem = this.page.getByRole('menuitem', { name: 'Compose email' }).first();
     await expect(composeMenuItem).toBeVisible({ timeout: this.defaultTimeout });
     await composeMenuItem.click();
+
+    // Nested action menu: Compose email → Send as Estimate
+    const sendAsEstimate = this.page.getByRole('menuitem', { name: 'Send as Estimate' }).first();
+    await expect(sendAsEstimate).toBeVisible({ timeout: this.defaultTimeout });
+    await sendAsEstimate.click();
 
     // Compose popup takes time to render; wait for the Send button to be ready.
     const sendBtn = this.page.getByRole('button', { name: 'Send Email' }).first();

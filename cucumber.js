@@ -241,4 +241,11 @@ module.exports = {
       return [`rfq-tc${id}`, rfqProfile(`@TS01 and @TC${id}`)];
     })
   ),
+  /** Vendor portal — all TCs (unique tag; does not include PO @vendor tests) */
+  'vendor-portal': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    tags: '@vendor-portal',
+  },
 };

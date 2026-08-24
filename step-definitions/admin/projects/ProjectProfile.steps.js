@@ -32,13 +32,16 @@ When('I click on the first project in the list', { timeout: 120000 }, async func
 
 When('I select the {string} heading', { timeout: 120000 }, async function (headingName) {
   const projectProfilePage = new ProjectProfilePage(this.page);
+  const schedulePage = getSchedulePage(this.page);
+  const projectNavigationPage = new ProjectNavigationPage(this.page);
 
-  if (/schedule/i.test(this.page.url())) {
-    const schedulePage = getSchedulePage(this.page);
-    if (await schedulePage.isOnScheduleModule()) {
-      const projectNavigationPage = new ProjectNavigationPage(this.page);
-      await projectNavigationPage.returnToProjectProfile();
-    }
+  // Being inside the project profile does NOT mean this heading is active
+  // (e.g. Design & Estimates may still be selected). Always select the requested heading
+  // so Schedule / Daily Report / etc. cards come from the correct section.
+  if (await schedulePage.isOnScheduleModule()) {
+    await projectNavigationPage.returnToProjectProfile();
+  } else if (!(await projectProfilePage.isInsideProjectProfile())) {
+    await projectNavigationPage.returnToProjectProfile();
   }
 
   await projectProfilePage.selectHeading(headingName);
@@ -46,15 +49,19 @@ When('I select the {string} heading', { timeout: 120000 }, async function (headi
 });
 
 When('I click the {string} module card', { timeout: 120000 }, async function (moduleName) {
+  const schedulePage = getSchedulePage(this.page);
   if (
     (moduleName || '').trim().toLowerCase() === 'schedule' &&
-    /schedule/i.test(this.page.url())
+    (await schedulePage.isOnScheduleModule())
   ) {
-    const schedulePage = getSchedulePage(this.page);
-    if (await schedulePage.isOnScheduleModule()) {
+    // Only skip when Gantt + List are both present (Budget-only view is not enough).
+    const ganttVisible = await schedulePage.ganttTab.isVisible({ timeout: 1500 }).catch(() => false);
+    const listVisible = await schedulePage.listTab.isVisible({ timeout: 1500 }).catch(() => false);
+    if (ganttVisible && listVisible) {
       console.log('Already on Schedule module — skipping Schedule module card');
       return;
     }
+    console.log('Schedule/Budget without both Gantt+List — re-opening Schedule module card');
   }
   const projectProfilePage = new ProjectProfilePage(this.page);
   await projectProfilePage.clickModuleCard(moduleName);

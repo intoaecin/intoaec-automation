@@ -1,5 +1,6 @@
 const { setWorldConstructor } = require('@cucumber/cucumber');
 const { chromium } = require('playwright');
+const { resolvePathForWorld } = require('./googleIntegrationStorage');
 
 function isHeadlessRun() {
   return (
@@ -9,14 +10,22 @@ function isHeadlessRun() {
   );
 }
 
+/** Headed runs keep the browser open after tests unless KEEP_BROWSER=false. */
+function shouldKeepBrowserOpen() {
+  if (process.env.KEEP_BROWSER === 'false') return false;
+  if (process.env.KEEP_BROWSER === 'true') return true;
+  return !isHeadlessRun();
+}
+
 let sharedSession = null;
 
 async function ensureSharedSession() {
   if (sharedSession) {
     const { browser, context, page } = sharedSession;
+    const browserAlive = browser && browser.isConnected();
     // Recover if a prior run closed the page/context unexpectedly.
-    if (page && !page.isClosed()) return sharedSession;
-    if (context) {
+    if (browserAlive && page && !page.isClosed()) return sharedSession;
+    if (browserAlive && context) {
       const newPage = await context.newPage().catch(() => null);
       if (newPage) {
         sharedSession = { browser, context, page: newPage };
@@ -24,18 +33,32 @@ async function ensureSharedSession() {
       }
     }
     // If we can't recover cleanly, drop the session and recreate.
+    await browser?.close().catch(() => {});
     sharedSession = null;
   }
 
   const headless = isHeadlessRun();
+  const keepOpen = shouldKeepBrowserOpen();
   const browser = await chromium.launch({
     headless,
-    args: headless ? [] : ['--start-maximized']
+    args: headless ? [] : ['--start-maximized'],
+    // Keep Chromium alive if the test process is interrupted while inspecting.
+    handleSIGINT: !keepOpen,
+    handleSIGTERM: !keepOpen,
+    handleSIGHUP: !keepOpen,
   });
 
-  const context = await browser.newContext({
-    viewport: headless ? { width: 1280, height: 720 } : null
-  });
+  const contextOptions = {
+    viewport: headless ? { width: 1280, height: 720 } : null,
+  };
+
+  const storageStatePath = resolvePathForWorld();
+  if (storageStatePath) {
+    console.log(`[World] Loading browser storage state from ${storageStatePath}`);
+    contextOptions.storageState = storageStatePath;
+  }
+
+  const context = await browser.newContext(contextOptions);
 
   const page = await context.newPage();
   sharedSession = { browser, context, page };
@@ -55,6 +78,16 @@ class CustomWorld {
     this.browser = session.browser;
     this.context = session.context;
     this.page = session.page;
+    // Drop stale page objects if the shared page was recreated.
+    this.myOrganizationPage = null;
+    this.myAccountPage = null;
+    this.warehousePage = null;
+    this.servicesPage = null;
+    this.vendorLoginPage = null;
+    this.vendorProfilePage = null;
+    this.vendorOrganizationPage = null;
+    this.vendorProductsPage = null;
+    this.vendorServicesPage = null;
   }
 
   async cleanup() {
@@ -76,4 +109,4 @@ class CustomWorld {
 
 setWorldConstructor(CustomWorld);
 
-module.exports = { closeSharedSession };
+module.exports = { closeSharedSession, shouldKeepBrowserOpen };

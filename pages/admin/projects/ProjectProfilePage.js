@@ -21,6 +21,13 @@ class ProjectProfilePage extends BasePage {
     let heading = this._visibleHeading(name);
 
     if (!(await heading.isVisible({ timeout: 3000 }).catch(() => false))) {
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      await this.page.waitForLoadState('networkidle', { timeout: 12000 }).catch(() => {});
+      await this.page.waitForTimeout(1200);
+      heading = this._visibleHeading(name);
+    }
+
+    if (!(await heading.isVisible({ timeout: 3000 }).catch(() => false))) {
       const ProjectNavigationPage = require('./ProjectNavigationPage');
       const nav = new ProjectNavigationPage(this.page);
       if (!(await nav.returnToProjectProfile())) {
@@ -81,6 +88,13 @@ class ProjectProfilePage extends BasePage {
       return;
     }
 
+    if ((name || '').trim().toLowerCase() === 'proposal') {
+      const ProposalPage = require('../common/ProposalPage');
+      const proposalPage = new ProposalPage(this.page);
+      await proposalPage.openProposalTab();
+      return;
+    }
+
     // Targeted fallback for Estimate card: the UI has multiple "Estimate" text nodes
     // and generic card/container matching can sometimes click the wrong module.
     // This mirrors the stable selector observed in Playwright inspector for this app.
@@ -138,6 +152,12 @@ class ProjectProfilePage extends BasePage {
       await taskCard.scrollIntoViewIfNeeded().catch(() => {});
       await taskCard.click({ timeout: taskTimeout });
       await this.page.waitForLoadState('domcontentloaded');
+      return;
+    }
+
+    // Budgeting card: same Project Management grid; generic card matching often misses it after module hops.
+    if ((name || '').trim().toLowerCase() === 'budgeting') {
+      await this.clickBudgetingModuleCard(scope, text);
       return;
     }
 
@@ -291,6 +311,61 @@ class ProjectProfilePage extends BasePage {
         { timeout: scheduleTimeout, intervals: [500, 1000, 2000] }
       )
       .toBe(true);
+  }
+
+  /**
+   * Project Management → Budgeting tile.
+   * Inspector path: <p class="MuiTypography-root MuiTypography-body1">Budgeting</p>
+   */
+  async clickBudgetingModuleCard(scope, text) {
+    const href = this.page.url();
+
+    if (/tab=Budgeting|tab=Budget/i.test(href)) {
+      return;
+    }
+
+    const pmHeading = this._visibleHeading('Project Management');
+    if (await pmHeading.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await pmHeading.click({ timeout: 10000 }).catch(() => {});
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      await this.page.waitForTimeout(800).catch(() => {});
+    }
+
+    // Exact user path (avoid generated css-* hash). Prefer page-wide so main-scope misses still work.
+    const budgetingLabel = this.page
+      .locator('p.MuiTypography-root.MuiTypography-body1')
+      .filter({ hasText: /^Budgeting$/i })
+      .first();
+
+    await expect(budgetingLabel).toBeVisible({ timeout: 40000 });
+    await budgetingLabel.scrollIntoViewIfNeeded().catch(() => {});
+    await budgetingLabel.click({ timeout: 15000 }).catch(async () => {
+      await budgetingLabel.click({ timeout: 15000, force: true });
+    });
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.page.waitForTimeout(800).catch(() => {});
+
+    const landedUrl = this.page.url();
+    const onBudgeting =
+      /tab=Budgeting|tab=Budget/i.test(landedUrl) ||
+      (await this.page.getByText(/actual\s*budget/i).first().isVisible({ timeout: 8000 }).catch(() => false)) ||
+      (await this.page.locator('table').filter({ visible: true }).first().isVisible({ timeout: 5000 }).catch(() => false));
+
+    if (onBudgeting) {
+      return;
+    }
+
+    const projectMatch = href.match(/projectId=([^&]+)/i) || this.page.url().match(/projectId=([^&]+)/i);
+    const clientMatch = href.match(/clientId=([^&]+)/i) || this.page.url().match(/clientId=([^&]+)/i);
+    if (projectMatch && clientMatch) {
+      const base = this.page.url().split('?')[0];
+      const budgetingUrl = `${base}?projectId=${projectMatch[1]}&isActive=true&tab=Budgeting&clientId=${clientMatch[1]}`;
+      await this.page.goto(budgetingUrl, { waitUntil: 'domcontentloaded' });
+      await this.page.waitForURL(/tab=Budgeting|tab=Budget/i, { timeout: 60000 }).catch(() => {});
+      return;
+    }
+
+    throw new Error('Could not open Budgeting module via p.MuiTypography-body1 "Budgeting".');
   }
 
   async clickPurchaseOrderModuleCard(scope, text) {

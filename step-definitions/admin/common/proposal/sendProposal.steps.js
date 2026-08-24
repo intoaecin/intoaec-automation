@@ -65,6 +65,11 @@ When('I open the choose proposal modal', { timeout: 120000 }, async function () 
   await proposalPage.openChooseProposalModal();
 });
 
+When('I select {string} in the proposal category dropdown', { timeout: 120000 }, async function (category) {
+  const proposalPage = getProposalPage(this);
+  await proposalPage.selectProposalCategory(category);
+});
+
 When('I choose the default proposal template', { timeout: 120000 }, async function () {
   const proposalPage = getProposalPage(this);
   await proposalPage.chooseDefaultProposal();
