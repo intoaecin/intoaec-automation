@@ -14,14 +14,34 @@ When('I navigate to the Projects page', { timeout: 120000 }, async function () {
   await projectNavigationPage.navigateToProjects();
 });
 
-When('I click on the first project in the list', { timeout: 120000 }, async function () {
+When('I navigate to the Admin Active Clients list', { timeout: 120000 }, async function () {
+  const projectNavigationPage = new ProjectNavigationPage(this.page);
+  await projectNavigationPage.navigateToActiveClientsList();
+});
+
+When('I open the project {string} profile directly', { timeout: 120000 }, async function (projectName) {
+  const projectNavigationPage = new ProjectNavigationPage(this.page);
+  await projectNavigationPage.openProjectProfileDirect(projectName);
+});
+
+When('I ensure the classic project profile UI is shown', { timeout: 120000 }, async function () {
   const projectProfilePage = new ProjectProfilePage(this.page);
-  if (await projectProfilePage.isInsideProjectProfile()) {
-    console.log('Already on project profile — skipping project selection');
-    return;
-  }
+  await projectProfilePage.ensureClassicProjectUi();
+});
+
+When('I click on the first project in the list', { timeout: 120000 }, async function () {
   const projectNavigationPage = new ProjectNavigationPage(this.page);
   await projectNavigationPage.clickFirstProject();
+});
+
+When('I click on the project {string} in the list', { timeout: 120000 }, async function (projectName) {
+  const projectNavigationPage = new ProjectNavigationPage(this.page);
+  await projectNavigationPage.clickProjectByName(projectName);
+});
+
+When('I select the client {string}', { timeout: 120000 }, async function (clientName) {
+  const projectNavigationPage = new ProjectNavigationPage(this.page);
+  await projectNavigationPage.clickProjectByName(clientName);
 });
 
 When('I select the {string} heading', { timeout: 120000 }, async function (headingName) {

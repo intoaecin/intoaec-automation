@@ -162,11 +162,23 @@ module.exports = {
       'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
     ],
   },
-  /** Vendor portal — all TCs (unique tag; does not include PO @vendor tests) */
+  /** Vendor portal — all TCs including TC-11 (unique tag; does not include PO @vendor tests) */
   'vendor-portal': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
     format: ['progress', 'html:reports/cucumber-report.html'],
     publishQuiet: true,
     tags: '@vendor-portal',
+  },
+  'vendor-all': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    tags: '@vendor-all',
+  },
+  'vendor-tc01-tc11': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    tags: '@vendor-tc01-tc11',
   },
 };

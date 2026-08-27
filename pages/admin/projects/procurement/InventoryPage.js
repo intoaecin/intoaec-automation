@@ -27,14 +27,21 @@ class InventoryPage extends BasePage {
     return this.addItemsButton.isVisible({ timeout: 1500 }).catch(() => false);
   }
 
-  /** Codegen: getByText('Inventory').click() */
+  /** Codegen: getByText('Inventory').click() — also matches tab/button roles. */
   async clickInventoryInProject() {
     if (await this.isOnInventoryModule()) {
       await this.logStep('Already on Inventory module');
       return;
     }
 
-    const inventoryTab = this.page.getByText('Inventory', { exact: true }).filter({ visible: true }).first();
+    const inventoryTab = this.page
+      .getByRole('tab', { name: /^\s*inventory\s*$/i })
+      .or(this.page.getByRole('button', { name: /^\s*inventory\s*$/i }))
+      .or(this.page.getByRole('link', { name: /^\s*inventory\s*$/i }))
+      .or(this.page.locator('.MuiTab-root, [role="tab"]').filter({ hasText: /^\s*inventory\s*$/i }))
+      .or(this.page.getByText('Inventory', { exact: true }))
+      .filter({ visible: true })
+      .first();
     await expect(inventoryTab).toBeVisible({ timeout: this.defaultTimeout });
     await inventoryTab.click({ timeout: 20000, force: true });
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
@@ -47,6 +54,28 @@ class InventoryPage extends BasePage {
 
   async waitForModuleToLoad() {
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    if (await this.createGroupButton.isVisible({ timeout: 20000 }).catch(() => false)) {
+      await this.logStep('Inventory page is displayed');
+      return;
+    }
+
+    // Tab click sometimes does not mount Create Group — open Inventory via profile URL.
+    const u = new URL(this.page.url());
+    const projectId = u.searchParams.get('projectId');
+    const clientId = u.searchParams.get('clientId');
+    if (projectId) {
+      await this.page.goto(
+        `https://app.aecplayhouse.com/client/profile?projectId=${projectId}&isActive=true&tab=Inventory${
+          clientId ? `&clientId=${clientId}` : ''
+        }`,
+        { waitUntil: 'domcontentloaded' }
+      );
+      await this.page
+        .waitForLoadState('networkidle', { timeout: 20000 })
+        .catch(() => {});
+      await this.logStep('Opened Inventory via profile URL fallback');
+    }
+
     await expect(this.createGroupButton).toBeVisible({ timeout: this.defaultTimeout });
     await this.logStep('Inventory page is displayed');
   }
@@ -86,18 +115,35 @@ class InventoryPage extends BasePage {
       .first();
   }
 
-  /** Codegen: paragraph / card / text containing the created group name on the inventory list. */
+  /** Visible label/card for a created inventory group (single locator — avoid .or() strict-mode). */
   createdGroupLocator(name) {
     const escaped = this.escapeRegex(name);
-    const shortToken = this.escapeRegex(String(name).split(/\s+/).pop() || name);
+    const exact = new RegExp(`^\\s*${escaped}\\s*$`, 'i');
+    // Prefer a tight title node (span/p) — avoid .or() chains that break expect() strict mode.
     return this.page
-      .getByRole('paragraph')
-      .filter({ hasText: new RegExp(escaped, 'i') })
-      .first()
-      .or(this.page.getByText(new RegExp(escaped, 'i')).first())
-      .or(this.main.locator('p, h1, h2, h3, h4, h5, h6, [class*="Card"], [class*="card"]')
-        .filter({ hasText: new RegExp(shortToken, 'i') })
-        .first());
+      .locator('span, p, h1, h2, h3, h4, h5, h6')
+      .filter({ hasText: exact })
+      .filter({ visible: true })
+      .first();
+  }
+
+  /** Prefer the clickable card/row for the recently created group (newest match first). */
+  createdGroupClickTarget(name) {
+    const escaped = this.escapeRegex(name);
+    const exact = new RegExp(`^\\s*${escaped}\\s*$`, 'i');
+    const contains = new RegExp(escaped, 'i');
+    const exactLabel = this.page
+      .locator('span, p, h1, h2, h3, h4, h5, h6, button, a')
+      .filter({ hasText: exact })
+      .filter({ visible: true })
+      .first();
+    // Resolve one element only — do not chain .or() into expect().
+    return exactLabel
+      .locator(
+        'xpath=ancestor::*[contains(@class,"Card") or contains(@class,"card") or contains(@class,"MuiPaper") or @role="button"][1]'
+      )
+      .or(exactLabel)
+      .first();
   }
 
   async waitForCreateGroupDialogClosed() {
@@ -143,19 +189,42 @@ class InventoryPage extends BasePage {
       throw new Error('No inventory group name to verify.');
     }
 
-    if (await this.addItemsButton.isVisible({ timeout: 5000 }).catch(() => false)) {
+    if (await this.addItemsButton.isVisible({ timeout: 8000 }).catch(() => false)) {
       await this.logStep(`Created inventory group opened directly: ${name}`);
       return;
     }
 
-    const group = this.createdGroupLocator(name);
-    await expect(group).toBeVisible({ timeout: this.defaultTimeout });
+    await this.page
+      .waitForLoadState('networkidle', { timeout: 15000 })
+      .catch(() => {});
+
+    const escaped = this.escapeRegex(name);
+    const title = this.page
+      .locator('span, p, h1, h2, h3, h4, h5, h6')
+      .filter({ hasText: new RegExp(`^\\s*${escaped}\\s*$`, 'i') })
+      .filter({ visible: true })
+      .first();
+
+    if (!(await title.isVisible({ timeout: 20000 }).catch(() => false))) {
+      await this.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+      await this.waitForModuleToLoad().catch(() => {});
+    }
+    await expect(title).toBeVisible({ timeout: this.defaultTimeout });
     await this.logStep(`Created inventory group visible: ${name}`);
   }
 
+  addItemsControl() {
+    return this.page
+      .getByRole('button', { name: /add items?/i })
+      .or(this.page.getByRole('link', { name: /add items?/i }))
+      .or(this.page.getByText(/^add items?$/i))
+      .filter({ visible: true })
+      .first();
+  }
+
   /**
-   * Codegen: click created group name → close overlay → Add Items visible.
-   * Skips the click when the app already lands on the group detail page.
+   * Click the recently created inventory group, then wait until Add Items is ready.
+   * Do not click generic "close" after open — that can leave the group detail.
    */
   async openCreatedInventoryGroup() {
     const name = this.lastCreatedGroupName;
@@ -163,25 +232,98 @@ class InventoryPage extends BasePage {
       throw new Error('No inventory group name to open.');
     }
 
-    if (await this.addItemsButton.isVisible({ timeout: 5000 }).catch(() => false)) {
+    const addItems = this.addItemsControl();
+    if (await addItems.isVisible({ timeout: 3000 }).catch(() => false)) {
       await this.logStep(`Already inside inventory group detail: ${name}`);
       return;
     }
 
-    const group = this.createdGroupLocator(name);
-    await expect(group).toBeVisible({ timeout: this.defaultTimeout });
-    await group.scrollIntoViewIfNeeded().catch(() => {});
-    await group.click({ timeout: 20000, force: true });
-    await this.logStep(`Clicked created inventory group: ${name}`);
+    // After Item Requests / Add to Group we are not on the groups list — leave first.
+    // Otherwise clicks hit the Group Name cell in the requests table and never open detail.
+    await this.ensureOnInventoryGroupsList();
 
-    await this.dismissInventoryOverlayIfPresent();
+    const deadline = Date.now() + this.defaultTimeout;
+    let lastError = null;
+    while (Date.now() < deadline) {
+      const group = this.createdGroupClickTarget(name);
+      if (!(await group.isVisible({ timeout: 3000 }).catch(() => false))) {
+        await this.page.waitForTimeout(800);
+        continue;
+      }
+      await group.scrollIntoViewIfNeeded().catch(() => {});
+      await group.click({ timeout: 20000, force: true }).catch((e) => {
+        lastError = e;
+      });
+      await this.logStep(`Clicked recently created inventory group: ${name}`);
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      await this.page.waitForTimeout(600);
 
-    await expect(this.addItemsButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.logStep(`Opened inventory group: ${name}`);
+      if (await addItems.isVisible({ timeout: 8000 }).catch(() => false)) {
+        await this.logStep(`Opened inventory group (Add Items ready): ${name}`);
+        return;
+      }
+      // Soft retry — wrong click target or slow navigation.
+      lastError = new Error(`Add Items not visible after opening group "${name}"`);
+      await this.page.waitForTimeout(1000);
+    }
+
+    throw lastError || new Error(`Could not open recently created inventory group "${name}"`);
+  }
+
+  /** Leave Item Requests (or other sub-views) so Create Group / group cards are available. */
+  async ensureOnInventoryGroupsList() {
+    if (await this.createGroupButton.isVisible({ timeout: 2500 }).catch(() => false)) {
+      return;
+    }
+
+    const onRequests =
+      /inventory-management\/requests/i.test(this.page.url()) ||
+      (await this.page
+        .getByText(/item requests?/i)
+        .filter({ visible: true })
+        .first()
+        .isVisible({ timeout: 1500 })
+        .catch(() => false));
+
+    if (onRequests || !(await this.createGroupButton.isVisible({ timeout: 1000 }).catch(() => false))) {
+      const inventory = this.page
+        .getByRole('tab', { name: /^\s*inventory\s*$/i })
+        .or(this.page.getByRole('button', { name: /^\s*inventory\s*$/i }))
+        .or(this.page.getByRole('link', { name: /^\s*inventory\s*$/i }))
+        .or(this.page.locator('a, button, span').filter({ hasText: /^\s*inventory\s*$/i }))
+        .filter({ visible: true })
+        .first();
+
+      if (await inventory.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await inventory.click({ timeout: 15000, force: true });
+        await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+        await this.page.waitForTimeout(800);
+      }
+
+      if (!(await this.createGroupButton.isVisible({ timeout: 8000 }).catch(() => false))) {
+        const u = new URL(this.page.url());
+        const projectId = u.searchParams.get('projectId');
+        const clientId = u.searchParams.get('clientId');
+        if (projectId) {
+          await this.page.goto(
+            `https://app.aecplayhouse.com/client/profile?projectId=${projectId}&isActive=true&tab=Inventory${
+              clientId ? `&clientId=${clientId}` : ''
+            }`,
+            { waitUntil: 'domcontentloaded' }
+          );
+        }
+      }
+    }
+
+    await expect(this.createGroupButton).toBeVisible({ timeout: this.defaultTimeout });
+    await this.logStep('On Inventory groups list (ready to open group)');
   }
 
   async clickAddItem() {
-    await this.addItemsButton.click({ timeout: 20000 });
+    const addItems = this.addItemsControl();
+    await expect(addItems).toBeVisible({ timeout: this.defaultTimeout });
+    await addItems.click({ timeout: 20000 });
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
     await this.logStep('Clicked Add Items');
   }
 

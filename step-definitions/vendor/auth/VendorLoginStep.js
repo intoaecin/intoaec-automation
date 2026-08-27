@@ -19,6 +19,7 @@ const VENDOR_TEST_CASE_LOG = {
   TC08: 'TC-08 — Upload and update vendor My Organization E-Signature',
   TC09: 'TC-09 — Add vendor product Premium Ceramic Floor Tile from scratch',
   TC10: 'TC-10 — Add vendor service Interior Design Consultation',
+  TC11: 'TC-11 — Invite vendor from Admin Portal, register from Yopmail, and verify Accepted status',
 };
 
 Before({ tags: '@vendor-login' }, async function ({ pickle }) {
@@ -111,6 +112,9 @@ When('I click the vendor Sign In button', async function () {
 });
 
 Then('I should be logged in to the vendor portal successfully', async function () {
+  if (this.vendorPortalPage && !this.vendorPortalPage.isClosed()) {
+    this.page = this.vendorPortalPage;
+  }
   const vendorLoginPage = getVendorLoginPage(this);
   await vendorLoginPage.expectLoggedInSuccessfully();
 });
@@ -529,7 +533,7 @@ When('I click the vendor signature upload area', async function () {
   await vendorOrganizationPage.clickSignatureUploadArea();
 });
 
-When('I upload the vendor signature file {string}', { timeout: 120000 }, async function (fileName) {
+When('I upload the vendor signature file {string}', async function (fileName) {
   const vendorOrganizationPage = getVendorOrganizationPage(this);
   await vendorOrganizationPage.uploadSignatureFile(fileName);
 });

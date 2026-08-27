@@ -88,6 +88,8 @@ class CustomWorld {
     this.vendorOrganizationPage = null;
     this.vendorProductsPage = null;
     this.vendorServicesPage = null;
+    this.inviteVendorPage = null;
+    this.vendorRfqPage = null;
   }
 
   async cleanup() {

@@ -14,10 +14,114 @@ class ProjectProfilePage extends BasePage {
   }
 
   _visibleHeading(name) {
-    return this.page.getByRole('button', { name }).filter({ visible: true }).first();
+    const exact = new RegExp(`^\\s*${String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+    return this.page
+      .getByRole('tab', { name: exact })
+      .or(this.page.getByRole('button', { name: exact }))
+      .or(this.page.locator('.MuiTab-root, [role="tab"]').filter({ hasText: exact }))
+      .filter({ visible: true })
+      .first();
+  }
+
+  /**
+   * Classic project profile (screenshot): header "New UI" toggle must be OFF.
+   * When ON, module tiles / Procurement tabs differ from the automation selectors.
+   */
+  async ensureClassicProjectUi() {
+    const url = String(this.page.url() || '');
+    if (!/\/client\/profile|\/project\//i.test(url)) {
+      return false;
+    }
+
+    const newUiLabel = this.page.getByText(/^New\s*UI$/i).filter({ visible: true }).first();
+    if (!(await newUiLabel.isVisible({ timeout: 2500 }).catch(() => false))) {
+      console.log('[ProjectProfile] Classic UI already active (no New UI toggle found)');
+      return true;
+    }
+
+    const switchControl = this.page
+      .getByRole('switch', { name: /new\s*ui/i })
+      .or(
+        newUiLabel
+          .locator(
+            'xpath=ancestor::*[.//input[@type="checkbox"] or .//*[@role="switch"]][1]//input[@type="checkbox"] | ancestor::*[.//*[@role="switch"]][1]//*[@role="switch"]'
+          )
+          .first()
+      )
+      .or(this.page.locator('header input[type="checkbox"], header [role="switch"]').filter({ visible: true }).last())
+      .filter({ visible: true })
+      .first();
+
+    // MUI Switch: often the input is visually near the "New UI" text.
+    const muiSwitch = this.page
+      .locator('span.MuiSwitch-root, label')
+      .filter({ has: this.page.getByText(/^New\s*UI$/i) })
+      .locator('input[type="checkbox"], [role="switch"]')
+      .filter({ visible: true })
+      .first()
+      .or(
+        this.page
+          .locator('header, [class*="AppBar"], [class*="Toolbar"]')
+          .locator('.MuiSwitch-root input[type="checkbox"], [role="switch"]')
+          .filter({ visible: true })
+          .first()
+      );
+
+    const control = (await switchControl.isVisible({ timeout: 1500 }).catch(() => false))
+      ? switchControl
+      : muiSwitch;
+
+    if (!(await control.isVisible({ timeout: 3000 }).catch(() => false))) {
+      // Click the label area / nearest switch sibling.
+      const nearSwitch = newUiLabel
+        .locator('xpath=following::input[@type="checkbox"][1] | preceding::input[@type="checkbox"][1] | following::*[@role="switch"][1] | preceding::*[@role="switch"][1]')
+        .first();
+      if (await nearSwitch.isVisible({ timeout: 2000 }).catch(() => false)) {
+        const checked =
+          (await nearSwitch.getAttribute('aria-checked').catch(() => null)) === 'true' ||
+          (await nearSwitch.isChecked().catch(() => false));
+        if (checked) {
+          await nearSwitch.click({ timeout: 10000, force: true });
+          await this.page.waitForTimeout(1200).catch(() => {});
+          console.log('[ProjectProfile] Turned OFF New UI toggle (classic profile)');
+        } else {
+          console.log('[ProjectProfile] New UI toggle already OFF — classic profile');
+        }
+        return true;
+      }
+      console.log('[ProjectProfile] Could not locate New UI switch — continuing');
+      return false;
+    }
+
+    const checked =
+      (await control.getAttribute('aria-checked').catch(() => null)) === 'true' ||
+      (await control.isChecked().catch(() => false));
+
+    if (checked) {
+      await control.click({ timeout: 10000, force: true }).catch(async () => {
+        await newUiLabel.click({ timeout: 10000, force: true });
+      });
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      await this.page.waitForTimeout(1500).catch(() => {});
+      console.log(`[ProjectProfile] Turned OFF New UI — classic grid (${this.page.url()})`);
+    } else {
+      console.log('[ProjectProfile] New UI already OFF — classic project profile');
+    }
+
+    // Classic markers: All / Procurement tabs + RFQ tile text.
+    const classicMarker = this.page
+      .getByRole('tab', { name: /^all$/i })
+      .or(this.page.getByRole('button', { name: /^procurement$/i }))
+      .or(this.page.getByText(/^RFQ$/i))
+      .filter({ visible: true })
+      .first();
+    await classicMarker.isVisible({ timeout: 8000 }).catch(() => false);
+    return true;
   }
 
   async selectHeading(name) {
+    await this.ensureClassicProjectUi();
+
     let heading = this._visibleHeading(name);
 
     if (!(await heading.isVisible({ timeout: 3000 }).catch(() => false))) {
@@ -34,19 +138,35 @@ class ProjectProfilePage extends BasePage {
         await nav.openClientsProjectsList();
         await nav.clickFirstProject();
       }
+      await this.ensureClassicProjectUi();
       heading = this._visibleHeading(name);
     }
 
     await expect(heading).toBeVisible({ timeout: 60000 });
     await heading.scrollIntoViewIfNeeded().catch(() => {});
     await heading.click();
+    await this.page.waitForTimeout(600).catch(() => {});
   }
 
-  /** True when the project profile hub is open (Project Management tab visible). */
+  /** True when the classic project profile hub is open (any main section heading). */
   async isInsideProjectProfile() {
-    return this._visibleHeading('Project Management')
-      .isVisible({ timeout: 2000 })
-      .catch(() => false);
+    const headings = [
+      'Project Management',
+      'Procurement',
+      'Design & Estimates',
+      'Financial',
+      'Communication & Docs',
+    ];
+    for (const name of headings) {
+      if (await this._visibleHeading(name).isVisible({ timeout: 800 }).catch(() => false)) {
+        return true;
+      }
+    }
+    const url = String(this.page.url() || '');
+    if (/\/client\/profile|\/project\//i.test(url) && !/\/client(\?|$)/i.test(url)) {
+      return true;
+    }
+    return false;
   }
 
   async clickModuleCard(name) {
@@ -69,6 +189,11 @@ class ProjectProfilePage extends BasePage {
 
     if ((name || '').trim().toLowerCase() === 'indent') {
       await this.clickIndentModuleCard(scope, text);
+      return;
+    }
+
+    if ((name || '').trim().toLowerCase() === 'rfq') {
+      await this.clickRfqModuleCard(scope, text);
       return;
     }
 
@@ -492,6 +617,97 @@ class ProjectProfilePage extends BasePage {
       return;
     }
     await woTab.click({ timeout: 10000, force: true }).catch(() => {});
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+  }
+
+  async clickRfqModuleCard(scope, text) {
+    const createRfq = this.page.getByRole('button', { name: /create rfq/i }).first();
+
+    if (await createRfq.isVisible({ timeout: 1500 }).catch(() => false)) {
+      return;
+    }
+
+    const href = this.page.url();
+    if (/tab=RFQAndPO/i.test(href) && /subTab=RFQ(?:&|$)/i.test(href)) {
+      await this.activateRfqSubTabIfPresent();
+      if (await createRfq.isVisible({ timeout: 5000 }).catch(() => false)) {
+        return;
+      }
+    }
+
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.page.waitForTimeout(800).catch(() => {});
+
+    // Classic project profile tile (screenshot): p.MuiTypography-body1 "RFQ"
+    const rfqLabel = this.page
+      .locator('p.MuiTypography-root.MuiTypography-body1')
+      .filter({ hasText: /^RFQ$/i })
+      .filter({ visible: true })
+      .first();
+
+    const candidates = [
+      rfqLabel,
+      this.page.locator('div').filter({ hasText: /^RFQ$/i }).nth(1),
+      scope.locator('div').filter({ hasText: /^RFQ$/i }).nth(1),
+      scope.getByRole('tab', { name: /^rfq$/i }).first(),
+      scope.getByText(/^RFQ$/i).filter({ visible: true }).first(),
+      scope.getByRole('button', { name: /^rfq$/i }).first(),
+      scope
+        .locator(
+          '[role="tab"], .MuiTab-root, .MuiCard-root, .MuiPaper-root, [role="button"], button, a, [role="link"], div.MuiBox-root'
+        )
+        .filter({ hasText: text })
+        .first(),
+      this.page.getByText(/request\s*for\s*quotation/i).filter({ visible: true }).first(),
+    ];
+
+    for (const candidate of candidates) {
+      if (!(await candidate.isVisible({ timeout: 2000 }).catch(() => false))) {
+        continue;
+      }
+
+      await candidate.scrollIntoViewIfNeeded().catch(() => {});
+      const clicked = await candidate
+        .click({ timeout: 10000, force: true })
+        .then(() => true)
+        .catch(() => false);
+      if (!clicked) {
+        continue;
+      }
+
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      await this.page
+        .waitForLoadState('networkidle', { timeout: 15000 })
+        .catch(() => {});
+      await this.activateRfqSubTabIfPresent();
+
+      if (await createRfq.isVisible({ timeout: 10000 }).catch(() => false)) {
+        return;
+      }
+    }
+
+    const projectMatch = href.match(/projectId=([^&]+)/i) || this.page.url().match(/projectId=([^&]+)/i);
+    const clientMatch = href.match(/clientId=([^&]+)/i) || this.page.url().match(/clientId=([^&]+)/i);
+    if (projectMatch && clientMatch) {
+      const base = this.page.url().split('?')[0];
+      const rfqUrl = `${base}?projectId=${projectMatch[1]}&isActive=true&tab=RFQAndPO&subTab=RFQ&clientId=${clientMatch[1]}`;
+      await this.page.goto(rfqUrl, { waitUntil: 'domcontentloaded' });
+      await this.page.waitForURL(/tab=RFQAndPO|tab=RFQ/i, { timeout: 60000 }).catch(() => {});
+      await this.activateRfqSubTabIfPresent();
+    }
+
+    await expect(createRfq).toBeVisible({ timeout: 60000 });
+  }
+
+  async activateRfqSubTabIfPresent() {
+    const rfqTab = this.page.getByRole('tab', { name: /^rfq$/i }).first();
+    if (!(await rfqTab.isVisible({ timeout: 3000 }).catch(() => false))) {
+      return;
+    }
+    if ((await rfqTab.getAttribute('aria-selected').catch(() => null)) === 'true') {
+      return;
+    }
+    await rfqTab.click({ timeout: 10000, force: true }).catch(() => {});
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
   }
 

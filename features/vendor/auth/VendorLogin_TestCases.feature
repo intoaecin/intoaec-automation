@@ -21,9 +21,12 @@
 #   TC-09 — Products → Add Product → Start From Scratch → Save Premium Ceramic Floor Tile
 # TS-10 Add Service — @TS10 @TC10
 #   TC-10 — Services → Create New → Interior Design Consultation → Save
+# TS-11 Invite Vendor — @TS11 @TC11
+#   TC-11 — Admin Invite Vendor → send invite → Yopmail → register with OTP → status Accepted
 #
-# Run ALL vendor portal TCs (this tag is unique — does not pick PO @vendor tests):
-#   npx.cmd cucumber-js --tags "@vendor-portal"
+# Run ALL vendor portal TCs from TC-01 to TC-11:
+#   npx.cmd cucumber-js --tags "@vendor-tc01-tc11"
+#   npx.cmd cucumber-js --tags "@vendor-all"
 #
 # Run one case (PowerShell: use npx.cmd / npm.cmd — npx.ps1 is blocked by execution policy):
 #   npx.cmd cucumber-js --tags "@vendor-portal and @TC01"
@@ -36,6 +39,7 @@
 #   npx.cmd cucumber-js --tags "@vendor-portal and @TC08"
 #   npx.cmd cucumber-js --tags "@vendor-portal and @TC09"
 #   npx.cmd cucumber-js --tags "@vendor-portal and @TC10"
+#   npx.cmd cucumber-js --tags "@vendor-portal and @TC11"
 #
 # npm:
 #   npm.cmd run test:vendor:auth:login
@@ -49,16 +53,19 @@
 #   npm.cmd run test:vendor:auth:login:tc08
 #   npm.cmd run test:vendor:auth:login:tc09
 #   npm.cmd run test:vendor:auth:login:tc10
+#   npm.cmd run test:vendor:auth:login:tc11
 #
 # Layering: `AGENTS.md` — scenarios here;
 #            logic in pages/vendor/auth/VendorLoginPage.js, pages/vendor/profile/VendorProfilePage.js,
 #            pages/vendor/organization/VendorOrganizationPage.js,
 #            pages/vendor/products/VendorProductsPage.js,
-#            pages/vendor/services/VendorServicesPage.js;
-#            step-definitions/vendor/auth/VendorLoginStep.js
+#            pages/vendor/services/VendorServicesPage.js,
+#            pages/admin/invite/InviteVendorPage.js (TC-11);
+#            step-definitions/vendor/auth/VendorLoginStep.js,
+#            step-definitions/admin/invite/InviteVendor.steps.js (TC-11)
 # -----------------------------------------------------------------------------
 
-@vendor @vendor-portal @vendor-login
+@vendor @vendor-portal @vendor-login @vendor-all @vendor-tc01-tc11
 Feature: Vendor Portal — incremental test cases
 
   # ===========================================================================
@@ -217,6 +224,7 @@ Feature: Vendor Portal — incremental test cases
 
   # ===========================================================================
   # TS-08 — E-Signature Upload (@TS08 @TC08)
+  # File upload is skipped so the suite can continue to TC-09..TC-11.
   # ===========================================================================
 
   @TS08 @TC08 @smoke @regression @positive
@@ -287,3 +295,47 @@ Feature: Vendor Portal — incremental test cases
     And I should see vendor service success toast "Service added successfully."
     When I navigate back to the vendor Service List
     Then the vendor service "Interior Design Consultation" should be displayed in the Service List
+
+  # ===========================================================================
+  # TS-11 — Invite Vendor (@TS11 @TC11)
+  # Admin Portal invite → Yopmail invitation → vendor registration (manual OTP) → Accepted
+  # OTP is entered manually; the scenario pauses at that step.
+  # ===========================================================================
+
+  @TS11 @TC11 @smoke @regression @positive @invite-vendor @yopmail
+  Scenario: TC-11 — Invite vendor from Admin Portal, register from Yopmail, and verify Accepted status
+    Given I am logged in
+    When I navigate to Invite Vendor
+    And I click the Send Invite Vendor option
+    And I fill the invite vendor first name with "Bhavani"
+    And I fill the invite vendor last name with "MM"
+    And I fill the invite vendor email with "bhavanimm@yopmail.com"
+    And I fill the invite vendor organization name with "Intoaec Org"
+    And I fill the invite vendor phone number with "7305570607"
+    And I fill the invite vendor tax name with "abc2002"
+    And I click the Send Invite button
+    Then the vendor invitation should be sent successfully
+    And the invite vendor status should be displayed as "Pending"
+    When I open Yopmail for "bhavanimm@yopmail.com"
+    And I wait for the vendor invitation email to be received
+    Then the vendor invitation email should be received successfully
+    And the vendor invitation email should show vendor name "Bhavani MM"
+    And the vendor invitation email should show organization name "Intoaec Org"
+    And the vendor invitation email should contain an invitation link
+    When I extract and open the vendor invitation URL
+    Then the Vendor Registration page should be displayed
+    When I enter the vendor registration mobile number "7305570607"
+    And I click the Request OTP button
+    And I wait for the OTP to be received
+    And I enter the received OTP manually
+    And I verify the vendor registration OTP
+    And I fill the vendor registration password with "Simple@10"
+    And I fill the vendor registration confirm password with "Simple@10"
+    And I click the vendor registration Proceed or Login button
+    When I refresh the vendor portal and sign in with the invited credentials
+    Then I should be logged in to the vendor portal successfully
+    When I switch back to the Admin Portal
+    And I refresh the Invite Vendor list
+    And I search the Invite Vendor list for "bhavanimm@yopmail.com"
+    Then the invite vendor status should be displayed as "Accepted"
+    And the invite vendor Edit, Delete, and Resend buttons should not be displayed

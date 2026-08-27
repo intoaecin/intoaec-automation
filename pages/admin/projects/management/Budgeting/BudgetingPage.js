@@ -349,6 +349,8 @@ class BudgetingPage extends BasePage {
       throw new Error(`Could not read Actual Budget Unallocated values from: ${text}`);
     }
     return this.parseMoney(match[1]);
+  }
+
   /**
    * Actual Budget card: Unallocated label sits next to "$remaining / $total".
    * Inspector: span "Unallocated" → sibling box → span "$3,050 / $3,050"
@@ -1181,52 +1183,6 @@ class BudgetingPage extends BasePage {
     }
   }
 
-  async setScheduleActualBudget(name, amount) {
-    await this.focusBudgetingScheduleTable();
-    const row = this.scheduleRow(name);
-    await expect(row).toBeVisible({ timeout: this.uiTimeout });
-    const visibleZeroBudgetCell = row
-      .locator('.MuiBox-root, p, span, div')
-      .filter({ hasText: /^\s*\$?\s*0(?:\.00)?\s*$/ })
-      .last();
-
-    if (await visibleZeroBudgetCell.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await visibleZeroBudgetCell.scrollIntoViewIfNeeded().catch(() => {});
-      await visibleZeroBudgetCell.dblclick({ force: true });
-      const openedInput = this.page
-        .getByRole('spinbutton')
-        .or(row.locator('input[type="number"], input[type="text"], input'))
-        .first();
-      await expect(openedInput).toBeVisible({ timeout: this.uiTimeout });
-      await openedInput.fill('');
-      await openedInput.fill(String(amount));
-      const tickIcon = this.page
-        .locator('.MuiButtonBase-root.MuiIconButton-root.MuiIconButton-sizeSmall.css-p947nl')
-        .or(row.locator('button.MuiIconButton-root').filter({ visible: true }))
-        .first();
-      await expect(tickIcon).toBeVisible({ timeout: this.uiTimeout });
-      await expect(tickIcon).toBeEnabled({ timeout: this.uiTimeout });
-      await tickIcon.click({ force: true });
-      await this.page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-      await this.page.waitForTimeout(2500);
-      this.lastTableBudgetAmount = Number(amount);
-      await this.logStep(`Set actual budget ${amount} on ${name}`);
-      return;
-    }
-    // Actual Budget is typically 5th data column — click money cell
-    const cells = row.locator('td');
-    const cellCount = await cells.count();
-    let target = cells.nth(Math.min(4, cellCount - 1));
-    for (let i = 0; i < cellCount; i++) {
-      const t = await cells.nth(i).innerText().catch(() => '');
-      if (/^[\s₹$€£]?\s*[\d,]+/.test(t.trim()) || t.trim() === '0' || t.includes('—') || t.includes('-')) {
-        // Prefer cells that look like money in budget/cost columns (skip dates)
-        if (!/\d{1,2}[\/\-]\d{1,2}/.test(t) && !/[ap]m/i.test(t)) {
-          target = cells.nth(i);
-          // Actual budget usually before actual cost — take first money-like after assignees
-          if (i >= 3) break;
-        }
-      }
   async _budgetTableColumnIndex(labelRe) {
     const headers = this.budgetSchedulesTable().locator('thead th, thead td');
     const count = await headers.count();

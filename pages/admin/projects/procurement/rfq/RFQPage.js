@@ -35,6 +35,53 @@ class RFQPage extends BasePage {
     ).toBeVisible({ timeout: this.defaultTimeout });
   }
 
+  /**
+   * Project profile → Procurement → RFQ list (Create RFQ visible).
+   * Tile click often misses RFQ (label is typography, not a MuiCard); URL + client menu are fallbacks.
+   */
+  async navigateToRfqModule() {
+    const createRfq = this.page.getByRole('button', { name: /create rfq/i }).first();
+    if (await createRfq.isVisible({ timeout: 2000 }).catch(() => false)) {
+      console.log('Already on RFQ module — skipping navigation');
+      return;
+    }
+
+    const ProjectProfilePage = require('../../ProjectProfilePage');
+    const profile = new ProjectProfilePage(this.page);
+
+    // Screenshot reference: classic profile with New UI OFF + Procurement tab + RFQ tile.
+    await profile.ensureClassicProjectUi();
+
+    const procurementVisible =
+      (await profile.procurementHeading.isVisible({ timeout: 3000 }).catch(() => false)) ||
+      (await profile._visibleHeading('Procurement').isVisible({ timeout: 2000 }).catch(() => false));
+    if (procurementVisible) {
+      await profile.selectHeading('Procurement');
+    }
+
+    try {
+      await profile.clickModuleCard('RFQ');
+    } catch (err) {
+      console.log(`RFQ module card click failed (${err.message}); trying classic RFQ tile`);
+      const rfqTile = this.page
+        .locator('p.MuiTypography-root.MuiTypography-body1')
+        .filter({ hasText: /^RFQ$/i })
+        .filter({ visible: true })
+        .first();
+      if (await rfqTile.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await rfqTile.scrollIntoViewIfNeeded().catch(() => {});
+        await rfqTile.click({ timeout: 15000, force: true });
+        await this.waitForNetworkSettled();
+      } else {
+        const ProjectNavigationPage = require('../../ProjectNavigationPage');
+        const nav = new ProjectNavigationPage(this.page);
+        await nav.openRfqFromClientMenu();
+      }
+    }
+
+    await this.expectRfqPageLoaded();
+  }
+
   rfqStartDialog() {
     return this.page
       .getByRole('dialog')
@@ -131,6 +178,17 @@ class RFQPage extends BasePage {
     const dd = String(d.getDate()).padStart(2, '0');
     const yyyy = String(d.getFullYear());
     return `${yyyy}-${mm}-${dd}`;
+  }
+
+  /**
+   * Compose / attachment flows call this before Action. Keep the RFQ tab focused
+   * and fail fast if Playwright already closed the page.
+   */
+  async ensureActivePage() {
+    if (!this.page || this.page.isClosed()) {
+      throw new Error('RFQ page is closed.');
+    }
+    await this.page.bringToFront().catch(() => {});
   }
 
   async dismissOpenMenusAndPopovers() {
@@ -417,9 +475,9 @@ class RFQPage extends BasePage {
   }
 
   /**
-   * Clicks today's date inside an open MUI X date picker (popper or modal).
+   * Visible MUI date calendar root (popper or modal).
    */
-  async pickTodayFromOpenMuiCalendar() {
+  async getOpenMuiCalendarScope() {
     let calendarScope = this.page
       .locator('.MuiPickersPopper-root')
       .filter({ visible: true })
@@ -435,7 +493,117 @@ class RFQPage extends BasePage {
         })
         .first();
     }
+    return calendarScope;
+  }
 
+  async muiClickPrevMonth(calendarScope) {
+    const named = calendarScope
+      .getByRole('button', { name: /previous month|go to previous month/i })
+      .first();
+    if (await named.isVisible({ timeout: 800 }).catch(() => false)) {
+      await named.click();
+      return;
+    }
+    const iconBtn = calendarScope
+      .locator(
+        '.MuiPickersArrowSwitcher-previousIconButton, button[aria-label*="Previous" i]'
+      )
+      .first();
+    await iconBtn.click({ timeout: 5000 });
+  }
+
+  async muiClickNextMonth(calendarScope) {
+    const named = calendarScope
+      .getByRole('button', { name: /next month|go to next month/i })
+      .first();
+    if (await named.isVisible({ timeout: 800 }).catch(() => false)) {
+      await named.click();
+      return;
+    }
+    const iconBtn = calendarScope
+      .locator('.MuiPickersArrowSwitcher-nextIconButton, button[aria-label*="Next" i]')
+      .first();
+    await iconBtn.click({ timeout: 5000 });
+  }
+
+  async navigateMuiCalendarToMonthYear(calendarScope, targetDate) {
+    const wantY = targetDate.getFullYear();
+    const wantM = targetDate.getMonth();
+    for (let step = 0; step < 24; step += 1) {
+      const label = (
+        await calendarScope
+          .locator('.MuiPickersCalendarHeader-label')
+          .first()
+          .innerText()
+          .catch(() => '')
+      ).trim();
+      const m = label.match(
+        /(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/i
+      );
+      if (!m) {
+        await this.muiClickPrevMonth(calendarScope);
+        continue;
+      }
+      const cur = new Date(Date.parse(`${m[1]} 1, ${m[2]}`));
+      if (Number.isNaN(cur.getTime())) {
+        await this.muiClickPrevMonth(calendarScope);
+        continue;
+      }
+      if (cur.getFullYear() === wantY && cur.getMonth() === wantM) {
+        return;
+      }
+      const wantTs = new Date(wantY, wantM, 1).getTime();
+      const curTs = new Date(cur.getFullYear(), cur.getMonth(), 1).getTime();
+      if (curTs > wantTs) {
+        await this.muiClickPrevMonth(calendarScope);
+      } else {
+        await this.muiClickNextMonth(calendarScope);
+      }
+      await this.page.waitForTimeout(200);
+    }
+  }
+
+  /**
+   * Clicks a specific day inside an open MUI X date picker (popper or modal).
+   */
+  async pickDateFromOpenMuiCalendar(targetDate) {
+    const calendarScope = await this.getOpenMuiCalendarScope();
+    if (!(await calendarScope.isVisible({ timeout: 2500 }).catch(() => false))) {
+      return false;
+    }
+
+    await expect(calendarScope).toBeVisible({ timeout: 15000 });
+    await this.navigateMuiCalendarToMonthYear(calendarScope, targetDate);
+
+    const dayNum = targetDate.getDate();
+    const dayRe = new RegExp(`^\\s*${dayNum}\\s*$`);
+    const dayBtn = calendarScope
+      .locator(
+        'button.MuiPickersDay-root:not(.MuiPickersDay-outsideCurrentMonth):not(.Mui-disabled):not([aria-disabled="true"])'
+      )
+      .filter({ hasText: dayRe })
+      .first();
+    if (await dayBtn.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await dayBtn.scrollIntoViewIfNeeded();
+      await dayBtn.click({ timeout: 10000 });
+      return true;
+    }
+
+    const gridCell = calendarScope.getByRole('gridcell', { name: dayRe }).first();
+    if (await gridCell.isVisible({ timeout: 2500 }).catch(() => false)) {
+      await gridCell.scrollIntoViewIfNeeded();
+      await gridCell.click({ timeout: 10000 });
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Clicks today's date inside an open MUI X date picker (popper or modal).
+   */
+  async pickTodayFromOpenMuiCalendar() {
+    const calendarScope = await this.getOpenMuiCalendarScope();
     await expect(calendarScope).toBeVisible({ timeout: 15000 });
 
     let todayBtn = calendarScope.getByRole('button', { name: /^today$/i }).first();
@@ -534,25 +702,31 @@ class RFQPage extends BasePage {
     }
   }
 
-  async openMuiDatePickerAndPickToday(target) {
+  async openMuiDatePickerForTarget(target) {
     await target.scrollIntoViewIfNeeded();
+    await this.dismissOpenMenusAndPopovers();
 
     await target.click({ timeout: 15000 });
-    await this.page.waitForTimeout(500);
+    await this.page.waitForTimeout(400);
 
     let opened = await this.isMuiDateCalendarOpen();
     if (!opened) {
       await this.clickCalendarAdornmentNearInput(target);
-      await this.page.waitForTimeout(500);
+      await this.page.waitForTimeout(400);
       opened = await this.isMuiDateCalendarOpen();
     }
 
     if (!opened) {
       await target.click({ force: true, timeout: 10000 });
-      await this.page.waitForTimeout(500);
+      await this.page.waitForTimeout(400);
       opened = await this.isMuiDateCalendarOpen();
     }
 
+    return opened;
+  }
+
+  async openMuiDatePickerAndPickToday(target) {
+    const opened = await this.openMuiDatePickerForTarget(target);
     if (!opened) {
       return false;
     }
@@ -570,18 +744,39 @@ class RFQPage extends BasePage {
     return picked;
   }
 
-  /**
-   * Opens the field, selects today from the calendar when the picker shows, else types US/ISO date.
-   */
-  async setDateInputToToday(target) {
-    const todayUs = this.formatTodayUs();
-    const todayIso = this.formatTodayIso();
+  async openMuiDatePickerAndPickDate(target, targetDate) {
+    const opened = await this.openMuiDatePickerForTarget(target);
+    if (!opened) {
+      return false;
+    }
 
-    const picked = await this.openMuiDatePickerAndPickToday(target);
+    const picked = await this.pickDateFromOpenMuiCalendar(targetDate);
+    await this.page.waitForTimeout(300);
+    if (await this.isMuiDateCalendarOpen()) {
+      await this.page.keyboard.press('Enter').catch(() => {});
+      await this.dismissOpenMenusAndPopovers();
+    }
+    await this.waitForNetworkSettled();
+    if (!picked) {
+      await this.dismissOpenMenusAndPopovers();
+    }
+    return picked;
+  }
+
+  /**
+   * Opens the field, picks the date from the calendar when possible, else types US/ISO date.
+   * @returns {Promise<string>} value written (US or ISO depending on input type)
+   */
+  async setDateInputToValue(target, date) {
+    const d = date instanceof Date ? date : new Date(date);
+    const us = this.formatUsDate(d);
+    const iso = this.formatIsoDate(d);
+
+    const picked = await this.openMuiDatePickerAndPickDate(target, d);
     if (picked) {
       await this.dismissOpenMenusAndPopovers();
       await this.waitForNetworkSettled();
-      return;
+      return us;
     }
 
     await this.page.keyboard.press('Escape').catch(() => {});
@@ -590,7 +785,7 @@ class RFQPage extends BasePage {
     await target.scrollIntoViewIfNeeded();
     await target.click({ timeout: 15000 }).catch(() => {});
     const type = ((await target.getAttribute('type')) || '').toLowerCase();
-    const val = type === 'date' ? todayIso : todayUs;
+    const val = type === 'date' ? iso : us;
     await target.fill(val).catch(async () => {
       await this.page.keyboard.press('ControlOrMeta+a');
       await this.page.keyboard.type(val);
@@ -601,11 +796,17 @@ class RFQPage extends BasePage {
     await this.waitForNetworkSettled();
 
     await expect
-      .poll(
-        async () => (await target.inputValue()).trim().length > 0,
-        { timeout: 15000 }
-      )
+      .poll(async () => (await target.inputValue()).trim().length > 0, { timeout: 15000 })
       .toBe(true);
+
+    return val;
+  }
+
+  /**
+   * Opens the field, selects today from the calendar when the picker shows, else types US/ISO date.
+   */
+  async setDateInputToToday(target) {
+    await this.setDateInputToValue(target, new Date());
   }
 
   async setRfqDateFieldToToday(kind) {
@@ -627,6 +828,203 @@ class RFQPage extends BasePage {
     await this.setRfqDateFieldToToday('createdOn');
   }
 
+  formatUsDate(date) {
+    const d = date instanceof Date ? date : new Date(date);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const yyyy = String(d.getFullYear());
+    return `${mm}/${dd}/${yyyy}`;
+  }
+
+  formatIsoDate(date) {
+    const d = date instanceof Date ? date : new Date(date);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const yyyy = String(d.getFullYear());
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  /**
+   * Created On: pick a random past date within the last 1–14 days (not today).
+   */
+  async setCreatedOnRandomDate() {
+    await this.page
+      .waitForURL(/rfq\/(create|edit)/i, { timeout: 90000 })
+      .catch(() => {});
+    await this.waitForNetworkSettled();
+    await this.dismissOpenMenusAndPopovers();
+    if (await this.isMuiDateCalendarOpen()) {
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.waitForTimeout(300);
+    }
+
+    const daysAgo = Math.floor(Math.random() * 14) + 1;
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() - daysAgo);
+
+    console.log(`[RFQ] Setting Created On to ${this.formatUsDate(d)} (${daysAgo} day(s) ago)`);
+    const target = await this.resolveRfqDateInput('createdOn');
+    const val = await this.setDateInputToValue(target, d);
+
+    this.lastCreatedOnDate = val;
+    console.log(`[RFQ] Set Created On to random date ${val} (${daysAgo} day(s) ago)`);
+  }
+
+  async searchRfqListIfPossible(title) {
+    const search = this.page
+      .getByPlaceholder(/search/i)
+      .or(this.page.getByRole('textbox', { name: /search/i }))
+      .or(this.page.locator('input[type="search"]'))
+      .filter({ visible: true })
+      .first();
+    if (!(await search.isVisible({ timeout: 2500 }).catch(() => false))) {
+      return;
+    }
+    await search.click({ timeout: 10000 }).catch(() => {});
+    await search.fill('');
+    await search.fill(String(title));
+    await this.page.keyboard.press('Enter').catch(() => {});
+    await this.waitForNetworkSettled();
+    await this.page.waitForTimeout(500);
+    console.log(`[RFQ] Searched RFQ list for "${title}"`);
+  }
+
+  async openRfqByTitle(titleText) {
+    const title = String(titleText || '').trim();
+    if (!title) throw new Error('RFQ title is required to open the RFQ');
+
+    await this.waitForNetworkSettled();
+    await this.expectRfqPageLoaded();
+    await this.searchRfqListIfPossible(title);
+
+    const RfqPreviewPage = require('./create-rfq/rfq-preview.page');
+    const preview = new RfqPreviewPage(this.page);
+
+    // Wait until the title text itself is on the list.
+    await expect(
+      this.page.getByText(title, { exact: true }).filter({ visible: true }).first()
+    ).toBeVisible({
+      timeout: Math.max(this.defaultTimeout, 120000),
+    });
+
+    // Always open the most recently created RFQ with this title (highest RFQ####) — not random.
+    const card = await preview.resolveRfqListCardForTitle(title);
+    await expect(card).toBeVisible({ timeout: this.defaultTimeout });
+    await card.scrollIntoViewIfNeeded().catch(() => {});
+
+    const cardText = await card.innerText().catch(() => '');
+    const rfqNo = preview.parseRfqNumberFromText(cardText);
+    this.lastOpenedRfqNumber = rfqNo >= 0 ? rfqNo : null;
+    console.log(
+      `[RFQ] Opening most recently created "${title}"${
+        rfqNo >= 0 ? ` (RFQ${String(rfqNo).padStart(7, '0')})` : ''
+      }`
+    );
+
+    // Click Expand on this RFQ card only.
+    console.log(`[RFQ] Expanding RFQ card "${title}"`);
+    const expandBtn = card
+      .getByRole('button', { name: /^expand$/i })
+      .filter({ visible: true })
+      .first()
+      .or(card.locator('button').filter({ hasText: /^expand$/i }).filter({ visible: true }).first());
+
+    if (await expandBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await expandBtn.scrollIntoViewIfNeeded().catch(() => {});
+      await expandBtn.click({ timeout: 15000 }).catch(async () => {
+        await expandBtn.click({ timeout: 15000, force: true });
+      });
+      await this.page.waitForTimeout(500);
+      console.log(`[RFQ] Clicked Expand on most recent RFQ "${title}"`);
+    } else {
+      await preview.ensureRfqCardRowExpanded(card);
+    }
+
+    // Confirm expanded (Collapse visible) when possible.
+    const collapseBtn = card.getByRole('button', { name: /^collapse$/i }).filter({ visible: true }).first();
+    if (!(await collapseBtn.isVisible({ timeout: 3000 }).catch(() => false))) {
+      await preview.ensureRfqCardRowExpanded(card);
+    }
+
+    this.lastOpenedRfqCardTitle = title;
+    this.lastOpenedRfqCard = card;
+
+    await this.expectPriceUpdateStatusOnExpandedCard(card);
+
+    console.log(`[RFQ] Expanded most recent "${title}" and price-update status is visible (${this.page.url()})`);
+  }
+
+  /**
+   * After Expand: assert vendor price-update status is shown on the card (Updated / Price Updated / Quoted, etc.).
+   */
+  async expectPriceUpdateStatusOnExpandedCard(cardOrNull) {
+    const card =
+      cardOrNull ||
+      this.lastOpenedRfqCard ||
+      this.page.locator('main, [role="main"]').filter({ visible: true }).first();
+
+    const statusRe =
+      /price\s*updated|updated\s*price|vendor\s*updated|quoted|price\s*received|rate\s*updated|updated|received/i;
+
+    const statusInCard = card.getByText(statusRe).filter({ visible: true }).first();
+    if (await statusInCard.isVisible({ timeout: 8000 }).catch(() => false)) {
+      await expect(statusInCard).toBeVisible({ timeout: 15000 });
+      console.log(`[RFQ] Price update status visible on expanded card`);
+      return;
+    }
+
+    // Fallback: anywhere in main after expand (status chip may render outside the matched shell).
+    const statusInPage = this.page
+      .locator('main, [role="main"]')
+      .getByText(statusRe)
+      .filter({ visible: true })
+      .first();
+    await expect(statusInPage).toBeVisible({ timeout: 30000 });
+    console.log(`[RFQ] Price update status visible on RFQ page`);
+  }
+
+  async expectUpdatedPriceVisible(priceValue, itemName = 'Material 1') {
+    const price = String(priceValue || '').trim();
+    const item = String(itemName || '').trim();
+    if (!price) throw new Error('Expected RFQ price value is required');
+
+    await this.waitForNetworkSettled();
+
+    const priceRe = new RegExp(
+      price.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\.0+$/, '') + '(?:\\.0+)?',
+      'i'
+    );
+
+    // Prefer the expanded RFQ card we just opened; then dialog / main.
+    let scope = this.lastOpenedRfqCard;
+    if (!(scope && (await scope.isVisible({ timeout: 2000 }).catch(() => false)))) {
+      scope = this.page
+        .getByRole('dialog')
+        .filter({ visible: true })
+        .or(this.page.locator('main, [role="main"]').filter({ visible: true }))
+        .first();
+    }
+
+    // Prefer the row that contains the item name, then assert rate/price nearby.
+    if (item) {
+      const itemRe = new RegExp(item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      const row = scope
+        .locator('tr, [role="row"], .MuiBox-root, .MuiPaper-root, .MuiCard-root, div')
+        .filter({ hasText: itemRe })
+        .filter({ visible: true })
+        .first();
+      if (await row.isVisible({ timeout: 8000 }).catch(() => false)) {
+        await expect(row.getByText(priceRe).first()).toBeVisible({ timeout: 30000 });
+        console.log(`[RFQ] Verified updated price ${price} on item "${item}"`);
+        return;
+      }
+    }
+
+    await expect(scope.getByText(priceRe).first()).toBeVisible({ timeout: 60000 });
+    console.log(`[RFQ] Verified updated price ${price} is displayed`);
+  }
+
   async addFirstVendorFromPanel() {
     const addVendor = this.page.getByRole('button', { name: /add vendor/i }).first().or(
       this.page.getByRole('button', { name: /add vendor details/i }).first()
@@ -635,7 +1033,10 @@ class RFQPage extends BasePage {
     await addVendor.click();
 
     // Off-canvas / modal container
-    const panel = this.page.locator('.MuiModal-root, [role="dialog"], .drawer, .MuiDrawer-root').filter({ visible: true }).last();
+    const panel = this.page
+      .locator('.MuiModal-root, [role="dialog"], .drawer, .MuiDrawer-root')
+      .filter({ visible: true })
+      .last();
     await expect(panel).toBeVisible({ timeout: 45000 });
 
     const firstRadio = panel.locator('table tbody input[type="radio"]').first().or(
@@ -652,19 +1053,68 @@ class RFQPage extends BasePage {
     await expect(addBtn).toBeEnabled({ timeout: 20000 });
     await addBtn.click();
 
+    await expect(panel).toBeHidden({ timeout: 60000 }).catch(() => {});
+    await this.dismissOpenMenusAndPopovers();
     await this.page.waitForLoadState('domcontentloaded');
     await this.waitForNetworkSettled();
+    console.log('[RFQ] First vendor added from panel');
+  }
+
+  async scrollRfqFormTowardLineItems() {
+    await this.page
+      .evaluate(() => {
+        const candidates = [
+          document.querySelector('main'),
+          document.querySelector('[role="main"]'),
+          document.querySelector('.MuiDrawer-content'),
+          document.scrollingElement,
+          document.documentElement,
+          document.body,
+        ].filter(Boolean);
+        for (const el of candidates) {
+          try {
+            if (el.scrollHeight > el.clientHeight + 40) {
+              el.scrollTop = Math.min(el.scrollHeight, Math.max(el.scrollTop, 800));
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        window.scrollBy(0, 600);
+      })
+      .catch(() => {});
+    await this.page.waitForTimeout(300);
   }
 
   async clickAddManually() {
     await this.dismissOpenMenusAndPopovers();
-    const addManually = this.page.getByText(/^\+\s*add manually$/i).first().or(
-      this.page.locator('span.pointer').filter({ hasText: /add manually/i }).first()
-    );
+    await this.dismissVisibleToastNotifications().catch(() => {});
+    await this.scrollRfqFormTowardLineItems();
+
+    const addManually = this.page
+      .getByText(/^\+\s*add manually$/i)
+      .first()
+      .or(this.page.locator('span.pointer').filter({ hasText: /add\s*manually/i }).first())
+      .or(this.page.getByText(/add\s*manually/i).filter({ visible: true }).first())
+      .or(this.page.getByRole('button', { name: /add\s*manually/i }).first());
+
+    if (!(await addManually.isVisible({ timeout: 8000 }).catch(() => false))) {
+      await this.scrollRfqFormTowardLineItems();
+      await this.page
+        .evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight);
+          const se = document.scrollingElement || document.documentElement;
+          if (se) se.scrollTop = se.scrollHeight;
+        })
+        .catch(() => {});
+      await this.page.waitForTimeout(400);
+    }
+
     await expect(addManually).toBeVisible({ timeout: 60000 });
-    await addManually.scrollIntoViewIfNeeded();
+    await addManually.scrollIntoViewIfNeeded().catch(() => {});
     await addManually.click({ force: true });
     await this.waitForNetworkSettled();
+    console.log('[RFQ] Clicked Add manually');
   }
 
   async ensureRfqLineItemsTableVisible() {

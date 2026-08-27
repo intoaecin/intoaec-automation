@@ -45,34 +45,136 @@ class RfqPreviewPage extends RFQComposePage {
    * On the RFQ list, each RFQ card shows an "open/preview" icon just left of the RFQ number
    * (looks like a small square-with-arrow / launch icon). This opens the preview/view.
    */
+  /**
+   * RFQ list card for a given title.
+   * Prefer the compact list row that includes title + RFQ number + Expand
+   * (avoid matching the whole app shell via broad .or() chains).
+   */
   rfqListCardForTitle(titleText) {
     const t = String(titleText || '').trim();
     if (!t) {
       return this.page.locator('main').first();
     }
-    // RFQ list: nested MuiBox nodes can match the inner title strip first (no Expand inside).
-    // Prefer the outer shell that also contains the row expand / collapse control.
-    const base = this.page
-      .locator('div.MuiBox-root.css-60kw0h, div.bg-white.p-2.MuiBox-root.css-60kw0h')
-      .filter({ has: this.page.getByText(t, { exact: false }) })
+
+    const titleExact = this.page.getByText(t, { exact: true });
+
+    // Primary: list cards often use mt-3 wrapper (see live DOM: div.mt-3.MuiBox-root).
+    const mt3Card = this.page
+      .locator('div.mt-3.MuiBox-root, div.mt-3')
+      .filter({ has: titleExact })
+      .filter({ has: this.page.getByRole('button', { name: /^(expand|collapse)$/i }) })
+      .filter({ hasText: /RFQ\s*\d+/i })
       .filter({ visible: true });
 
-    const withRowToggle = base.filter({
-      has: this.page.getByRole('button', {
-        name: /^(expand|collapse)$/i,
-      }),
+    // Secondary: any box with title + RFQ#### + Expand, and RFQ card actions.
+    const rfqRowCard = this.page
+      .locator('div.MuiBox-root, div.MuiPaper-root, div.MuiCard-root, div.bg-white')
+      .filter({ has: titleExact })
+      .filter({ hasText: /RFQ\s*\d+/i })
+      .filter({ has: this.page.getByRole('button', { name: /^(expand|collapse)$/i }) })
+      .filter({ hasText: /compare vendor price|send to vendor|expand|collapse/i })
+      .filter({ visible: true });
+
+    return mt3Card.first().or(rfqRowCard.first());
+  }
+
+  parseRfqNumberFromText(text) {
+    const m = String(text || '').match(/RFQ\s*0*(\d+)/i);
+    return m ? parseInt(m[1], 10) : -1;
+  }
+
+  /**
+   * Among matching title cards, pick the most recently created one (highest RFQ####).
+   * Never picks randomly via first/last when multiple "New One" cards exist.
+   */
+  async pickMostRecentRfqCard(cardsLocator) {
+    const n = await cardsLocator.count().catch(() => 0);
+    if (n <= 0) return null;
+    if (n === 1) return cardsLocator.first();
+
+    let bestIdx = 0;
+    let bestNum = -1;
+    for (let i = 0; i < n; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const text = await cardsLocator.nth(i).innerText().catch(() => '');
+      const num = this.parseRfqNumberFromText(text);
+      if (num >= bestNum) {
+        bestNum = num;
+        bestIdx = i;
+      }
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `[RFQ] Multiple cards matched — selecting most recent RFQ# ${bestNum >= 0 ? bestNum : '(unknown)'} (index ${bestIdx + 1}/${n})`
+    );
+    return cardsLocator.nth(bestIdx);
+  }
+
+  /**
+   * Resolve a single unique RFQ card for title = the most recently created match.
+   */
+  async resolveRfqListCardForTitle(titleText) {
+    const t = String(titleText || '').trim();
+    if (!t) throw new Error('RFQ title is required');
+
+    const titleExact = this.page.getByText(t, { exact: true }).filter({ visible: true });
+    await expect(titleExact.first()).toBeVisible({
+      timeout: Math.max(this.defaultTimeout || 60000, 90000),
     });
 
-    const withLooseToggle = base.filter({
-      has: this.page.getByRole('button', {
-        name: /expand|collapse|show more|view details|view more|see more|see details/i,
-      }),
-    });
+    const strategies = [
+      this.page
+        .locator('div.mt-3.MuiBox-root, div.mt-3')
+        .filter({ has: this.page.getByText(t, { exact: true }) })
+        .filter({ has: this.page.getByRole('button', { name: /^(expand|collapse)$/i }) })
+        .filter({ hasText: /RFQ\s*\d+/i })
+        .filter({ visible: true }),
+      this.page
+        .locator('div.MuiBox-root')
+        .filter({ has: this.page.getByText(t, { exact: true }) })
+        .filter({ hasText: /RFQ\s*\d+/i })
+        .filter({ has: this.page.getByRole('button', { name: /^(expand|collapse)$/i }) })
+        .filter({ visible: true }),
+      this.page
+        .locator('div.MuiPaper-root, div.MuiCard-root, div.bg-white')
+        .filter({ has: this.page.getByText(t, { exact: true }) })
+        .filter({ hasText: /RFQ\s*\d+/i })
+        .filter({ has: this.page.getByRole('button', { name: /^(expand|collapse)$/i }) })
+        .filter({ visible: true }),
+    ];
 
-    return withRowToggle
-      .first()
-      .or(withLooseToggle.first())
-      .or(base.first());
+    for (const loc of strategies) {
+      // eslint-disable-next-line no-await-in-loop
+      const picked = await this.pickMostRecentRfqCard(loc);
+      if (picked) {
+        // eslint-disable-next-line no-await-in-loop
+        if (await picked.isVisible({ timeout: 3000 }).catch(() => false)) {
+          // eslint-disable-next-line no-await-in-loop
+          const blob = await picked.innerText().catch(() => '');
+          const rfqNo = this.parseRfqNumberFromText(blob);
+          // eslint-disable-next-line no-console
+          console.log(
+            `[RFQ] Resolved card for title "${t}"${rfqNo >= 0 ? ` → RFQ${String(rfqNo).padStart(7, '0')}` : ''}`
+          );
+          return picked;
+        }
+      }
+    }
+
+    // Last resort: Expand button near the title text (still prefer last/most recent title occurrence).
+    const titleNodes = this.page.getByText(t, { exact: true }).filter({ visible: true });
+    const titleCount = await titleNodes.count().catch(() => 0);
+    const titleNode = titleCount > 0 ? titleNodes.nth(titleCount - 1) : titleNodes.first();
+    const expandNearTitle = titleNode
+      .locator(
+        'xpath=ancestor::div[contains(@class,"mt-3") or contains(@class,"MuiBox-root")][.//button[normalize-space()="Expand" or normalize-space()="Collapse"]][1]'
+      )
+      .first();
+    await expect(expandNearTitle).toBeVisible({ timeout: 30000 });
+    // eslint-disable-next-line no-console
+    console.log(`[RFQ] Resolved card for title "${t}" via Expand ancestor near most recent title node`);
+    return expandNearTitle;
   }
 
   /**
@@ -183,9 +285,18 @@ class RfqPreviewPage extends RFQComposePage {
 
   rfqListFirstCard() {
     return this.page
-      .locator('div.MuiBox-root.css-60kw0h, div.bg-white.p-2.MuiBox-root.css-60kw0h')
+      .locator('div.MuiPaper-root, div.MuiCard-root, div.bg-white, div.MuiBox-root')
+      .filter({
+        has: this.page.getByRole('button', { name: /^(expand|collapse)$/i }),
+      })
       .filter({ visible: true })
-      .first();
+      .first()
+      .or(
+        this.page
+          .locator('div.MuiBox-root.css-60kw0h, div.bg-white.p-2.MuiBox-root.css-60kw0h')
+          .filter({ visible: true })
+          .first()
+      );
   }
 
   async resolveCreatedRfqCard() {

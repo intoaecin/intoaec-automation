@@ -28,22 +28,25 @@ class RfqVendorPortalPriceUpdatePage extends BasePage {
 
   async openPriceUpdateEditorIfNeeded() {
     const p = this.page;
+    const rows = this.lineItemRows ? this.lineItemRows() : p.locator('tbody tr');
+    if (await rows.first().isVisible({ timeout: 2500 }).catch(() => false)) {
+      return;
+    }
 
     const updateBtn = p
-      .getByRole('button', { name: /update price|update prices|update/i })
+      .getByRole('button', { name: /^update\s*price(s)?$/i })
       .filter({ visible: true })
       .first();
-    if (await updateBtn.isVisible({ timeout: 2500 }).catch(() => false)) {
-      // In this vendor UI, clicking this top button enables inline editing (row highlights).
+    if (await updateBtn.isVisible({ timeout: 4000 }).catch(() => false)) {
       await updateBtn.click({ timeout: 20000 }).catch(async () => {
         await updateBtn.click({ timeout: 20000, force: true });
       });
-      await p.waitForTimeout(600);
+      await p.waitForTimeout(800);
       return;
     }
 
     const edit = p
-      .getByRole('button', { name: /edit|update|price/i })
+      .getByRole('button', { name: /edit\s*price|price\s*update/i })
       .filter({ visible: true })
       .first();
     if (await edit.isVisible({ timeout: 2500 }).catch(() => false)) {
@@ -52,6 +55,60 @@ class RfqVendorPortalPriceUpdatePage extends BasePage {
       });
       await p.waitForTimeout(400);
     }
+  }
+
+  async isEditablePriceInput(field) {
+    if (!(await field.isVisible({ timeout: 800 }).catch(() => false))) return false;
+    if (await field.isDisabled().catch(() => true)) return false;
+
+    const meta = [
+      await field.getAttribute('placeholder').catch(() => ''),
+      await field.getAttribute('name').catch(() => ''),
+      await field.getAttribute('aria-label').catch(() => ''),
+      await field.getAttribute('id').catch(() => ''),
+    ]
+      .join(' ')
+      .toLowerCase();
+
+    if (/material\s*name|item\s*name|description|quantity|unit\b|uom/i.test(meta)) {
+      return false;
+    }
+
+    const type = ((await field.getAttribute('type').catch(() => '')) || '').toLowerCase();
+    if (type === 'number') return true;
+    return /rate|price|amount|cost/i.test(meta);
+  }
+
+  async findEditablePriceInput(row, rateCell) {
+    const p = this.page;
+    const buckets = [];
+
+    if (rateCell) {
+      buckets.push(rateCell.locator('input:not([disabled]), textarea:not([disabled]), [contenteditable="true"]'));
+    }
+
+    buckets.push(
+      row.locator('input[type="number"]:not([disabled])'),
+      row.locator('td').nth(3).locator('input:not([disabled])'),
+      row.locator('td').nth(4).locator('input:not([disabled])'),
+      row.locator('td').nth(5).locator('input:not([disabled])'),
+      row.locator('td').last().locator('input:not([disabled])'),
+      p.getByRole('spinbutton').filter({ visible: true }),
+      p.locator('input[type="number"]:not([disabled])').filter({ visible: true })
+    );
+
+    for (const bucket of buckets) {
+      const count = await bucket.count().catch(() => 0);
+      for (let i = 0; i < count; i += 1) {
+        const candidate = bucket.nth(i);
+        // eslint-disable-next-line no-await-in-loop
+        if (await this.isEditablePriceInput(candidate)) {
+          return candidate;
+        }
+      }
+    }
+
+    return null;
   }
 
   lineItemsRoot() {
@@ -63,23 +120,23 @@ class RfqVendorPortalPriceUpdatePage extends BasePage {
       .or(p.locator('main').filter({ visible: true }).first());
   }
 
-  async selectFirstLineItemRowForPriceUpdate() {
+  lineItemRows() {
     const p = this.page;
     const root = this.lineItemsRoot();
+    const tbodyRows = root.locator('tbody tr').filter({ has: p.locator('td') });
+    const gridRows = root
+      .getByRole('row')
+      .filter({ has: root.getByRole('gridcell') })
+      .filter({ hasNot: root.locator('[role="columnheader"]') });
+    const muiRows = root.locator('.MuiDataGrid-row');
+    return tbodyRows.or(gridRows).or(muiRows);
+  }
 
-    // Common table rows
-    let rows = root.locator('tbody tr').filter({ has: p.locator('td') });
-    if ((await rows.count().catch(() => 0)) === 0) {
-      rows = root
-        .getByRole('row')
-        .filter({ has: root.getByRole('gridcell') })
-        .filter({ hasNot: root.locator('[role="columnheader"]') });
-    }
-    if ((await rows.count().catch(() => 0)) === 0) {
-      rows = root.locator('.MuiDataGrid-row');
-    }
-
-    const row = rows.first();
+  async selectLineItemRowForPriceUpdate(rowIndex = 0) {
+    const p = this.page;
+    const root = this.lineItemsRoot();
+    const rows = this.lineItemRows();
+    const row = rows.nth(rowIndex);
     await expect(row).toBeVisible({ timeout: 60000 });
     await row.scrollIntoViewIfNeeded().catch(() => {});
     await row.click({ timeout: 15000 }).catch(async () => {
@@ -89,11 +146,15 @@ class RfqVendorPortalPriceUpdatePage extends BasePage {
 
     const selected = root
       .locator('tr[aria-selected="true"], [role="row"][aria-selected="true"], .Mui-selected')
-      .first();
+      .nth(rowIndex);
     if (await selected.isVisible({ timeout: 1200 }).catch(() => false)) {
       return selected;
     }
     return row;
+  }
+
+  async selectFirstLineItemRowForPriceUpdate() {
+    return this.selectLineItemRowForPriceUpdate(0);
   }
 
   async clickRateCellToEdit(row) {
@@ -125,50 +186,8 @@ class RfqVendorPortalPriceUpdatePage extends BasePage {
     return null;
   }
 
-  async fillFirstVisiblePriceField(priceValue) {
+  async typePriceIntoField(field, value) {
     const p = this.page;
-    const value = String(priceValue ?? '').trim();
-    if (!value) throw new Error('Vendor price value must be non-empty');
-
-    // Your vendor UI: Update price -> select row (highlight) -> click Rate -> input appears.
-    await this.openPriceUpdateEditorIfNeeded();
-    const row = await this.selectFirstLineItemRowForPriceUpdate();
-    const rateCell = await this.clickRateCellToEdit(row);
-
-    const candidates = [
-      // Prefer field within selected row if it becomes an inline editor
-      row
-        .locator('input[type="number"], input:not([type="hidden"])')
-        .filter({ visible: true })
-        .first(),
-      // Prefer field inside the clicked rate cell (inline editor)
-      ...(rateCell
-        ? [
-            rateCell
-              .locator('input[type="number"], input:not([type="hidden"]), textarea, [contenteditable="true"]')
-              .filter({ visible: true })
-              .first(),
-          ]
-        : []),
-      // Common labeled fields
-      p.getByRole('spinbutton', { name: /rate|unit price|price|amount/i }).filter({ visible: true }).first(),
-      p.getByRole('textbox', { name: /rate|unit price|price|amount/i }).filter({ visible: true }).first(),
-      // Any visible numeric/text input as fallback
-      p.locator('input[type="number"]').filter({ visible: true }).first(),
-      p.locator('input:not([type="hidden"])').filter({ visible: true }).first(),
-    ];
-
-    let field = null;
-    for (const c of candidates) {
-      if (await c.isVisible({ timeout: 1500 }).catch(() => false)) {
-        field = c;
-        break;
-      }
-    }
-    if (!field) {
-      throw new Error('RFQ vendor portal: could not find a visible price input.');
-    }
-
     await field.scrollIntoViewIfNeeded().catch(() => {});
     await field.click({ timeout: 10000 }).catch(() => {});
     const isContentEditable =
@@ -182,8 +201,70 @@ class RfqVendorPortalPriceUpdatePage extends BasePage {
       await field.fill(value);
     }
     await p.waitForTimeout(250);
+  }
 
+  async fillPriceOnLineItemRow(rowIndex, priceValue) {
+    const p = this.page;
+    const value = String(priceValue ?? '').trim();
+    if (!value) throw new Error('Vendor price value must be non-empty');
+
+    const row = await this.selectLineItemRowForPriceUpdate(rowIndex);
+    const rateCell = await this.clickRateCellToEdit(row);
+    await p.waitForTimeout(400);
+
+    let field = await this.findEditablePriceInput(row, rateCell);
+    if (!field) {
+      for (const idx of [4, 5, 3, 2]) {
+        const cell = row.locator('td, [role="gridcell"]').nth(idx);
+        // eslint-disable-next-line no-await-in-loop
+        if (await cell.isVisible({ timeout: 800 }).catch(() => false)) {
+          // eslint-disable-next-line no-await-in-loop
+          await cell.dblclick({ timeout: 8000, force: true }).catch(() => {});
+          // eslint-disable-next-line no-await-in-loop
+          await p.waitForTimeout(300);
+          // eslint-disable-next-line no-await-in-loop
+          field = await this.findEditablePriceInput(row, cell);
+          if (field) break;
+        }
+      }
+    }
+
+    if (!field) {
+      throw new Error(
+        `RFQ vendor portal: could not find an editable Rate/Price input on line-item row ${rowIndex + 1}.`
+      );
+    }
+
+    await this.typePriceIntoField(field, value);
     await this.clickSaveRateIfPresent(row);
+    await p.keyboard.press('Tab').catch(() => {});
+  }
+
+  async fillFirstVisiblePriceField(priceValue) {
+    const value = String(priceValue ?? '').trim();
+    if (!value) throw new Error('Vendor price value must be non-empty');
+
+    await this.openPriceUpdateEditorIfNeeded();
+    await this.fillPriceOnLineItemRow(0, value);
+  }
+
+  /**
+   * Fill Rate/Price on every visible line-item row (Material 1/2/3), then leave submit to the caller.
+   */
+  async fillPriceOnAllLineItemRows(priceValue) {
+    const value = String(priceValue ?? '').trim();
+    if (!value) throw new Error('Vendor price value must be non-empty');
+
+    await this.openPriceUpdateEditorIfNeeded();
+    const rows = this.lineItemRows();
+    await expect(rows.first()).toBeVisible({ timeout: 60000 });
+    const count = await rows.count();
+    const n = Math.max(count, 1);
+    for (let i = 0; i < n; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await this.fillPriceOnLineItemRow(i, value);
+    }
+    return n;
   }
 
   async clickSaveRateIfPresent(rowScope) {
@@ -220,19 +301,13 @@ class RfqVendorPortalPriceUpdatePage extends BasePage {
   async clickUpdatePriceButton() {
     const p = this.page;
     const btn = p
-      .getByRole('button', { name: /update price|update prices/i })
+      .getByRole('button', { name: /^update\s*price(s)?$/i })
       .filter({ visible: true })
-      .first()
-      .or(
-        p
-          .getByRole('button', { name: /update/i })
-          .filter({ visible: true })
-          .first()
-      );
+      .last();
 
-    await expect(btn.first()).toBeVisible({ timeout: 60000 });
-    await btn.first().click({ timeout: 20000, force: true }).catch(async () => {
-      await btn.first().click({ timeout: 20000, force: true });
+    await expect(btn).toBeVisible({ timeout: 60000 });
+    await btn.click({ timeout: 20000, force: true }).catch(async () => {
+      await btn.click({ timeout: 20000, force: true });
     });
 
     await p.waitForLoadState('domcontentloaded').catch(() => {});

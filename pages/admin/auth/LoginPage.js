@@ -6,9 +6,12 @@ class LoginPage extends BasePage {
   constructor(page) {
     super(page);
     this.emailInput = page
-      .locator('input[type="email"], input[name="email"], input[name="username"]')
+      .locator(
+        'input[type="email"], input[name="email" i], input[name="username" i], input[autocomplete="username"], input[autocomplete="email"]'
+      )
       .or(page.getByPlaceholder(/email|username/i))
-      .or(page.getByLabel(/email|username/i))
+      .or(page.getByLabel(/email|username|user name/i))
+      .or(page.locator('input[type="text"]').first())
       .first();
     this.passwordInput = page.locator('input[type="password"]').first();
     this.loginButton = page
@@ -27,15 +30,44 @@ class LoginPage extends BasePage {
       .first();
   }
 
+  _isAdminHost() {
+    return /app\.(aecplayhouse|intoaec)/i.test(String(this.page.url() || ''));
+  }
+
   async _isAppReady() {
+    if (!this._isAdminHost()) {
+      return false;
+    }
     if (await this.appHeader.isVisible({ timeout: 2500 }).catch(() => false)) {
       return true;
     }
-    return this.appShell.isVisible({ timeout: 2500 }).catch(() => false);
+    if (await this.appShell.isVisible({ timeout: 2500 }).catch(() => false)) {
+      return true;
+    }
+    return this.page
+      .getByRole('button', { name: /account settings|profile settings|clients\/projects|resources|dashboard/i })
+      .first()
+      .isVisible({ timeout: 1500 })
+      .catch(() => false);
   }
 
   async _isSignInVisible() {
-    return this.passwordInput.isVisible({ timeout: 5000 }).catch(() => false);
+    const emailVisible = await this.emailInput.isVisible({ timeout: 1500 }).catch(() => false);
+    const passwordVisible = await this.passwordInput.isVisible({ timeout: 1500 }).catch(() => false);
+    return Boolean(emailVisible || passwordVisible);
+  }
+
+  async _waitForSplashToClear(timeoutMs = 45000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (this.page.isClosed()) return;
+      if (await this._isAppReady()) return 'app';
+      if (await this._isSignInVisible()) return 'signin';
+      await this.page.waitForTimeout(400).catch(() => {});
+    }
+    if (await this._isAppReady()) return 'app';
+    if (await this._isSignInVisible()) return 'signin';
+    return 'timeout';
   }
 
   async goto() {
@@ -43,18 +75,22 @@ class LoginPage extends BasePage {
       waitUntil: 'domcontentloaded',
       timeout: 60000,
     });
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-    if (await this._isAppReady()) {
-      return;
-    }
-    if (await this._isSignInVisible()) {
+    const state = await this._waitForSplashToClear(45000);
+    if (state === 'app' || state === 'signin') {
       return;
     }
     await this.page.goto(`${env.admin}/auth/signIn`, {
       waitUntil: 'domcontentloaded',
       timeout: 60000,
     });
-    await this.passwordInput.waitFor({ state: 'visible', timeout: 30000 });
+    const afterSignIn = await this._waitForSplashToClear(30000);
+    if (afterSignIn === 'app') {
+      return;
+    }
+    await this.emailInput
+      .or(this.passwordInput)
+      .first()
+      .waitFor({ state: 'visible', timeout: 30000 });
   }
 
   async _fillStable(locator, value) {
@@ -73,29 +109,71 @@ class LoginPage extends BasePage {
     if (await this._isAppReady()) {
       return;
     }
-    await this.emailInput.waitFor({ state: 'visible', timeout: 30000 });
+    await this.emailInput
+      .or(this.passwordInput)
+      .first()
+      .waitFor({ state: 'visible', timeout: 45000 });
+    if (await this.emailInput.isVisible({ timeout: 8000 }).catch(() => false)) {
+      await this._fillStable(this.emailInput, email);
+    }
     await this.passwordInput.waitFor({ state: 'visible', timeout: 30000 });
 
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const loadingStuck = await this.loginButton
+        .evaluate((el) =>
+          Boolean(
+            el.disabled ||
+              el.classList.contains('Mui-disabled') ||
+              el.classList.contains('MuiLoadingButton-loading')
+          )
+        )
+        .catch(() => false);
+
+      if (loadingStuck) {
+        console.log(
+          `[Login] Submit control stuck loading (attempt ${attempt}) — reloading sign-in`
+        );
+        await this.page.goto(`${env.admin}/auth/signIn`, {
+          waitUntil: 'domcontentloaded',
+          timeout: 60000,
+        });
+        await this._waitForSplashToClear(30000);
+        await this.emailInput
+          .or(this.passwordInput)
+          .first()
+          .waitFor({ state: 'visible', timeout: 30000 });
+      }
+
       await this._fillStable(this.emailInput, email);
       await this._fillStable(this.passwordInput, password);
 
       await this.loginButton.waitFor({ state: 'visible', timeout: 15000 });
-      const enabled = await this.loginButton.isEnabled().catch(() => true);
+
+      // Wait until enabled — do not force-click a disabled LoadingButton.
+      const enabledDeadline = Date.now() + 25000;
+      let enabled = false;
+      while (Date.now() < enabledDeadline) {
+        enabled = await this.loginButton.isEnabled().catch(() => false);
+        if (enabled) break;
+        await this.page.waitForTimeout(300);
+      }
       if (!enabled) {
-        await this.page.waitForTimeout(500);
+        console.log(
+          `[Login] Button never enabled on attempt ${attempt} — will reload next loop`
+        );
+        continue;
       }
 
-      await this.loginButton.click({ timeout: 15000 });
+      await this.loginButton.click({ timeout: 20000 });
       const ok = await this.isLoginSuccessful();
       if (ok || (await this._isAppReady())) {
         return;
       }
       console.log(`[Login] Attempt ${attempt} still on ${this.page.url()}`);
 
-      // Already past sign-in (session landed on the app) — wait for chrome instead of retyping credentials.
       const signedIn =
-        !String(this.page.url()).includes('signIn') && !(await this._isSignInVisible());
+        !String(this.page.url()).includes('signIn') &&
+        !(await this._isSignInVisible());
       if (signedIn) {
         await this.appHeader
           .or(this.appShell)
