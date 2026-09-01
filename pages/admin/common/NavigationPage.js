@@ -34,7 +34,8 @@ class NavigationPage extends BasePage {
   async clickLeadManager() {
     console.log('[NavigationPage] Opening Lead Manager');
     await expect(this.leadManagerLink).toBeVisible({ timeout: this.defaultTimeout });
-    await this.leadManagerLink.click();
+    await this.leadManagerLink.scrollIntoViewIfNeeded().catch(() => {});
+    await this.leadManagerLink.click({ force: true, timeout: 15000 });
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
     await this.page.waitForURL(/leadmanager\/master/i, { timeout: this.defaultTimeout }).catch(() => {});
   }
@@ -61,9 +62,15 @@ class NavigationPage extends BasePage {
 
     const nameCell = firstRow.getByRole('cell').nth(1);
     await expect(nameCell).toBeVisible({ timeout: this.defaultTimeout });
-    await nameCell.click({ timeout: 15000 });
+    await nameCell.scrollIntoViewIfNeeded().catch(() => {});
+    await nameCell.click({ force: true, timeout: 15000 });
 
-    await this.page.waitForURL(/leadmanager\/profile/i, { timeout: this.defaultTimeout }).catch(() => {});
+    await expect
+      .poll(() => /leadmanager\/profile/i.test(this.page.url()), {
+        timeout: this.defaultTimeout,
+        intervals: [500, 1000, 2000],
+      })
+      .toBeTruthy();
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
   }
 

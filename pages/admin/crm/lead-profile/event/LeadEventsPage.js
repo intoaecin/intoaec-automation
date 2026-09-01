@@ -25,7 +25,15 @@ class LeadEventsPage extends EventPage {
 
   async clickOnlineMeetingTab() {
     console.log('[LeadEventsPage] Clicking Online meeting tab');
+    const onlineTab = this.meetingTypeTab('online');
+    if (await onlineTab.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await onlineTab.click({ force: true });
+      await this.page.waitForTimeout(500);
+      return;
+    }
+
     await this.clickMeetingTab('online');
+    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
   }
 
   async clickMeetingTab(tabName) {
