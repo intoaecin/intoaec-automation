@@ -108,6 +108,7 @@ class CustomWorld {
       this.editNotePage = null;
       this.deleteNotePage = null;
       this.createNoteValidationPage = null;
+      this.fileUploadPage = null;
     }
     this.myOrganizationPage = null;
     this.myAccountPage = null;
