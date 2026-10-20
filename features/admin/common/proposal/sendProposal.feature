@@ -2,23 +2,22 @@
 Feature: Build Proposal From Client Profile
 
   # What this feature covers:
-  # - Opens a client profile and navigates to the Proposal workspace
+  # - Opens the first lead (CRM → Lead Manager) and navigates to the Proposal workspace
   # - Creates/opens a proposal template in the editor
   # - Adds multiple block types (drag & drop) to validate the builder palette
   # - Proceeds through the send stepper and sends via Email
   #
   # Implementation mapping:
+  # - Shared lead / template / email send steps: `step-definitions/admin/common/proposal/proposalFlow.steps.js`
   # - Navigation + send stepper: `pages/admin/common/ProposalPage.js`
   # - Drag/drop builder blocks: `pages/admin/common/proposal/ProposalBuilderPage.js`
-  # - Step glue: `step-definitions/admin/common/proposal/sendProposal.steps.js`
+  # - Builder step glue: `step-definitions/admin/common/proposal/sendProposal.steps.js`
 
   Scenario: Open a client proposal, build it with all blocks, and send by email
     Given I am logged in
-    And I go to Clients section
-    And I select the first client
-    When I open the Proposal tab for the selected client
-    And I open the choose proposal modal
-    And I choose the default proposal template
+    And I open the first lead for the "send" proposal flow
+    When I open the Proposal module for the lead
+    And I choose the default proposal template for the lead
     Then I should land on the proposal editor page
     And the proposal editor should be ready
 
@@ -39,10 +38,5 @@ Feature: Build Proposal From Client Profile
     Then I should have all elements added successfully
     And no UI errors should be shown
 
-    When I click Next on the proposal editor
-    And I click Skip for now
-    Then the proposal send preview should be visible
-    When I click Send
-    And I select Email channel
-    And I send proposal
+    When I send the proposal to the lead via email
     Then the proposal send flow should complete successfully

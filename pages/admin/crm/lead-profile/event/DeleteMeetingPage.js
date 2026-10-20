@@ -2,6 +2,27 @@ const { expect } = require('@playwright/test');
 const EventPage = require('./EventPage');
 
 class DeleteMeetingPage extends EventPage {
+  deleteReasonInput() {
+    return this.confirmDialog
+      .getByPlaceholder(/enter your reason|type reason|reason/i)
+      .or(this.confirmDialog.getByRole('textbox'))
+      .first();
+  }
+
+  confirmNoInDialog() {
+    return this.confirmDialog
+      .getByRole('button', { name: /^(no|cancel)$/i })
+      .or(this.confirmCancelButton)
+      .first();
+  }
+
+  confirmYesInDialog() {
+    return this.confirmDialog
+      .getByRole('button', { name: /^yes$|^delete$|^confirm$|^ok$/i })
+      .or(this.confirmYesButton)
+      .first();
+  }
+
   async createMeetingForDeletion() {
     await this.createOfflineMeetingForLifecycleAction();
   }
@@ -16,6 +37,7 @@ class DeleteMeetingPage extends EventPage {
     await this.openMeetingActionMenuForTitle(title, this.getActiveMeetingTab());
 
     await expect(this.deleteMenuItem).toBeVisible({ timeout: this.defaultTimeout });
+    await this.hideChatWidget();
     await this.deleteMenuItem.click();
   }
 
@@ -23,28 +45,26 @@ class DeleteMeetingPage extends EventPage {
     console.log('[DeleteMeetingPage] Expecting delete confirmation popup');
     await expect(this.confirmDialog).toBeVisible({ timeout: this.defaultTimeout });
 
-    const dialogTextVisible = await this.confirmDialog
-      .getByText(/delete|remove|confirm|are you sure/i)
-      .first()
-      .isVisible()
-      .catch(() => false);
-    const yesVisible = await this.confirmDialog
-      .getByRole('button', { name: /^yes$|^delete$|^confirm$|^ok$/i })
-      .first()
-      .isVisible()
-      .catch(() => false);
+    await expect(
+      this.confirmDialog.getByText(/are you sure|cancel the meeting|delete/i).first()
+    ).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(this.confirmYesInDialog()).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(this.confirmNoInDialog()).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(this.deleteReasonInput()).toBeVisible({ timeout: this.defaultTimeout });
+  }
 
-    expect(dialogTextVisible || yesVisible).toBeTruthy();
+  async fillDeleteReason() {
+    const reason = this.deleteReasonInput();
+    await expect(reason).toBeVisible({ timeout: this.defaultTimeout });
+    await reason.fill(`Automation delete ${Date.now().toString().slice(-6)}`);
   }
 
   async confirmMeetingDeletion() {
     console.log('[DeleteMeetingPage] Confirming meeting deletion');
     await expect(this.confirmDialog).toBeVisible({ timeout: this.defaultTimeout });
+    await this.fillDeleteReason();
 
-    const yesButton = this.confirmDialog
-      .getByRole('button', { name: /^yes$|^delete$|^confirm$|^ok$/i })
-      .or(this.confirmYesButton)
-      .first();
+    const yesButton = this.confirmYesInDialog();
 
     await expect(yesButton).toBeVisible({ timeout: this.defaultTimeout });
     await expect(yesButton).toBeEnabled({ timeout: this.defaultTimeout });
@@ -71,8 +91,7 @@ class DeleteMeetingPage extends EventPage {
       console.log(`[DeleteMeetingPage] Meeting delete API responded with status ${response.status()}`);
     }
 
-    await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-    await expect(this.confirmDialog).toBeHidden({ timeout: this.defaultTimeout }).catch(() => {});
+    await expect(this.confirmDialog).toBeHidden({ timeout: this.defaultTimeout });
     await this.dismissOpenMenus();
   }
 
@@ -80,10 +99,7 @@ class DeleteMeetingPage extends EventPage {
     console.log('[DeleteMeetingPage] Cancelling meeting deletion');
     await expect(this.confirmDialog).toBeVisible({ timeout: this.defaultTimeout });
 
-    const cancelButton = this.confirmDialog
-      .getByRole('button', { name: /^cancel$/i })
-      .or(this.confirmCancelButton)
-      .first();
+    const cancelButton = this.confirmNoInDialog();
 
     await expect(cancelButton).toBeVisible({ timeout: this.defaultTimeout });
     await cancelButton.click();

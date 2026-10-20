@@ -2,7 +2,7 @@
 # Vendor Portal — incremental TCs in ONE file.
 #
 # TS-01 Vendor Login — @TS01 @TC01
-#   TC-01 — Vendor sign-in → Dashboard (https://vendor.aecplayhouse.com/auth/signIn)
+#   TC-01 — Vendor sign-in → Dashboard (config/urls.js → vendorSignIn)
 # TS-02 My Profile — @TS02 @TC02
 #   TC-02 — My Profile → Edit → update profile details → Save
 # TS-03 Change password — @TS03 @TC03

@@ -18,7 +18,9 @@ When('I fill the note mandatory fields', { timeout: 120000 }, async function () 
   await notePage.fillMandatoryNoteFields();
 });
 
-When('I add a note attachment', { timeout: 300000 }, async function () {
+When('I add a note attachment', { timeout: 600000 }, async function () {
+  // Waits for the operator to upload in the browser, then press ENTER in this terminal.
+  // Unattended: set NOTE_ATTACHMENT_AUTO=1
   const notePage = getNotePage(this);
   await notePage.addNoteAttachment();
 });

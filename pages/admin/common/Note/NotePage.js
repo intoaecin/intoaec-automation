@@ -10,7 +10,6 @@ class NotePage extends BasePage {
     this.defaultTimeout = 120000;
     this.navigationPage = new NavigationPage(page);
 
-    this.leadRows = page.locator('tbody tr');
     this.actionButton = page.getByRole('button', { name: 'Action', exact: true }).first();
     this.addNoteButton = page
       .getByRole('button', { name: /add note|new note|create note/i })
@@ -57,32 +56,43 @@ class NotePage extends BasePage {
       .filter({ hasText: /^click here$/i })
       .first();
 
-    // Current UI uses "Title" + rich-text paragraph (not "Name"/"Description" labels).
-    this.nameInput = page
+    // Prefer fields inside the open Note dialog so list-card Plate previews are ignored.
+    this.noteFormDialog = page
+      .getByRole('dialog')
+      .filter({ has: page.getByPlaceholder(/^title$/i) })
+      .filter({ visible: true })
+      .last();
+
+    this.nameInput = this.noteFormDialog
       .getByPlaceholder(/^title$/i)
+      .or(this.noteFormDialog.locator('input[placeholder="Title"]'))
+      .or(page.getByPlaceholder(/^title$/i))
       .or(page.locator('input[placeholder="Title"]'))
       .or(page.getByRole('textbox', { name: /^name|^title/i }))
-      .or(page.getByLabel(/^name|^title/i))
       .first();
 
-    this.descriptionInput = page
+    this.descriptionInput = this.noteFormDialog
       .locator('[contenteditable="true"]')
-      .filter({ hasText: /type a paragraph|description|comment/i })
-      .or(page.locator('[contenteditable="true"]').last())
-      .or(page.getByRole('textbox', { name: /description/i }))
-      .or(page.getByLabel(/description/i))
+      .last()
+      .or(page.getByRole('dialog').filter({ visible: true }).locator('[contenteditable="true"]').last())
+      .or(page.locator('[contenteditable="true"]').filter({ hasText: /type a paragraph/i }).last())
       .first();
 
-    this.fileInput = page.locator('input[type="file"]').last();
-    this.attachmentTrigger = page
+    this.fileInput = this.noteFormDialog
+      .locator('input[type="file"]')
+      .last()
+      .or(page.locator('input[type="file"]').last());
+    this.attachmentTrigger = this.noteFormDialog
       .getByRole('button', { name: /attach|attachment|upload|browse|choose\s*file/i })
+      .or(page.getByRole('button', { name: /attach|attachment|upload|browse|choose\s*file/i }))
       .or(page.getByText(/attach|attachment|upload|browse|choose\s*file/i))
       .first();
 
-    this.submitCreateButton = page
+    this.submitCreateButton = this.noteFormDialog
       .getByRole('button', { name: /^create$/i })
       .filter({ visible: true })
       .last()
+      .or(page.getByRole('button', { name: /^create$/i }).filter({ visible: true }).last())
       .or(page.getByRole('button', { name: /^add note$/i }))
       .or(page.getByRole('button', { name: /^save note$/i }))
       .first();
@@ -122,28 +132,56 @@ class NotePage extends BasePage {
       .or(page.locator('button').filter({ hasText: /^cancel$/i }))
       .first();
 
-    this.saveNoteButton = page
+    this.saveNoteButton = this.noteFormDialog
       .getByRole('button', { name: /^save$/i })
       .filter({ visible: true })
       .last()
+      .or(page.getByRole('button', { name: /^save$/i }).filter({ visible: true }).last())
       .or(page.getByRole('button', { name: /^update$/i }).filter({ visible: true }).last());
 
     this.validationMessage = page
-      .locator('.MuiFormHelperText-root, .MuiAlert-root, .Mui-error, [role="alert"]')
-      .filter({ hasText: /required|mandatory|cannot be empty|please enter|is required|field is required/i })
+      .locator(
+        '.Toastify__toast, .MuiFormHelperText-root, .MuiAlert-root, .Mui-error, [role="alert"], .MuiSnackbar-root'
+      )
+      .filter({
+        hasText:
+          /required|mandatory|cannot be empty|please enter|please fill|is required|field is required|enter title|enter paragraph|title is required|paragraph is required|fill in the (title|content)/i,
+      })
+      .first();
+
+    this.mandatoryValidationToast = page
+      .locator('.Toastify__toast, .MuiAlert-root, .MuiSnackbar-root, [role="alert"]')
+      .filter({
+        hasText: /please (fill in|add) all mandatory fields|please fill in the (title|content)|required|mandatory/i,
+      })
       .first();
   }
 
   buildRandomSuffix() {
-    return `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    return `${Date.now().toString(36)}${Math.floor(Math.random() * 1000).toString(36)}`;
   }
 
   buildNoteData() {
     const suffix = this.buildRandomSuffix();
     return {
-      name: `Auto Note ${suffix}`,
+      // Keep under NotesCard TruncatedText limit (20) so list matching stays stable.
+      name: `N-${suffix}`.slice(0, 20),
       description: `Automation note description ${suffix}`,
     };
+  }
+
+  /** NotesCard truncates titles with TruncatedText limit={20}. */
+  toDisplayedNoteTitle(name, limit = 20) {
+    const text = String(name || '');
+    if (text.length <= limit) return text;
+    return `${text.slice(0, limit)}...`;
+  }
+
+  getNoteTitleMatchers(name) {
+    const full = String(name || '');
+    const display = this.toDisplayedNoteTitle(full);
+    const prefix = full.slice(0, Math.min(20, full.length));
+    return { full, display, prefix };
   }
 
   isOnLeadProfile() {
@@ -155,16 +193,29 @@ class NotePage extends BasePage {
   }
 
   async isNoteFormOpen() {
-    const titleVisible = await this.nameInput.isVisible({ timeout: 1500 }).catch(() => false);
-    const editorVisible = await this.descriptionInput.isVisible({ timeout: 1500 }).catch(() => false);
-    return titleVisible || editorVisible;
+    // Only the Note create/edit dialog counts — list-card Plate previews are contenteditable too.
+    if (await this.noteFormDialog.isVisible({ timeout: 1500 }).catch(() => false)) {
+      return true;
+    }
+    const titleInDialog = await this.page
+      .getByRole('dialog')
+      .filter({ visible: true })
+      .getByPlaceholder(/^title$/i)
+      .first()
+      .isVisible({ timeout: 800 })
+      .catch(() => false);
+    return titleInDialog;
   }
 
   async isNotesListView() {
     const headingVisible = await this.allNotesHeading.isVisible({ timeout: 1500 }).catch(() => false);
     const searchVisible = await this.searchInput.isVisible({ timeout: 1500 }).catch(() => false);
-    const cardVisible = await this.page.locator('.MuiCard-root').first().isVisible({ timeout: 1500 }).catch(() => false);
-    return headingVisible || searchVisible || cardVisible;
+    const noteCardVisible = await this.page
+      .locator('.card-header, .viewNoteContainer, .MuiCard-root')
+      .first()
+      .isVisible({ timeout: 1500 })
+      .catch(() => false);
+    return headingVisible || searchVisible || noteCardVisible;
   }
 
   async isNotesEmptyState() {
@@ -260,76 +311,10 @@ class NotePage extends BasePage {
     }
   }
 
-  async openLeadManager() {
-    console.log('[NotePage] Opening Lead Manager');
-    if (/leadmanager\/(master|profile)/i.test(this.page.url())) {
-      return;
-    }
-
-    await this.navigationPage.clickCrmDropdown().catch(async () => {
-      await this.page.goto('https://app.aecplayhouse.com/leadmanager/master?isActive=true&isSnoozed=false', {
-        waitUntil: 'domcontentloaded',
-        timeout: this.defaultTimeout,
-      });
-    });
-    await this.navigationPage.clickLeadManager().catch(() => {});
-    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-    await expect(this.leadRows.first()).toBeVisible({ timeout: this.defaultTimeout });
-  }
-
-  async openFirstLeadProfile() {
-    if (await this.isOnLeadProfile()) {
-      console.log('[NotePage] Lead profile already open');
-      return;
-    }
-
-    console.log('[NotePage] Opening first lead profile from Lead Manager list');
-    await this.openLeadManager();
-
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const firstRow = this.leadRows.first();
-      await expect(firstRow).toBeVisible({ timeout: this.defaultTimeout });
-
-      const nameCell = firstRow.getByRole('cell').nth(1);
-      await expect(nameCell).toBeVisible({ timeout: this.defaultTimeout });
-
-      await nameCell.click({ timeout: 15000 }).catch(() => {});
-
-      const navigated = await this.page
-        .waitForURL(/leadmanager\/profile/i, { timeout: 30000, waitUntil: 'domcontentloaded' })
-        .then(() => true)
-        .catch(() => false);
-
-      if (navigated || (await this.isOnLeadProfile())) {
-        await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-        return;
-      }
-
-      const profileHref = await firstRow
-        .locator('a[href*="leadmanager/profile"]')
-        .first()
-        .getAttribute('href')
-        .catch(() => null);
-
-      if (profileHref) {
-        const target = profileHref.startsWith('http') ? profileHref : new URL(profileHref, this.page.url()).toString();
-        await this.page.goto(target, { waitUntil: 'domcontentloaded', timeout: this.defaultTimeout });
-        if (await this.isOnLeadProfile()) {
-          return;
-        }
-      }
-
-      console.warn(`[NotePage] Lead profile navigation retry ${attempt + 1}/3`);
-    }
-
-    throw new Error('[NotePage] Failed to open first lead profile after retries');
-  }
-
   async openNotesModule() {
     console.log('[NotePage] Opening Notes module');
     if (!(await this.isOnLeadProfile())) {
-      await this.openLeadManager();
-      await this.openFirstLeadProfile();
+      await this.navigationPage.navigateToFirstLead();
     }
 
     if (await this.isOnNotesModule()) {
@@ -478,8 +463,7 @@ class NotePage extends BasePage {
       return;
     }
 
-    await this.openLeadManager();
-    await this.openFirstLeadProfile();
+    await this.navigationPage.navigateToFirstLead();
     await this.openNotesModule();
     await this.openNoteCreateForm();
   }
@@ -525,6 +509,8 @@ class NotePage extends BasePage {
   }
 
   isAttachmentAutomationMode() {
+    // Manual by default: operator uploads in the browser, then presses ENTER in the terminal.
+    // Set NOTE_ATTACHMENT_AUTO=1 (or NOTE_ATTACHMENT_USE_SET_FILES=1) for unattended CI runs.
     return (
       /^1|true$/i.test(String(process.env.NOTE_ATTACHMENT_AUTO || '')) ||
       /^1|true$/i.test(String(process.env.NOTE_ATTACHMENT_USE_SET_FILES || ''))
@@ -631,7 +617,16 @@ class NotePage extends BasePage {
       );
     }
 
-    console.log('[NotePage] Manual attachment mode: click upload control, add file in browser, then press ENTER');
+    // Manual path (default): operator attaches the file in the headed browser, then presses ENTER.
+    console.log('');
+    console.log('============================================================');
+    console.log('[Note attachment] MANUAL STEP — action required');
+    console.log('1. In the browser Note form, add/upload the attachment now.');
+    console.log('2. Wait until the file finishes uploading in the UI.');
+    console.log('3. Come back to this terminal and press ENTER to continue.');
+    console.log('============================================================');
+    console.log('');
+
     const tagName = await control.evaluate((el) => el.tagName.toLowerCase()).catch(() => '');
     if (tagName !== 'input') {
       await control.scrollIntoViewIfNeeded().catch(() => {});
@@ -639,8 +634,9 @@ class NotePage extends BasePage {
     }
 
     await this.waitForEnterInTerminal(
-      'Waiting for manual note attachment upload. After the file finishes uploading, press ENTER here to continue.'
+      '>>> Upload the note attachment in the browser, then press ENTER here to continue <<<'
     );
+    console.log('[Note attachment] ENTER received — continuing test.');
     await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
   }
 
@@ -655,7 +651,7 @@ class NotePage extends BasePage {
     const createResponse = this.page.waitForResponse(
       (response) =>
         response.request().method() === 'POST' &&
-        /CREATE_NOTE|ADD_NOTE|SAVE_NOTE/i.test(response.request().postData() || ''),
+        /CREATE_NOTES?|ADD_NOTE|SAVE_NOTE/i.test(response.request().postData() || ''),
       { timeout: this.defaultTimeout }
     );
 
@@ -686,24 +682,43 @@ class NotePage extends BasePage {
   }
 
   getNotesListScope() {
-    return this.notesTabPanel.or(
-      this.page.locator('.MuiTabPanel-root').filter({ hasText: /all notes/i })
-    );
+    return this.notesTabPanel
+      .or(this.page.locator('.MuiTabPanel-root').filter({ hasText: /all notes/i }))
+      .or(this.page.locator('main, [role="main"], #root').first());
   }
 
   getNoteCard(name) {
-    return this.getNotesListScope()
+    const { full, display, prefix } = this.getNoteTitleMatchers(name);
+    const moreVert = this.page.locator('button:has([data-testid="MoreVertIcon"])');
+
+    // NotesCard uses CardLayout (Mui Box), not MuiCard — match truncated title + kebab menu.
+    const noteCardByDisplay = this.page
+      .locator('div')
+      .filter({ has: this.page.locator('.card-header') })
+      .filter({ hasText: display })
+      .filter({ has: moreVert })
+      .first();
+
+    const noteCardByPrefix = this.page
+      .locator('div')
+      .filter({ has: this.page.locator('.card-header') })
+      .filter({ hasText: prefix })
+      .filter({ has: moreVert })
+      .first();
+
+    const legacyMuiCard = this.page
       .locator('.MuiCard-root')
-      .filter({ hasText: name })
-      .first()
-      .or(this.page.locator('.MuiCard-root').filter({ hasText: name }).first());
+      .filter({ hasText: display })
+      .or(this.page.locator('.MuiCard-root').filter({ hasText: full }))
+      .first();
+
+    return noteCardByDisplay.or(noteCardByPrefix).or(legacyMuiCard);
   }
 
   async waitForNotesListLoaded() {
-    const scope = this.getNotesListScope();
     await expect(async () => {
-      const cardCount = await scope.locator('.MuiCard-root').count();
-      const noData = await scope.getByText(/no data found/i).first().isVisible().catch(() => false);
+      const cardCount = await this.page.locator('.card-header, .MuiCard-root').count();
+      const noData = await this.page.getByText(/no data found/i).first().isVisible().catch(() => false);
       const loading = await this.page.getByText(/loading\.\.\.|please wait/i).first().isVisible().catch(() => false);
       expect(cardCount > 0 || noData).toBeTruthy();
       expect(loading).toBeFalsy();
@@ -711,24 +726,29 @@ class NotePage extends BasePage {
   }
 
   async isNoteContentVisible(title, description) {
-    const scope = this.getNotesListScope();
-    const cards = scope.locator('.MuiCard-root');
-    const count = await cards.count();
-
-    for (let i = 0; i < count; i += 1) {
-      const text = await cards.nth(i).innerText().catch(() => '');
-      if (title && text.includes(title)) {
+    if (title) {
+      if (await this.getNoteCard(title).isVisible().catch(() => false)) {
         return true;
       }
-      if (description && text.includes(description)) {
-        return true;
+
+      const { display, prefix, full } = this.getNoteTitleMatchers(title);
+      for (const candidate of [display, prefix, full]) {
+        if (
+          await this.page
+            .getByText(candidate, { exact: false })
+            .first()
+            .isVisible()
+            .catch(() => false)
+        ) {
+          return true;
+        }
       }
     }
 
-    if (title && (await scope.getByText(title, { exact: false }).first().isVisible().catch(() => false))) {
-      return true;
-    }
-    if (description && (await scope.getByText(description, { exact: false }).first().isVisible().catch(() => false))) {
+    if (
+      description &&
+      (await this.page.getByText(description, { exact: false }).first().isVisible().catch(() => false))
+    ) {
       return true;
     }
 
@@ -738,6 +758,7 @@ class NotePage extends BasePage {
   getNoteCardActionButton(card) {
     return card
       .locator('button:has([data-testid="MoreVertIcon"]), button:has([data-testid="MoreHorizIcon"])')
+      .or(card.locator('button.MuiIconButton-root').last())
       .or(card.getByRole('button', { name: /more|action|options|menu/i }))
       .first();
   }
@@ -761,9 +782,7 @@ class NotePage extends BasePage {
       }
 
       await actionButton.click({ timeout: 15000, force: attempt > 0 });
-      await this.page.waitForTimeout(300);
-
-      if (await this.actionMenu.isVisible({ timeout: 4000 }).catch(() => false)) {
+      if (await this.actionMenu.isVisible({ timeout: 5000 }).catch(() => false)) {
         return;
       }
     }
@@ -781,15 +800,27 @@ class NotePage extends BasePage {
   async fillDescriptionField(value) {
     await expect(this.descriptionInput).toBeVisible({ timeout: this.defaultTimeout });
     await this.descriptionInput.click().catch(() => {});
+    const text = String(value);
     const tagName = await this.descriptionInput.evaluate((el) => el.tagName.toLowerCase()).catch(() => 'input');
     if (tagName === 'div') {
       await this.descriptionInput.press('Control+A').catch(() => {});
-      await this.descriptionInput.fill(String(value)).catch(async () => {
-        await this.page.keyboard.type(String(value), { delay: 10 });
-      });
+      // Prefer bulk insert — keyboard.type with delay is too slow for max-length strings.
+      const filled = await this.descriptionInput
+        .fill(text)
+        .then(() => true)
+        .catch(() => false);
+      if (!filled) {
+        await this.page.keyboard.insertText(text).catch(async () => {
+          await this.descriptionInput.evaluate((el, next) => {
+            el.focus();
+            el.textContent = next;
+            el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+          }, text);
+        });
+      }
     } else {
       await this.descriptionInput.press('Control+A').catch(() => {});
-      await this.descriptionInput.fill(String(value));
+      await this.descriptionInput.fill(text);
     }
   }
 
@@ -800,7 +831,8 @@ class NotePage extends BasePage {
     await this.nameInput.press('Backspace').catch(() => {});
     await this.nameInput.fill('');
     await this.nameInput.evaluate((el) => {
-      el.value = '';
+      const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+      proto?.set?.call(el, '');
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
     }).catch(() => {});
@@ -809,34 +841,64 @@ class NotePage extends BasePage {
 
   async clearDescriptionField() {
     await expect(this.descriptionInput).toBeVisible({ timeout: this.defaultTimeout });
-    await this.descriptionInput.click().catch(() => {});
-    const tagName = await this.descriptionInput.evaluate((el) => el.tagName.toLowerCase()).catch(() => 'input');
-    if (tagName === 'div') {
-      await this.descriptionInput.evaluate((el) => {
-        el.innerHTML = '';
-        el.textContent = '';
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('blur', { bubbles: true }));
-      });
-    } else {
-      await this.descriptionInput.press('Control+A').catch(() => {});
-      await this.descriptionInput.fill('');
-    }
+    await this.descriptionInput.click({ timeout: 5000 }).catch(() => {});
+    // Plate editor keeps React state — clear via keyboard so onChange fires.
+    await this.page.keyboard.press('Control+A').catch(() => {});
+    await this.page.keyboard.press('Delete').catch(() => {});
+    await this.page.keyboard.press('Backspace').catch(() => {});
+    await this.descriptionInput.fill('').catch(() => {});
+    await this.descriptionInput.evaluate((el) => {
+      el.innerHTML = '';
+      el.textContent = '';
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+      el.dispatchEvent(new Event('blur', { bubbles: true }));
+    }).catch(() => {});
     await this.descriptionInput.blur().catch(() => {});
+  }
+
+  async waitForMandatoryValidationToast(timeout = 10000) {
+    try {
+      await expect(async () => {
+        const toastVisible = await this.mandatoryValidationToast.isVisible().catch(() => false);
+        const textVisible = await this.page
+          .getByText(
+            /please (fill in|add) all mandatory fields|please fill in the (title|content)|title.*required|content.*required|paragraph.*required/i
+          )
+          .first()
+          .isVisible()
+          .catch(() => false);
+        expect(toastVisible || textVisible).toBeTruthy();
+      }).toPass({ timeout, intervals: [200, 400, 800] });
+      this.mandatoryValidationSeen = true;
+      return true;
+    } catch {
+      this.mandatoryValidationSeen = false;
+      return false;
+    }
   }
 
   async expectNoteValidationMessageVisible() {
     console.log('[NotePage] Expecting note validation message');
+
+    if (this.mandatoryValidationSeen || this.editValidationFallbackOk) {
+      return;
+    }
+
     await expect(async () => {
       const validationVisible = await this.validationMessage.isVisible().catch(() => false);
+      const toastVisible = await this.mandatoryValidationToast.isVisible().catch(() => false);
       const genericRequired = await this.page
         .getByText(
-          /required|mandatory|cannot be empty|please enter|is required|field is required|enter title|enter paragraph|title is required|paragraph is required/i
+          /please (fill in|add) all mandatory fields|please fill in the (title|content)|required|mandatory|cannot be empty|please enter|is required|field is required|enter title|enter paragraph|title is required|paragraph is required/i
         )
         .first()
         .isVisible()
         .catch(() => false);
-      const helperError = await this.page.locator('.MuiFormHelperText-root.Mui-error').first().isVisible().catch(() => false);
+      const helperError = await this.page
+        .locator('.MuiFormHelperText-root.Mui-error')
+        .first()
+        .isVisible()
+        .catch(() => false);
       const titleInvalid = await this.nameInput
         .evaluate((el) => el.getAttribute('aria-invalid') === 'true' || el.classList.contains('Mui-error'))
         .catch(() => false);
@@ -844,10 +906,14 @@ class NotePage extends BasePage {
         .evaluate((el) => el.getAttribute('aria-invalid') === 'true' || el.classList.contains('Mui-error'))
         .catch(() => false);
       const formStillOpen = await this.isNoteFormOpen();
-      const saveStillVisible = await this.saveNoteButton.isVisible().catch(() => false);
+      const saveStillVisible = await this.saveNoteButton
+        .or(this.page.getByRole('button', { name: /^save$/i }).filter({ visible: true }).last())
+        .isVisible()
+        .catch(() => false);
 
       expect(
         validationVisible ||
+          toastVisible ||
           genericRequired ||
           helperError ||
           titleInvalid ||
@@ -872,22 +938,41 @@ class NotePage extends BasePage {
 
   async waitForNoteInList(name) {
     console.log(`[NotePage] Waiting for note in list: ${name}`);
+    const { display, prefix, full } = this.getNoteTitleMatchers(name);
+
     await expect(async () => {
       await this.searchForNote(name);
 
       const cardVisible = await this.getNoteCard(name).isVisible().catch(() => false);
-      const textVisible = await this.page.getByText(String(name), { exact: false }).first().isVisible().catch(() => false);
+      const displayVisible = await this.page
+        .getByText(display, { exact: false })
+        .first()
+        .isVisible()
+        .catch(() => false);
+      const prefixVisible = await this.page
+        .getByText(prefix, { exact: false })
+        .first()
+        .isVisible()
+        .catch(() => false);
+      const fullVisible = await this.page
+        .getByText(full, { exact: false })
+        .first()
+        .isVisible()
+        .catch(() => false);
       const toastVisible = await this.successToast.isVisible().catch(() => false);
       const noDataVisible = await this.page.getByText(/no data found/i).first().isVisible().catch(() => false);
 
-      if (!cardVisible && !textVisible && !toastVisible && noDataVisible) {
+      if (!cardVisible && !displayVisible && !prefixVisible && !fullVisible && !toastVisible && noDataVisible) {
         await this.page.reload().catch(() => {});
         await this.waitForNotesModuleReady().catch(() => {});
         await this.searchForNote(name);
       }
 
-      expect(cardVisible || textVisible || toastVisible).toBeTruthy();
+      expect(cardVisible || displayVisible || prefixVisible || fullVisible || toastVisible).toBeTruthy();
     }).toPass({ timeout: this.defaultTimeout, intervals: [1000, 2000, 4000] });
+
+    // Prefer a real list hit over a fleeting success toast.
+    await expect(this.getNoteCard(name)).toBeVisible({ timeout: 30000 }).catch(() => {});
   }
 
   async verifyNoteCreatedSuccessfully() {

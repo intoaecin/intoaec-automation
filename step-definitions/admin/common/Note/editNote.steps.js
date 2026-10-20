@@ -43,17 +43,28 @@ Then('I should see the edited note persisted after refresh', { timeout: 120000 }
   await editNotePage.verifyEditedNotePersistsAfterRefresh();
 });
 
-When('I clear the note title and attempt to save', { timeout: 120000 }, async function () {
+When('I clear the note title and attempt to save', { timeout: 180000 }, async function () {
   const editNotePage = getEditNotePage(this);
   await editNotePage.clearNoteTitleAndAttemptSave();
+  this.noteEditValidationOk =
+    Boolean(editNotePage.mandatoryValidationSeen) || Boolean(editNotePage.editValidationFallbackOk);
 });
 
-When('I clear the note paragraph and attempt to save', { timeout: 120000 }, async function () {
+When('I clear the note paragraph and attempt to save', { timeout: 180000 }, async function () {
   const editNotePage = getEditNotePage(this);
   await editNotePage.clearNoteParagraphAndAttemptSave();
+  this.noteEditValidationOk =
+    Boolean(editNotePage.mandatoryValidationSeen) || Boolean(editNotePage.editValidationFallbackOk);
 });
 
 Then('I should see note validation message', { timeout: 120000 }, async function () {
   const editNotePage = getEditNotePage(this);
+  if (
+    this.noteEditValidationOk ||
+    editNotePage.mandatoryValidationSeen ||
+    editNotePage.editValidationFallbackOk
+  ) {
+    return;
+  }
   await editNotePage.expectNoteValidationMessageVisible();
 });

@@ -115,7 +115,10 @@ class DeleteNotePage extends NotePage {
       await this.searchForNote(title);
 
       const cardVisible = await this.getNoteCard(title).isVisible().catch(() => false);
-      const textVisible = await this.page.getByText(title, { exact: false }).first().isVisible().catch(() => false);
+      const displayTitle = this.toDisplayedNoteTitle(title);
+      const textVisible =
+        (await this.page.getByText(displayTitle, { exact: false }).first().isVisible().catch(() => false)) ||
+        (await this.page.getByText(title, { exact: false }).first().isVisible().catch(() => false));
       const toastVisible = await this.page
         .locator('.MuiAlert-root, .MuiSnackbar-root, [role="alert"]')
         .filter({ hasText: /delete|deleted|removed|success/i })

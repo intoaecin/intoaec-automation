@@ -33,10 +33,11 @@ class GoogleIntegrationPage extends LeadEventsPage {
   }
 
   async clickConnectGoogleMeet() {
-    console.log('[GoogleIntegrationPage] Clicking Connect Google Meet');
-    await expect(this.connectGoogleMeetButton()).toBeVisible({ timeout: this.defaultTimeout });
-    await this.connectGoogleMeetButton().click();
-    await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+    console.log('[GoogleIntegrationPage] Clicking Connect calendar');
+    const connectButton = this.connectCalendarButton();
+    await expect(connectButton).toBeVisible({ timeout: this.defaultTimeout });
+    await connectButton.click();
+    await expect(connectButton).toBeHidden({ timeout: this.defaultTimeout });
   }
 
   async expectConfigureGoogleAccountPageOpen() {
@@ -65,8 +66,7 @@ class GoogleIntegrationPage extends LeadEventsPage {
     const connectStep = this.googleConnectStep();
     await expect(connectStep).toBeVisible({ timeout: this.defaultTimeout });
     await connectStep.click();
-
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await expect(this.configureButton()).toBeVisible({ timeout: this.defaultTimeout });
   }
 
   async ensureGoogleIntegrationCardSelected() {
@@ -110,15 +110,13 @@ class GoogleIntegrationPage extends LeadEventsPage {
         popup.close().catch(() => {});
       });
     }
-
-    await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
   }
 
   async navigateBackToLeadEventsCreateMeeting() {
     console.log('[GoogleIntegrationPage] Navigating back to Lead Events Create Meeting');
-    if (await this.configureGoogleAccountHeading().isVisible({ timeout: 2000 }).catch(() => false)) {
+    if (await this.configureGoogleAccountHeading().isVisible().catch(() => false)) {
       await this.page.goBack({ waitUntil: 'domcontentloaded' }).catch(() => {});
-      await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+      await expect(this.configureGoogleAccountHeading()).toBeHidden({ timeout: this.defaultTimeout });
     }
 
     await this.reopenCreateMeetingOnlineTab();
@@ -134,8 +132,6 @@ class GoogleIntegrationPage extends LeadEventsPage {
     } else {
       await this.page.keyboard.press('Escape').catch(() => {});
     }
-
-    await this.page.waitForTimeout(1000);
   }
 
   async expectRemainsOnConfigureGoogleAccountPage() {
@@ -164,7 +160,7 @@ class GoogleIntegrationPage extends LeadEventsPage {
     const defaultPath = GoogleIntegrationStorage.getDefaultPath();
     throw new Error(
       [
-        'Google Calendar is not connected for this session.',
+        'No calendar (Google or Outlook) is connected for this session.',
         'Complete one-time setup:',
         '  npm run setup:google-integration',
         'Then run connected scenarios with:',

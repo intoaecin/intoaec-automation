@@ -1,28 +1,28 @@
 const AcceptedProposalPage = require('./AcceptedProposalPage');
 const { expect } = require('@playwright/test');
 
+function parseRevisionCount(text) {
+    return parseInt(String(text || '').replace(/[^\d]/g, ''), 10) || 0;
+}
+
 class EditProposalPage extends AcceptedProposalPage {
     constructor(page) {
         super(page);
+        this.firstSentRevision = null;
     }
 
     async clickEditProposal() {
-        // Allow CRM states to settle after previous send
-        await this.page.waitForTimeout(3000); 
+        this.firstSentRevision = Number(this.requireSentProposal().proposalRevision) || null;
 
         // Leverage precise SVG mapping supplied by the user to evade cloned row elements
         const viewEditBtnGroup = this.page.locator('button[aria-label="Edit Proposal"]')
             .or(this.page.locator('button:has(svg path[d^="M3.50146"])'));
-            
+
         // Filter strictly for the mathematically visible instance on the dynamic CRM table
-        const activeEditBtn = viewEditBtnGroup.filter({ state: 'visible' }).first();
-        
-        await expect(activeEditBtn).toBeVisible({ timeout: 15000 });
+        const activeEditBtn = viewEditBtnGroup.filter({ visible: true }).first();
+
+        await expect(activeEditBtn).toBeVisible({ timeout: 60000 });
         await activeEditBtn.click({ force: true });
-        
-        // Wait for the proposal builder / stepper UI to completely load
-        // Sometimes React blocks for a few seconds resolving the template JSON
-        await this.page.waitForTimeout(3000); 
     }
 
     async stepThroughEditBuilderAndSkip() {
@@ -32,67 +32,74 @@ class EditProposalPage extends AcceptedProposalPage {
             .or(this.page.getByRole('textbox', { name: /proposal title/i }))
             .or(this.page.locator('input[type="text"]'))
             .first();
-            
-        await expect(titleInput).toBeVisible({ timeout: 10000 });
-        
+
+        // The builder can take a while to resolve the template JSON after Edit is clicked.
+        await expect(titleInput).toBeVisible({ timeout: 60000 });
+
         let rawCurrentValue = await titleInput.inputValue().catch(() => '');
         if (!rawCurrentValue || rawCurrentValue.trim() === '') rawCurrentValue = "Automated Rev";
-        
+
         // Append edit flag to force CRM system to view it as explicitly modified
-        await titleInput.fill(`${rawCurrentValue} (Edited)`, { force: true });
-        await this.page.waitForTimeout(2000);
+        const editedTitle = `${rawCurrentValue} (Edited)`;
+        await titleInput.fill(editedTitle, { force: true });
+        await expect(titleInput).toHaveValue(editedTitle, { timeout: 10000 });
 
         // DELIBERATE OMISSION: We do NOT natively click 'Next' or 'Skip & Proceed' here!
         // The inherited `sendProposalViaEmail()` method called directly after this in the Cucumber 
         // framework internally maps to the native page handlers which cycle the UI Stepper, 
         // bypass the Template Dialog block with "Skip", and launch the exact Mail Composer UI seamlessly!
     }
-    
+
     async verifyRevisionUpdated() {
-        // Assert the revision updates in the table viewport
-        await this.page.waitForTimeout(4000); // Buffer for complex datagrid network refreshes
+        const { proposalRevision } = this.requireSentProposal();
+        console.log(`[Proposal] Revised send recorded revision ${proposalRevision} (first send: ${this.firstSentRevision})`);
+        if (this.firstSentRevision) {
+            expect(Number(proposalRevision), 'Send API did not return a higher proposal revision').toBeGreaterThan(this.firstSentRevision);
+        }
 
         // Map directly onto the explicitly provided DOM layout for the Revision Toggle Button
         const revisionsClickable = this.page.locator('.revisions-clickable')
             .or(this.page.getByText(/Revision\(s\)/i)).first();
-            
-        await expect(revisionsClickable).toBeVisible({ timeout: 15000 });
-        
-        // Pre-validate the parent text inherently incremented to > 1
-        const toggleText = await revisionsClickable.innerText();
-        const baseCount = parseInt(toggleText.replace(/[^\d]/g, ''), 10);
-        if (baseCount <= 1) {
-             throw new Error(`Revision trigger badge failed to bump mathematically! Found sequence: ${toggleText}`);
-        }
-        
+
+        await expect(revisionsClickable).toBeVisible({ timeout: 60000 });
+
+        // The revision badge refreshes asynchronously after the resend.
+        let toggleText = '';
+        await expect
+            .poll(async () => {
+                toggleText = await revisionsClickable.innerText().catch(() => '');
+                return parseRevisionCount(toggleText);
+            }, { timeout: 60000, intervals: [1000, 2000, 3000] })
+            .toBeGreaterThan(1)
+            .catch(() => {
+                throw new Error(`Revision trigger badge failed to bump mathematically! Found sequence: ${toggleText}`);
+            });
+
         // Launch the off-canvas proposal history drawer
         await revisionsClickable.click({ force: true });
-        
+
         // Anchor the DOM onto the off-canvas sidebar overlay
         const offcanvas = this.page.locator('.offcanvas, .MuiDrawer-root, .MuiDrawer-paper, [role="dialog"]')
             .filter({ hasText: /Revision/i })
             .first();
-            
+
         await expect(offcanvas).toBeVisible({ timeout: 15000 });
-        
+
         // Sift down to the first generated proposal card in the overlay stack
         const firstRevisionCard = offcanvas.locator('.MuiCard-root, .proposal-card, [class*="card"], li, .MuiBox-root')
             .filter({ hasText: /Rev|V\d|\d/i })
             .first();
-            
+
         await expect(firstRevisionCard).toBeVisible({ timeout: 10000 });
         const cardText = await firstRevisionCard.innerText();
-        
+
         // Dynamically strip the numerical revision tag parsing formats like "Revision 2", "V 2.0", "Rev-2", etc.
         const match = cardText.match(/(?:Revision|Rev|V|Version)[^\d]*(\d+)/i) || cardText.match(/(\d+)/);
         const revisionNo = match ? parseInt(match[1], 10) : 0;
-        
+
         if (revisionNo <= 1) {
             throw new Error(`The latest revision block displayed a dormant version trace of ${revisionNo}. Edit mutation sequence failed to propagate!`);
         }
-        
-        // Conclusive visual buffer signifying completion for the automated dashboard overlay
-        await this.page.waitForTimeout(2000);
     }
 }
 module.exports = EditProposalPage;

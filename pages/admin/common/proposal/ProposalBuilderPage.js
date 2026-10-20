@@ -17,6 +17,19 @@ function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** The canvas exposes no DOM signal that a drop finished, so each drop gets a short settle. */
+const CANVAS_DROP_SETTLE_MS = 400;
+
+/** One macro per Variables category; User macros open a "Select User" popup before inserting. */
+const DEFAULT_PROPOSAL_MACROS = [
+  { category: 'Organization', option: 'Organization Name' },
+  { category: 'Common', option: 'Current Date' },
+  { category: 'Leads', option: 'Lead Email' },
+  { category: 'User', option: 'First Name' },
+];
+
+const MACRO_TOKEN_PATTERN = /\{[^{}\s]+\}/g;
+
 /**
  * Drag a palette tile into the canvas.
  *
@@ -43,7 +56,7 @@ async function performPaletteDragDrop(
       targetPosition: dropOffset,
       timeout,
     });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(CANVAS_DROP_SETTLE_MS);
     return;
   } catch {
     // Fall through to the lower-level mouse + DragEvent fallback below.
@@ -69,7 +82,7 @@ async function performPaletteDragDrop(
   await page.mouse.down();
   await page.mouse.move(dropAt.x, dropAt.y, { steps: 20 });
   await page.mouse.up();
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(CANVAS_DROP_SETTLE_MS);
 
   // Fallback 2: synthetic DragEvent/DataTransfer for react-dnd style builders.
   await page.evaluate(
@@ -88,14 +101,13 @@ async function performPaletteDragDrop(
 
   await page.mouse.click(dropAt.x, dropAt.y, { delay: 50 });
   await page.waitForLoadState('domcontentloaded').catch(() => {});
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(CANVAS_DROP_SETTLE_MS);
 }
 
 class ProposalBuilderPage extends BasePage {
   constructor(page) {
     super(page);
     this.defaultTimeout = 120000;
-    this.actionSettleMs = 250;
     this.sampleText = null;
     this.sampleImageUrl = null;
     this.sampleCheckboxLabel = null;
@@ -121,10 +133,16 @@ class ProposalBuilderPage extends BasePage {
       .locator('[role="tabpanel"]:not([hidden])')
       .filter({ has: page.getByText('Editors', { exact: true }) })
       .first();
-    this.variablesTabPanel = page
+    this.macroPanel = page
       .locator('[role="tabpanel"]:not([hidden])')
-      .filter({ has: page.getByText('Variables', { exact: true }) })
+      .filter({ has: page.getByPlaceholder('Search Macro...') })
       .first();
+    this.userMacroModal = page
+      .locator('.MuiModal-root')
+      .filter({ has: page.getByPlaceholder('Select User') })
+      .first();
+    this.insertedMacros = [];
+    this.elementsCanvasId = null;
     this.editorContentEditables = page.locator('[contenteditable="true"]');
     this.toastError = page.locator('.Toastify__toast--error, .toast-error, [data-testid="toast-error"]');
     this.variableContentEditables = page.locator('[contenteditable="true"]');
@@ -140,13 +158,11 @@ class ProposalBuilderPage extends BasePage {
   async afterInteraction() {
     await this.waitUiStable();
     await expect(this.canvas).toBeVisible({ timeout: this.defaultTimeout });
-    await this.page.waitForTimeout(this.actionSettleMs);
   }
 
   async waitForBuilderToLoad() {
     await this.waitUiStable();
     await expect(this.canvas).toBeVisible({ timeout: this.defaultTimeout });
-    await this.page.waitForTimeout(this.actionSettleMs);
   }
 
   randomSuffix() {
@@ -170,7 +186,6 @@ class ProposalBuilderPage extends BasePage {
       if (el) el.scrollIntoView({ block: 'center', inline: 'nearest' });
     });
     await expect(last).toBeVisible({ timeout: this.defaultTimeout });
-    await this.page.waitForTimeout(this.actionSettleMs);
   }
 
   async getWorkingCanvas() {
@@ -192,24 +207,132 @@ class ProposalBuilderPage extends BasePage {
     return this.page;
   }
 
-  async ensureVariablesPaletteVisible() {
-    if (await this.variablesTab.isVisible().catch(() => false)) {
-      const selected = await this.variablesTab.getAttribute('aria-selected');
-      if (selected !== 'true') {
-        await this.variablesTab.click();
-        await this.waitUiStable();
-      }
+  async selectBuilderTab(tab) {
+    await expect(tab).toBeVisible({ timeout: this.defaultTimeout });
+    if ((await tab.getAttribute('aria-selected')) !== 'true') {
+      await tab.click();
+    }
+    await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: this.defaultTimeout });
+  }
+
+  macroCategoryHeader(category) {
+    return this.macroPanel
+      .locator('[role="button"][aria-expanded]')
+      .filter({ hasText: new RegExp(`^\\s*${escapeRegExp(category)}\\s*$`) })
+      .first();
+  }
+
+  /** Scoped to the category's accordion: some labels (e.g. "Organization Name") exist in several categories. */
+  macroOption(category, option) {
+    return this.macroCategoryHeader(category)
+      .locator('xpath=ancestor::div[contains(@class,"MuiAccordion-root")][1]')
+      .locator('[role="region"] p')
+      .filter({ hasText: new RegExp(`^\\s*${escapeRegExp(option)}\\s*$`) })
+      .first();
+  }
+
+  async openMacroCategory(category) {
+    await this.selectBuilderTab(this.variablesTab);
+    await expect(this.macroPanel).toBeVisible({ timeout: this.defaultTimeout });
+    const header = this.macroCategoryHeader(category);
+    await expect(header).toBeVisible({ timeout: this.defaultTimeout });
+    if ((await header.getAttribute('aria-expanded')) !== 'true') {
+      await header.click();
+    }
+    await expect(header).toHaveAttribute('aria-expanded', 'true', { timeout: this.defaultTimeout });
+  }
+
+  async readMacroTokens(editor) {
+    return ((await editor.innerText()) || '').match(MACRO_TOKEN_PATTERN) || [];
+  }
+
+  async chooseUserForMacro(userName = null) {
+    await expect(this.userMacroModal).toBeVisible({ timeout: this.defaultTimeout });
+    const userInput = this.userMacroModal.getByPlaceholder('Select User');
+    await this.userMacroModal.getByRole('button', { name: 'Open' }).click();
+    const userOption = userName
+      ? this.page.getByRole('option', { name: new RegExp(`^\\s*${escapeRegExp(userName)}\\s*$`, 'i') }).first()
+      : this.page.getByRole('option').first();
+    await expect(userOption).toBeVisible({ timeout: this.defaultTimeout });
+    const chosenUser = ((await userOption.innerText()) || '').trim();
+    await userOption.click();
+    await expect(userInput).toHaveValue(chosenUser, { timeout: this.defaultTimeout });
+
+    const addButton = this.userMacroModal.getByRole('button', { name: /^add$/i });
+    await expect(addButton).toBeEnabled({ timeout: this.defaultTimeout });
+    await addButton.click();
+    await expect(this.userMacroModal).toBeHidden({ timeout: this.defaultTimeout });
+    return chosenUser;
+  }
+
+  async readAllEditorMacroTokens() {
+    const texts = await this.editorContentEditables.allInnerTexts();
+    return texts.map((text, index) => ({ index, tokens: text.match(MACRO_TOKEN_PATTERN) || [] }));
+  }
+
+  /** Inserts a macro into the clicked Text block and requires the new token to land in that block. */
+  async insertMacro(editor, { category, option, userName = null }) {
+    await this.openMacroCategory(category);
+    const optionRow = this.macroOption(category, option);
+    await optionRow.scrollIntoViewIfNeeded();
+    await expect(optionRow).toBeVisible({ timeout: this.defaultTimeout });
+
+    const tokensBefore = await this.readMacroTokens(editor);
+    const allTokensBefore = await this.readAllEditorMacroTokens();
+    await editor.scrollIntoViewIfNeeded();
+    await editor.click();
+    await optionRow.click();
+
+    let chosenUser = null;
+    if (category === 'User') {
+      chosenUser = await this.chooseUserForMacro(userName);
     }
 
-    if (await this.variablesTabPanel.isVisible().catch(() => false)) {
-      await this.variablesTabPanel.scrollIntoViewIfNeeded().catch(() => {});
-      return this.variablesTabPanel;
+    const macroName = `${category} → ${option}${chosenUser ? ` (user ${chosenUser})` : ''}`;
+    try {
+      await expect
+        .poll(async () => (await this.readMacroTokens(editor)).length, { timeout: 30000 })
+        .toBe(tokensBefore.length + 1);
+    } catch {
+      const allTokensAfter = await this.readAllEditorMacroTokens();
+      const receivedBy = allTokensAfter
+        .filter(({ index, tokens }) => tokens.length > (allTokensBefore[index]?.tokens.length || 0))
+        .map(({ index }) => `Text editor #${index + 1}`);
+      throw new Error(
+        `[Proposal] Macro ${macroName} was not inserted into the clicked Text block; ` +
+          (receivedBy.length ? `it went into ${receivedBy.join(', ')}` : 'no Text block received it')
+      );
     }
 
-    const fallbackVariableText = this.page.getByText(/variables/i).first();
-    await expect(fallbackVariableText).toBeVisible({ timeout: this.defaultTimeout });
-    await fallbackVariableText.scrollIntoViewIfNeeded().catch(() => {});
-    return this.page.locator('[role="tabpanel"]:not([hidden])').first();
+    const remaining = [...tokensBefore];
+    const token = (await this.readMacroTokens(editor)).find((candidate) => {
+      const index = remaining.indexOf(candidate);
+      if (index === -1) return true;
+      remaining.splice(index, 1);
+      return false;
+    });
+
+    console.log(`[Proposal] Inserted macro ${macroName}: ${token}`);
+    this.insertedMacros.push({ category, option, user: chosenUser, token });
+    return token;
+  }
+
+  /** Macros get their own blank page so no other block covers the Text block they are inserted into. */
+  async addTextBlockForMacros() {
+    const elementsCanvas = await this.getWorkingCanvas();
+    this.elementsCanvasId = await elementsCanvas.getAttribute('id');
+    await this.addBlankPage();
+    await expect(this.lastCanvas).not.toHaveAttribute('id', this.elementsCanvasId, { timeout: this.defaultTimeout });
+    const macroCanvas = await this.getWorkingCanvas();
+
+    await this.selectBuilderTab(this.blocksTab);
+    await this.dragPaletteItemToCanvas('Text', { x: 80, y: 140 }, macroCanvas);
+    const editor = this.editorContentEditables.filter({ hasText: /type a paragraph/i }).last();
+    await expect(editor).toBeVisible({ timeout: this.defaultTimeout });
+    const editorIndex = await editor.evaluate((el) =>
+      Array.from(document.querySelectorAll('[contenteditable="true"]')).indexOf(el)
+    );
+    return this.editorContentEditables.nth(editorIndex);
   }
 
   async dragPaletteItemToCanvas(paletteLabelText, dropOffset = { x: 80, y: 120 }, canvasLocator = null) {
@@ -222,7 +345,6 @@ class ProposalBuilderPage extends BasePage {
       dropOffset,
       timeout: this.defaultTimeout,
     });
-    await this.page.waitForTimeout(300);
     await this.afterInteraction();
   }
 
@@ -242,10 +364,11 @@ class ProposalBuilderPage extends BasePage {
     await expect(this.editorContentEditables.first()).toBeVisible({ timeout: this.defaultTimeout });
     const editor = this.editorContentEditables.last();
     await editor.click();
-    await this.page.waitForTimeout(this.actionSettleMs);
     await this.page.keyboard.press('Control+A');
     await this.page.keyboard.type(text, { delay: 15 });
-    await this.page.waitForTimeout(this.actionSettleMs);
+    await expect(this.editorContentEditables.filter({ hasText: text }).first()).toBeVisible({
+      timeout: this.defaultTimeout,
+    });
     await editor.press('Escape');
     await this.afterInteraction();
   }
@@ -280,18 +403,16 @@ class ProposalBuilderPage extends BasePage {
 
     const modal = this.page.locator('[role="dialog"]').filter({ hasText: /select image|image gallery|image url/i }).first();
     await expect(modal).toBeVisible({ timeout: this.defaultTimeout });
-    await this.page.waitForTimeout(this.actionSettleMs);
 
     const imageUrlTab = modal.getByRole('tab', { name: /image url/i }).first();
     if (await imageUrlTab.isVisible().catch(() => false)) {
       await imageUrlTab.click();
-      await this.page.waitForTimeout(this.actionSettleMs);
     }
 
     const urlInput = modal.getByLabel(/enter url/i).or(modal.locator('input').first());
     await expect(urlInput).toBeVisible({ timeout: this.defaultTimeout });
     await urlInput.fill(url);
-    await this.page.waitForTimeout(this.actionSettleMs);
+    await expect(urlInput).toHaveValue(url, { timeout: this.defaultTimeout });
 
     await modal.getByRole('button', { name: /insert/i }).click();
     await this.waitUiStable();
@@ -323,11 +444,9 @@ class ProposalBuilderPage extends BasePage {
     }).toPass({ timeout: this.defaultTimeout, intervals: [300, 600, 1200] });
 
     await tds.nth(0).click();
-    await this.page.waitForTimeout(this.actionSettleMs);
     await this.typeIntoLastEditor(cellValue1);
 
     await tds.nth(1).click();
-    await this.page.waitForTimeout(this.actionSettleMs);
     await this.typeIntoLastEditor(cellValue2);
 
     await expect(scopedCanvas.locator(`text=${cellValue1}`).first()).toBeVisible({ timeout: this.defaultTimeout });
@@ -431,15 +550,14 @@ class ProposalBuilderPage extends BasePage {
           /checked|selected|active/i.test(String(className))
       ).toBeTruthy();
     }).toPass({ timeout: this.defaultTimeout, intervals: [300, 700, 1200] });
-    await this.page.waitForTimeout(this.actionSettleMs);
 
-    const textarea = scopedCanvas.locator('textarea').last();
+    const textarea = scopedCanvas.locator('textarea:not([aria-hidden="true"])').last();
     await expect(textarea).toBeVisible({ timeout: this.defaultTimeout });
     await textarea.click();
-    await this.page.waitForTimeout(this.actionSettleMs);
+    await expect(textarea).toBeFocused({ timeout: this.defaultTimeout });
     await this.page.keyboard.press('Control+A');
     await textarea.type(labelText, { delay: 15 });
-    await this.page.waitForTimeout(this.actionSettleMs);
+    await expect(textarea).toHaveValue(new RegExp(escapeRegExp(labelText)), { timeout: this.defaultTimeout });
     await textarea.press('Escape');
     this.sampleCheckboxLabel = labelText;
     await this.afterInteraction();
@@ -457,14 +575,13 @@ class ProposalBuilderPage extends BasePage {
 
     const modal = this.page.locator('[role="dialog"]').filter({ hasText: /choose the signature/i }).first();
     await expect(modal).toBeVisible({ timeout: this.defaultTimeout });
-    await this.page.waitForTimeout(this.actionSettleMs);
 
     const radioLabel = type === 'ADMIN' ? 'Architect Signature' : 'Lead Signature';
     this.signatureLabel = radioLabel;
     const radio = modal.getByRole('radio', { name: radioLabel });
     await expect(radio).toBeVisible({ timeout: this.defaultTimeout });
     await radio.click();
-    await this.page.waitForTimeout(this.actionSettleMs);
+    await expect(radio).toBeChecked({ timeout: this.defaultTimeout });
 
     await modal.getByRole('button', { name: /^add$/i }).click();
     await expect(modal).toBeHidden({ timeout: this.defaultTimeout });
@@ -478,9 +595,15 @@ class ProposalBuilderPage extends BasePage {
     const scopedCanvas = await this.getWorkingCanvas();
     await this.dragPaletteItemToCanvas('Shape', { x: 110, y: 90 }, scopedCanvas);
 
-    const shapeSelect = this.page.getByRole('combobox', { name: /^Shape$/ }).first();
+    const shapeSelect = this.page
+      .getByRole('combobox', { name: /^Shape$/ })
+      .or(this.page.getByRole('combobox').filter({ hasText: /^\s*(square|rectangle|circle|ellipse|triangle)\s*$/i }))
+      .first();
+    if (!(await shapeSelect.isVisible().catch(() => false))) {
+      // The shape toolbar only opens once the dropped shape is selected.
+      await scopedCanvas.locator('.react-draggable').last().click();
+    }
     await expect(shapeSelect).toBeVisible({ timeout: this.defaultTimeout });
-    await this.page.waitForTimeout(this.actionSettleMs);
 
     // ShapeEditorToolbar: Background Color = PaintBucket IconButton (templateCenter.proposal.backgroundColor).
     const bgFillButton = this.page.locator('button:has(svg.lucide-paint-bucket)').first();
@@ -493,7 +616,6 @@ class ProposalBuilderPage extends BasePage {
         await this.page.mouse.click(box.x + box.width + 40, box.y + box.height / 2);
       });
     }
-    await this.page.waitForTimeout(this.actionSettleMs);
 
     const picker = this.page.locator('.chrome-picker').first();
     await expect(picker).toBeVisible({ timeout: this.defaultTimeout });
@@ -504,7 +626,6 @@ class ProposalBuilderPage extends BasePage {
         pickerBox.y + pickerBox.height * 0.45
       );
     }
-    await this.page.waitForTimeout(400);
     await this.page.keyboard.press('Escape').catch(() => {});
     await this.afterInteraction();
   }
@@ -519,35 +640,32 @@ class ProposalBuilderPage extends BasePage {
     const qty2Str = String(1 + Math.floor(Math.random() * 9));
 
     const canvasPricing = scopedCanvas.locator('table').last();
-    const priceArea = canvasPricing.locator('textarea').first();
+    const priceArea = canvasPricing.locator('textarea:not([aria-hidden="true"])').first();
     await expect(priceArea).toBeVisible({ timeout: this.defaultTimeout });
     await priceArea.click();
-    await this.page.waitForTimeout(this.actionSettleMs);
+    await expect(priceArea).toBeFocused({ timeout: this.defaultTimeout });
     await this.page.keyboard.press('Control+A');
     await priceArea.type(priceStr, { delay: 15 });
     await priceArea.press('Escape');
     this.pricingSamplePrice = priceStr;
-    await this.page.waitForTimeout(this.actionSettleMs);
 
     const numberInputs = canvasPricing.locator('input[type="number"]');
     const count = await numberInputs.count();
     if (count > 0) {
       await numberInputs.nth(0).click();
-      await this.page.waitForTimeout(this.actionSettleMs);
+      await expect(numberInputs.nth(0)).toBeFocused({ timeout: this.defaultTimeout });
       await this.page.keyboard.press('Control+A');
       await numberInputs.nth(0).type(qty1Str, { delay: 15 });
       await numberInputs.nth(0).press('Escape');
       this.pricingSampleQty1 = qty1Str;
-      await this.page.waitForTimeout(this.actionSettleMs);
     }
     if (count > 1) {
       await numberInputs.nth(1).click();
-      await this.page.waitForTimeout(this.actionSettleMs);
+      await expect(numberInputs.nth(1)).toBeFocused({ timeout: this.defaultTimeout });
       await this.page.keyboard.press('Control+A');
       await numberInputs.nth(1).type(qty2Str, { delay: 15 });
       await numberInputs.nth(1).press('Escape');
       this.pricingSampleQty2 = qty2Str;
-      await this.page.waitForTimeout(this.actionSettleMs);
     }
 
     await expect(scopedCanvas.locator(`text=${priceStr}`).first()).toBeVisible({ timeout: this.defaultTimeout });
@@ -561,12 +679,30 @@ class ProposalBuilderPage extends BasePage {
 
     const modal = this.page.locator('[role="dialog"]').filter({ hasText: /add terms and conditions/i }).first();
     await expect(modal).toBeVisible({ timeout: this.defaultTimeout });
-    await this.page.waitForTimeout(this.actionSettleMs);
+
+    const hasTerms = await modal
+      .locator('input[type="radio"]')
+      .first()
+      .waitFor({ state: 'visible', timeout: 15000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!hasTerms) {
+      console.log('[Proposal] No Terms & Conditions templates for this account; leaving the block out');
+      const closeButton = modal.getByRole('button', { name: /cancel|close/i }).first();
+      if (await closeButton.isVisible().catch(() => false)) {
+        await closeButton.click();
+      } else {
+        await this.page.keyboard.press('Escape');
+      }
+      await expect(modal).toBeHidden({ timeout: this.defaultTimeout });
+      await this.afterInteraction();
+      return;
+    }
 
     const firstRadio = modal.locator('input[type="radio"]').first();
     await expect(firstRadio).toBeVisible({ timeout: this.defaultTimeout });
     await firstRadio.click();
-    await this.page.waitForTimeout(this.actionSettleMs);
+    await expect(firstRadio).toBeChecked({ timeout: this.defaultTimeout });
 
     await modal.getByRole('button', { name: /^add$/i }).click();
     await expect(modal).toBeHidden({ timeout: this.defaultTimeout });
@@ -583,44 +719,30 @@ class ProposalBuilderPage extends BasePage {
     await this.afterInteraction();
   }
 
-  async addAllVisibleVariablesAndMacros() {
+  async addAllVisibleVariablesAndMacros(macros = DEFAULT_PROPOSAL_MACROS) {
     await this.waitForBuilderToLoad();
-    const scopedCanvas = await this.getWorkingCanvas();
-    const variableRoot = await this.ensureVariablesPaletteVisible();
-    const tiles = variableRoot.locator('[draggable="true"]');
+    const editor = await this.addTextBlockForMacros();
 
-    await expect(async () => {
-      expect(await tiles.count()).toBeGreaterThan(0);
-    }).toPass({ timeout: this.defaultTimeout, intervals: [500, 1000, 2000] });
-
-    const count = Math.min(await tiles.count(), 8);
-    for (let i = 0; i < count; i += 1) {
-      const label = (await tiles.nth(i).innerText().catch(() => '')).trim().replace(/\s+/g, ' ');
-      const tileLabel = label || `Variable ${i + 1}`;
-        await performPaletteDragDrop(this.page, {
-          paletteLabelText: tileLabel,
-          canvasLocator: scopedCanvas,
-          paletteRoot: variableRoot,
-          dropOffset: { x: 60 + i * 18, y: 120 + i * 24 },
-          timeout: this.defaultTimeout,
-      });
-      await this.page.waitForTimeout(this.actionSettleMs);
+    for (const macro of macros) {
+      await this.insertMacro(editor, macro);
     }
 
+    const tokens = await this.readMacroTokens(editor);
+    for (const { token } of this.insertedMacros) {
+      expect(tokens).toContain(token);
+    }
+
+    await editor.press('Escape');
+    await this.selectBuilderTab(this.blocksTab);
     await this.afterInteraction();
-
-    if (await this.blocksTab.isVisible().catch(() => false)) {
-      const selected = await this.blocksTab.getAttribute('aria-selected');
-      if (selected !== 'true') {
-        await this.blocksTab.click();
-        await this.afterInteraction();
-      }
-    }
   }
 
   async assertAllElementsAddedSuccessfully() {
     await this.waitUiStable();
-    const scopedCanvas = await this.getWorkingCanvas();
+    const scopedCanvas = this.elementsCanvasId
+      ? this.page.locator(`[id="${this.elementsCanvasId}"]`)
+      : await this.getWorkingCanvas();
+    await scopedCanvas.scrollIntoViewIfNeeded();
     const errorCount = await this.toastError.count();
     await expect(errorCount).toBe(0);
     await expect(scopedCanvas.locator('img[alt="Organization Logo"], img[alt*="Organization Logo"]').first()).toBeVisible({
@@ -651,6 +773,12 @@ class ProposalBuilderPage extends BasePage {
         timeout: this.defaultTimeout,
       });
     }
+    if (this.insertedMacros.length) {
+      const macroCanvas = await this.getWorkingCanvas();
+      for (const { token } of this.insertedMacros) {
+        await expect(macroCanvas.getByText(token).first()).toBeVisible({ timeout: this.defaultTimeout });
+      }
+    }
     await this.afterInteraction();
   }
 
@@ -660,7 +788,6 @@ class ProposalBuilderPage extends BasePage {
     if (errorCount > 0) {
       throw new Error(`UI errors detected: ${errorCount} error toast(s)`);
     }
-    await this.page.waitForTimeout(this.actionSettleMs);
   }
 
   async tryClickEditorPreviewIcon() {
@@ -668,7 +795,6 @@ class ProposalBuilderPage extends BasePage {
     if (await previewBtn.isVisible().catch(() => false)) {
       await previewBtn.click();
       await this.waitUiStable();
-      await this.page.waitForTimeout(this.actionSettleMs);
     }
   }
 }

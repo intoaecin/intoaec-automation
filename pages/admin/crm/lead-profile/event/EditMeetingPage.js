@@ -72,8 +72,7 @@ class EditMeetingPage extends EventPage {
       console.log(`[EditMeetingPage] Meeting update API responded with status ${response.status()}`);
     }
 
-    await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-    await expect(this.panel()).toBeHidden({ timeout: this.defaultTimeout }).catch(() => {});
+    await expect(this.panel()).toBeHidden({ timeout: this.defaultTimeout });
   }
 
   async verifyMeetingUpdatedSuccessfully() {

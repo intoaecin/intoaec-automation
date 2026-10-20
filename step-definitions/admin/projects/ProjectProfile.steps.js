@@ -2,6 +2,7 @@
 const { When } = require('@cucumber/cucumber');
 const ProjectNavigationPage = require('../../../pages/admin/projects/ProjectNavigationPage');
 const ProjectProfilePage = require('../../../pages/admin/projects/ProjectProfilePage');
+const urls = require('../../../config/urls');
 
 function getSchedulePage(page) {
   const SchedulePage = require('../../../pages/admin/projects/management/Schedule/SchedulePage');
@@ -21,8 +22,11 @@ When('I navigate to the Projects page', { timeout: 120000 }, async function () {
 
 When('I click on the first project in the list', { timeout: 120000 }, async function () {
   const projectProfilePage = new ProjectProfilePage(this.page);
-  if (await projectProfilePage.isInsideProjectProfile()) {
-    console.log('Already on project profile — skipping project selection');
+  if (
+    (await projectProfilePage.isInsideProjectProfile()) ||
+    urls.isClientProjectProfile(this.page.url())
+  ) {
+    console.log('Already on client/project profile — skipping project selection');
     return;
   }
   const projectNavigationPage = new ProjectNavigationPage(this.page);

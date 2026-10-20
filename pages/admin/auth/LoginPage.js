@@ -1,6 +1,6 @@
 // pages/admin/auth/LoginPage.js
 const BasePage = require('../../BasePage');
-const env = require('../../../config/env');
+const urls = require('../../../config/urls');
 
 class LoginPage extends BasePage {
   constructor(page) {
@@ -39,7 +39,7 @@ class LoginPage extends BasePage {
   }
 
   async goto() {
-    await this.page.goto(env.admin, {
+    await this.page.goto(urls.adminBase, {
       waitUntil: 'domcontentloaded',
       timeout: 60000,
     });
@@ -50,7 +50,7 @@ class LoginPage extends BasePage {
     if (await this._isSignInVisible()) {
       return;
     }
-    await this.page.goto(`${env.admin}/auth/signIn`, {
+    await this.page.goto(urls.adminSignIn, {
       waitUntil: 'domcontentloaded',
       timeout: 60000,
     });
@@ -156,11 +156,11 @@ class LoginPage extends BasePage {
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
     await Promise.race([
       this.page
-        .getByLabel(/clients\/projects/i)
+        .getByLabel(/clients\/projects|^projects$/i)
         .first()
         .waitFor({ state: 'visible', timeout: 60000 }),
       this.page
-        .getByRole('button', { name: /clients\/projects/i })
+        .getByRole('button', { name: /clients\/projects|^projects$/i })
         .first()
         .waitFor({ state: 'visible', timeout: 60000 }),
       this.page

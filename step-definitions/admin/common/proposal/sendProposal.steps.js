@@ -34,7 +34,6 @@ function getBuilderPage(world) {
 async function waitBetweenSteps(page) {
   await page.waitForLoadState('domcontentloaded').catch(() => {});
   await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
-  await page.waitForTimeout(200);
 }
 
 // --- Proposal workspace entry points (client/project profile → Proposal tab) ---

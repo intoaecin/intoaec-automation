@@ -199,7 +199,7 @@ class MeetingUIPage extends EventPage {
     console.log('[MeetingUIPage] Clicking Create Meeting close icon');
     await this.expectCloseIconVisibleAndClickable();
     await this.closeIconButton().click();
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await expect(this.createMeetingPanel.first()).toBeHidden({ timeout: this.defaultTimeout });
   }
 
   async expectCreateMeetingPopupClosed() {
@@ -210,8 +210,7 @@ class MeetingUIPage extends EventPage {
   async expectUserReturnedToEventsPage() {
     console.log('[MeetingUIPage] Verifying user returned to Events page');
     await this.expectCreateMeetingPopupClosed();
-    await expect(this.actionButton.first()).toBeVisible({ timeout: this.defaultTimeout });
-    await expect(this.eventsMeetingTypeTablist()).toBeVisible({ timeout: this.defaultTimeout });
+    await this.waitForEventsModuleReady();
   }
 }
 

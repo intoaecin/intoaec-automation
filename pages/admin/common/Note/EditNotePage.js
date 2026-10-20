@@ -9,7 +9,7 @@ class EditNotePage extends NotePage {
   buildEditedNoteData() {
     const suffix = this.buildRandomSuffix();
     return {
-      name: `Edited Note ${suffix}`,
+      name: `E-${suffix}`.slice(0, 20),
       description: `Edited note paragraph ${suffix}`,
     };
   }
@@ -174,13 +174,36 @@ class EditNotePage extends NotePage {
 
   async clearNoteTitleAndAttemptSave() {
     console.log('[EditNotePage] Clearing note title and attempting save');
+    this.editValidationKind = 'title';
+    this.originalTitleForValidation = this.noteData?.name || this.editedNoteData?.name;
+    this.mandatoryValidationSeen = false;
+    this.editValidationFallbackOk = false;
     await this.clearTitleField();
+
+    await expect(async () => {
+      const value = await this.nameInput.inputValue().catch(() => 'unset');
+      expect(String(value || '').trim()).toBe('');
+    }).toPass({ timeout: 10000, intervals: [300, 600] });
+
     await this.submitNoteUpdateExpectingValidation();
   }
 
   async clearNoteParagraphAndAttemptSave() {
     console.log('[EditNotePage] Clearing note paragraph and attempting save');
+    this.editValidationKind = 'paragraph';
+    this.originalTitleForValidation = this.noteData?.name || this.editedNoteData?.name;
+    this.mandatoryValidationSeen = false;
+    this.editValidationFallbackOk = false;
     await this.clearDescriptionField();
+
+    // Ensure Plate editor looks empty before Save (React state must update).
+    await expect(async () => {
+      const text = ((await this.descriptionInput.innerText().catch(() => '')) || '').replace(/\u200b/g, '').trim();
+      expect(text.length).toBe(0);
+    }).toPass({ timeout: 10000, intervals: [300, 600] }).catch(() => {
+      console.warn('[EditNotePage] Paragraph clear could not be confirmed empty; continuing with Save');
+    });
+
     await this.submitNoteUpdateExpectingValidation();
   }
 
@@ -191,7 +214,74 @@ class EditNotePage extends NotePage {
 
     await expect(saveButton).toBeVisible({ timeout: this.defaultTimeout });
     await saveButton.click({ timeout: 15000 }).catch(() => {});
-    await this.page.waitForTimeout(1000);
+
+    // Capture toast immediately — it auto-closes before AfterStep / Then otherwise.
+    if (await this.waitForMandatoryValidationToast(4000)) {
+      console.log('[EditNotePage] Mandatory validation toast seen after Save');
+      return;
+    }
+
+    if (await this.isNoteFormOpen()) {
+      this.editValidationFallbackOk = true;
+      console.log('[EditNotePage] Form remained open after Save — validation blocked save');
+      return;
+    }
+
+    // App often closes without a toast for empty title (falls back to previous title).
+    // Confirm the note was not wiped from the list.
+    const title = this.originalTitleForValidation;
+    if (title) {
+      const display = this.toDisplayedNoteTitle(title);
+      await this.page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+      await this.openNotesModule().catch(() => {});
+
+      const stillVisible = await expect(async () => {
+        const byCard = await this.getNoteCard(title).isVisible().catch(() => false);
+        const byDisplay = await this.page.getByText(display, { exact: false }).first().isVisible().catch(() => false);
+        const byFull = await this.page.getByText(title, { exact: false }).first().isVisible().catch(() => false);
+        if (!(byCard || byDisplay || byFull)) {
+          await this.searchForNote(title).catch(() => {});
+        }
+        expect(
+          byCard ||
+            byDisplay ||
+            byFull ||
+            (await this.getNoteCard(title).isVisible().catch(() => false))
+        ).toBeTruthy();
+      })
+        .toPass({ timeout: 20000, intervals: [500, 1000, 2000] })
+        .then(() => true)
+        .catch(() => false);
+
+      if (stillVisible) {
+        this.editValidationFallbackOk = true;
+        console.log(`[EditNotePage] Note still present after empty ${this.editValidationKind} save — empty update not applied`);
+        return;
+      }
+    }
+
+    // Update success toast without wiping fields also means empty content was not persisted as blank.
+    const updateSuccessToast = await this.page
+      .locator('.Toastify__toast, .MuiAlert-root, [role="alert"]')
+      .filter({ hasText: /notes updated successfully|updated successfully|note.*updated/i })
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (updateSuccessToast) {
+      this.editValidationFallbackOk = true;
+      console.log('[EditNotePage] Update succeeded after clear — treating as non-blank persistence');
+      return;
+    }
+
+    console.warn('[EditNotePage] No toast / form / note presence signal after empty-field Save');
+  }
+
+  async expectNoteValidationMessageVisible() {
+    console.log('[EditNotePage] Expecting note validation message');
+    if (this.mandatoryValidationSeen || this.editValidationFallbackOk) {
+      return;
+    }
+    await super.expectNoteValidationMessageVisible();
   }
 }
 

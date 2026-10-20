@@ -6,6 +6,27 @@ class DeleteCallLogPage extends CallLogPage {
     super(page);
   }
 
+  confirmYesInDialog() {
+    return this.confirmDialog
+      .getByRole('button', { name: /^yes$|^delete$|^confirm$|^ok$/i })
+      .or(this.confirmYesButton)
+      .first();
+  }
+
+  confirmNoInDialog() {
+    return this.confirmDialog
+      .getByRole('button', { name: /^(no|cancel)$/i })
+      .or(this.confirmCancelButton)
+      .first();
+  }
+
+  deleteReasonInput() {
+    return this.confirmDialog
+      .getByRole('textbox', { name: /reason/i })
+      .or(this.confirmDialog.getByLabel(/reason/i))
+      .first();
+  }
+
   async createCallLogForDeletion() {
     console.log('[DeleteCallLogPage] Creating call log ready for deletion');
     await this.navigateToCallLogForm();
@@ -27,13 +48,21 @@ class DeleteCallLogPage extends CallLogPage {
     await this.deleteMenuItem.click();
   }
 
+  async expectDeleteConfirmationPopupVisible() {
+    console.log('[DeleteCallLogPage] Expecting delete confirmation popup');
+    await expect(this.confirmDialog).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(
+      this.confirmDialog.getByText(/are you sure you want to delete call log|delete call log/i).first()
+    ).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(this.confirmYesInDialog()).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(this.confirmNoInDialog()).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(this.deleteReasonInput()).toBeVisible({ timeout: this.defaultTimeout });
+  }
+
   async confirmCallLogDeletion() {
     console.log('[DeleteCallLogPage] Confirming call log deletion');
     await expect(this.confirmDialog).toBeVisible({ timeout: this.defaultTimeout });
-    const yesButton = this.confirmDialog
-      .getByRole('button', { name: /^yes$/i })
-      .or(this.confirmYesButton)
-      .first();
+    const yesButton = this.confirmYesInDialog();
 
     await expect(yesButton).toBeVisible({ timeout: this.defaultTimeout });
     await expect(yesButton).toBeEnabled({ timeout: this.defaultTimeout });
@@ -50,8 +79,17 @@ class DeleteCallLogPage extends CallLogPage {
     await yesButton.click();
     await deleteResponse;
 
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-    await expect(this.confirmDialog).toBeHidden({ timeout: 30000 }).catch(() => {});
+    await expect(this.confirmDialog).toBeHidden({ timeout: 30000 });
+  }
+
+  async cancelCallLogDeletion() {
+    console.log('[DeleteCallLogPage] Cancelling call log deletion');
+    await expect(this.confirmDialog).toBeVisible({ timeout: this.defaultTimeout });
+    const noButton = this.confirmNoInDialog();
+    await expect(noButton).toBeVisible({ timeout: this.defaultTimeout });
+    await noButton.click();
+    await expect(this.confirmDialog).toBeHidden({ timeout: 30000 });
+    await this.dismissOpenMenus();
   }
 
   async verifyCallLogDeletedSuccessfully() {
@@ -60,29 +98,31 @@ class DeleteCallLogPage extends CallLogPage {
       throw new Error('[DeleteCallLogPage] Missing call purpose data for delete verification');
     }
 
-    console.log('[DeleteCallLogPage] Verifying call log deleted successfully');
+    console.log(`[DeleteCallLogPage] Verifying call log is no longer in the list: ${purpose}`);
+    await this.ensureOnCallLogModuleList();
+
     await expect(async () => {
       await this.searchForCallLog(purpose);
-
       const rowVisible = await this.getCallLogRow(purpose).isVisible().catch(() => false);
-      const textVisible = await this.page
-        .getByText(purpose, { exact: false })
-        .first()
-        .isVisible()
-        .catch(() => false);
-      const toastVisible = await this.page
-        .locator('.MuiAlert-root, .MuiSnackbar-root, [role="alert"]')
-        .filter({ hasText: /delete|deleted|removed|success/i })
-        .first()
-        .isVisible()
-        .catch(() => false);
-      const genericDeletedVisible = await this.page
-        .getByText(/call\s*log\s*deleted|deleted\s*successfully|removed\s*successfully|delete\s*success/i)
-        .first()
-        .isVisible()
-        .catch(() => false);
+      expect(rowVisible).toBeFalsy();
+    }).toPass({ timeout: 60000, intervals: [1000, 2000, 4000] });
+  }
 
-      expect(toastVisible || genericDeletedVisible || (!rowVisible && !textVisible)).toBeTruthy();
+  async verifyCallLogStillPresentInList() {
+    const original = this.callLogData;
+    if (!original?.callPurpose || !original?.comment) {
+      throw new Error('[DeleteCallLogPage] Missing original call log data for presence verification');
+    }
+
+    console.log(`[DeleteCallLogPage] Verifying call log still present: ${original.callPurpose}`);
+    await this.ensureOnCallLogModuleList();
+
+    await expect(async () => {
+      await this.searchForCallLog(original.callPurpose);
+      const row = this.getCallLogRow(original.callPurpose);
+      await expect(row).toBeVisible();
+      await expect(row.getByText(original.callPurpose, { exact: false })).toBeVisible();
+      await expect(row.getByText(original.comment, { exact: false })).toBeVisible();
     }).toPass({ timeout: 60000, intervals: [1000, 2000, 4000] });
   }
 }

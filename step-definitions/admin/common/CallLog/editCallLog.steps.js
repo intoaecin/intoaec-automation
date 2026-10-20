@@ -32,3 +32,28 @@ Then('I should see the call log updated successfully', { timeout: 120000 }, asyn
   const editCallLogPage = getEditCallLogPage(this);
   await editCallLogPage.verifyCallLogUpdatedSuccessfully();
 });
+
+When('I refresh the Call Log page', { timeout: 120000 }, async function () {
+  const editCallLogPage = getEditCallLogPage(this);
+  await editCallLogPage.refreshCallLogPage();
+});
+
+Then('I should see the edited call log persisted after refresh', { timeout: 120000 }, async function () {
+  const editCallLogPage = getEditCallLogPage(this);
+  await editCallLogPage.verifyEditedCallLogPersistsAfterRefresh();
+});
+
+When('I clear the call log mandatory fields and attempt to save', { timeout: 120000 }, async function () {
+  const editCallLogPage = getEditCallLogPage(this);
+  await editCallLogPage.clearMandatoryEditFieldsAndAttemptSave();
+});
+
+Then('I should see call log edit mandatory validation', { timeout: 120000 }, async function () {
+  const editCallLogPage = getEditCallLogPage(this);
+  await editCallLogPage.expectCallLogEditMandatoryValidation();
+});
+
+Then('the call log should not be updated', { timeout: 120000 }, async function () {
+  const editCallLogPage = getEditCallLogPage(this);
+  await editCallLogPage.expectCallLogNotUpdated();
+});

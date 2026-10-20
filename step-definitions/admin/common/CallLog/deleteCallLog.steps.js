@@ -27,3 +27,18 @@ Then('I should see the call log deleted successfully', { timeout: 120000 }, asyn
   const deleteCallLogPage = getDeleteCallLogPage(this);
   await deleteCallLogPage.verifyCallLogDeletedSuccessfully();
 });
+
+Then('I should see the call log delete confirmation popup', { timeout: 120000 }, async function () {
+  const deleteCallLogPage = getDeleteCallLogPage(this);
+  await deleteCallLogPage.expectDeleteConfirmationPopupVisible();
+});
+
+When('I cancel call log deletion from the popup', { timeout: 120000 }, async function () {
+  const deleteCallLogPage = getDeleteCallLogPage(this);
+  await deleteCallLogPage.cancelCallLogDeletion();
+});
+
+Then('I should see the call log still present in the list', { timeout: 120000 }, async function () {
+  const deleteCallLogPage = getDeleteCallLogPage(this);
+  await deleteCallLogPage.verifyCallLogStillPresentInList();
+});

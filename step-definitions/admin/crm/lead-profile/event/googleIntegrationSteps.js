@@ -52,8 +52,6 @@ When('I close the Google OAuth popup without signing in', { timeout: 120000 }, a
   } else {
     await page.cancelGoogleAuthenticationPopup();
   }
-
-  await page.page.waitForTimeout(1000);
 });
 
 When('I navigate back to Lead Events Create Meeting Online tab', { timeout: 120000 }, async function () {
