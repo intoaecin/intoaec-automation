@@ -1,4 +1,4 @@
-@regression @rfq @rfq-vendor @rfq-compare-vendor-price
+@regression @rfq @rfq-vendor @rfq-compare-vendor-price @ashraf-modules
 Feature: RFQ Vendor - compare vendor price after price update
 
   Create and send an RFQ to a Yopmail vendor, open Yopmail in a new tab, click View RFQ,

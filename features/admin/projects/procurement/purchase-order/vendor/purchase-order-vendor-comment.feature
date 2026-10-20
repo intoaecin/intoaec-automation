@@ -1,4 +1,4 @@
-@po @procurement @vendor @po-vendor-comment
+@po @procurement @vendor @po-vendor-comment @ashraf-modules
 Feature: Purchase Order — vendor adds comment via Yopmail (same browser)
 
   Create PO → send to Yopmail vendor → **View PO** → submit a **comment** on the vendor portal and assert it appears.

@@ -1,4 +1,4 @@
-@regression @rfq @rfq-vendor @rfq-vendor-decline @negative
+@regression @rfq @rfq-vendor @rfq-vendor-decline @negative @ashraf-modules
 Feature: RFQ Vendor - decline
 
   Create and send an RFQ to a Yopmail vendor, open Yopmail in a new tab, click View RFQ,

@@ -1,4 +1,4 @@
-@regression @rfq @rfq-download
+@regression @rfq @rfq-download @ashraf-modules
 Feature: RFQ — download from preview
 
   Create an RFQ via Action → Compose email → Send email, open Preview from the RFQ card menu,

@@ -1,4 +1,4 @@
-@crm @lead-profile @events @meeting @delete @positive @regression
+@crm @lead-profile @events @meeting @delete @positive @regression @ashraf-modules
 Feature: Delete Meeting
 
   Background:

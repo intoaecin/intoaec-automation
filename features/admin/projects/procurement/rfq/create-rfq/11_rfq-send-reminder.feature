@@ -1,4 +1,4 @@
-@regression @rfq @send-reminder
+@regression @rfq @send-reminder @ashraf-modules
 Feature: RFQ - send reminder from list
 
   Create and send an RFQ through compose email, then expand the created RFQ card,

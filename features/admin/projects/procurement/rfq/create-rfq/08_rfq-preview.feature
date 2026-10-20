@@ -1,4 +1,4 @@
-@regression @rfq @rfq-preview
+@regression @rfq @rfq-preview @ashraf-modules
 Feature: RFQ — preview
 
   Create an RFQ via Action → Compose email → Send email (same as compose RFQ),

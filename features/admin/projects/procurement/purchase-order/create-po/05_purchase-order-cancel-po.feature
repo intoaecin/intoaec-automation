@@ -1,4 +1,4 @@
-@smoke @regression @po @procurement @create-po @po-cancel
+@smoke @regression @po @procurement @create-po @po-cancel @ashraf-modules
 Feature: Purchase Order — create and cancel from list
 
   Create PO, send email, return to list, open ⋮ on the first card, choose Cancel.

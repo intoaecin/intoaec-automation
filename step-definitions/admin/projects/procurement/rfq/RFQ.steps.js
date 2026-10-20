@@ -37,6 +37,11 @@ When('I fill RFQ title with {string}', { timeout: 120000 }, async function (titl
     : base;
   this.lastRfqTitle = finalTitle;
   await rfq.fillRfqTitle(finalTitle);
+  try {
+    require('../../../../../support/vendor-rfq-session').setRfqTitle(finalTitle);
+  } catch {
+    /* optional */
+  }
   console.log(`[RFQ] Title set to exact value "${finalTitle}"`);
 });
 
@@ -58,7 +63,21 @@ When('I set RFQ created on date to a random date', { timeout: 120000 }, async fu
 
 When('I add the first vendor in RFQ vendor panel', { timeout: 180000 }, async function () {
   const rfq = getRfqPage(this);
-  await rfq.addFirstVendorFromPanel();
+  const email = await rfq.addFirstVendorFromPanel();
+  if (email) this.vendorRfqLoginEmail = email;
+});
+
+When('I add a vendor in the RFQ vendor panel', { timeout: 180000 }, async function () {
+  const testData = require('../../../../../utils/testData');
+  const vendorRfqSession = require('../../../../../support/vendor-rfq-session');
+  const rfq = getRfqPage(this);
+  const preferEmail = String(testData.vendor?.rfqUser?.email || '').trim();
+  const email = await rfq.addVendorFromPanel({ preferEmail });
+  this.vendorRfqLoginEmail = email || preferEmail || null;
+  if (this.vendorRfqLoginEmail) vendorRfqSession.setVendorEmail(this.vendorRfqLoginEmail);
+  console.log(
+    `[RFQ] Selected vendor for portal login: ${this.vendorRfqLoginEmail || '(unknown — using testData fallback at login)'}`
+  );
 });
 
 When(
@@ -74,6 +93,68 @@ When(
   }
 );
 
+When(
+  'I select {string} from the RFQ item category type dropdown',
+  { timeout: 120000 },
+  async function (category) {
+    const rfq = getRfqPage(this);
+    await rfq.selectItemCategoryType(category);
+  }
+);
+
+When(
+  'I select {int} products from the RFQ Material product dropdown',
+  { timeout: 180000 },
+  async function (count) {
+    const rfq = getRfqPage(this);
+    const selected = await rfq.selectMaterialProductsFromDropdown(count);
+    this.lastRfqSelectedProducts = selected;
+  }
+);
+
+When(
+  'I create {int} new Material products in the RFQ cost catalog',
+  { timeout: 240000 },
+  async function (count) {
+    const rfq = getRfqPage(this);
+    this.lastRfqSelectedProducts = await rfq.createMaterialProductsInCatalog(count);
+  }
+);
+
+Then(
+  'I should see {int} selected products added to the RFQ',
+  { timeout: 120000 },
+  async function (count) {
+    const rfq = getRfqPage(this);
+    if (this.lastRfqSelectedProducts) {
+      rfq.lastRfqSelectedProducts = this.lastRfqSelectedProducts;
+    }
+    await rfq.expectSelectedProductsAddedToRfq(count);
+  }
+);
+
+When('I enter quantity for each selected RFQ product', { timeout: 120000 }, async function () {
+  const rfq = getRfqPage(this);
+  if (this.lastRfqSelectedProducts) {
+    rfq.lastRfqSelectedProducts = this.lastRfqSelectedProducts;
+  }
+  await rfq.enterQuantityForSelectedRfqProducts('1');
+  this.lastRfqSelectedProducts = rfq.lastRfqSelectedProducts;
+});
+
+When(
+  'I select unit {string} for each selected RFQ product',
+  { timeout: 120000 },
+  async function (unit) {
+    const rfq = getRfqPage(this);
+    if (this.lastRfqSelectedProducts) {
+      rfq.lastRfqSelectedProducts = this.lastRfqSelectedProducts;
+    }
+    await rfq.selectUnitForSelectedRfqProducts(unit);
+    this.lastRfqSelectedProducts = rfq.lastRfqSelectedProducts;
+  }
+);
+
 When('I create the RFQ from Action menu', { timeout: 240000 }, async function () {
   const rfq = getRfqPage(this);
   await rfq.openActionMenuAndChooseCreate();
@@ -85,8 +166,9 @@ Then('I should see RFQ created successfully toast', { timeout: 240000 }, async f
 });
 
 When('I open the RFQ titled {string} on the admin RFQ list', { timeout: 180000 }, async function (title) {
+  const vendorRfqSession = require('../../../../../support/vendor-rfq-session');
   const rfq = getRfqPage(this);
-  const wanted = String(this.lastRfqTitle || title || '').trim();
+  const wanted = String(title || this.lastRfqTitle || vendorRfqSession.getRfqTitle() || '').trim();
   this.lastRfqTitle = wanted;
   await rfq.openRfqByTitle(wanted);
 });
@@ -94,6 +176,11 @@ When('I open the RFQ titled {string} on the admin RFQ list', { timeout: 180000 }
 Then('I should see the RFQ price update status on the expanded card', { timeout: 120000 }, async function () {
   const rfq = getRfqPage(this);
   await rfq.expectPriceUpdateStatusOnExpandedCard();
+});
+
+Then('I should see the RFQ vendor response status on the expanded card', { timeout: 120000 }, async function () {
+  const rfq = getRfqPage(this);
+  await rfq.expectVendorResponseStatusOnExpandedCard();
 });
 
 Then(
@@ -113,4 +200,19 @@ Then(
     await rfq.expectUpdatedPriceVisible(price, itemName);
   }
 );
+
+Then('I should see the RFQ status displayed as Declined on the admin RFQ card', { timeout: 120000 }, async function () {
+  const rfq = getRfqPage(this);
+  await rfq.expectDeclinedStatusOnExpandedCard();
+});
+
+Then('I should see the RFQ vendor declined response on the admin RFQ card', { timeout: 120000 }, async function () {
+  const rfq = getRfqPage(this);
+  await rfq.expectVendorDeclinedResponseOnExpandedCard();
+});
+
+Then('I should see the vendor comment {string} on the admin RFQ', { timeout: 120000 }, async function (comment) {
+  const rfq = getRfqPage(this);
+  await rfq.expectVendorCommentVisibleOnExpandedCard(comment);
+});
 

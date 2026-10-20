@@ -127,23 +127,22 @@ class InventoryPage extends BasePage {
       .first();
   }
 
-  /** Prefer the clickable card/row for the recently created group (newest match first). */
+  /**
+   * The group card. Clicking the blue title starts a rename (check / X).
+   * The card body ("All items") opens the group details.
+   */
   createdGroupClickTarget(name) {
     const escaped = this.escapeRegex(name);
-    const exact = new RegExp(`^\\s*${escaped}\\s*$`, 'i');
-    const contains = new RegExp(escaped, 'i');
-    const exactLabel = this.page
-      .locator('span, p, h1, h2, h3, h4, h5, h6, button, a')
-      .filter({ hasText: exact })
+    const nameRe = new RegExp(escaped.replace(/\s+/g, '\\s*'), 'i');
+    const title = this.page
+      .locator('span, p, h1, h2, h3, h4, h5, h6, a')
+      .filter({ hasText: nameRe })
       .filter({ visible: true })
       .first();
-    // Resolve one element only — do not chain .or() into expect().
-    return exactLabel
-      .locator(
-        'xpath=ancestor::*[contains(@class,"Card") or contains(@class,"card") or contains(@class,"MuiPaper") or @role="button"][1]'
-      )
-      .or(exactLabel)
-      .first();
+    const card = title.locator(
+      'xpath=ancestor::div[.//*[contains(translate(normalize-space(.), "ALL ITEMS", "all items"), "all items")]][1]'
+    );
+    return card.getByText(/all items/i).first();
   }
 
   async waitForCreateGroupDialogClosed() {
@@ -223,8 +222,8 @@ class InventoryPage extends BasePage {
   }
 
   /**
-   * Click the recently created inventory group, then wait until Add Items is ready.
-   * Do not click generic "close" after open — that can leave the group detail.
+   * Click the group card body to open its details.
+   * The blue title is a rename field (green check / red X) — do not click that.
    */
   async openCreatedInventoryGroup() {
     const name = this.lastCreatedGroupName;
@@ -241,6 +240,8 @@ class InventoryPage extends BasePage {
     // After Item Requests / Add to Group we are not on the groups list — leave first.
     // Otherwise clicks hit the Group Name cell in the requests table and never open detail.
     await this.ensureOnInventoryGroupsList();
+    // Leave a rename editor if a previous click focused the title.
+    await this.page.keyboard.press('Escape').catch(() => {});
 
     const deadline = Date.now() + this.defaultTimeout;
     let lastError = null;
@@ -251,10 +252,8 @@ class InventoryPage extends BasePage {
         continue;
       }
       await group.scrollIntoViewIfNeeded().catch(() => {});
-      await group.click({ timeout: 20000, force: true }).catch((e) => {
-        lastError = e;
-      });
-      await this.logStep(`Clicked recently created inventory group: ${name}`);
+      await group.click({ timeout: 20000 });
+      await this.logStep(`Clicked inventory group card "${name}"`);
       await this.page.waitForLoadState('domcontentloaded').catch(() => {});
       await this.page.waitForTimeout(600);
 
@@ -262,8 +261,8 @@ class InventoryPage extends BasePage {
         await this.logStep(`Opened inventory group (Add Items ready): ${name}`);
         return;
       }
-      // Soft retry — wrong click target or slow navigation.
       lastError = new Error(`Add Items not visible after opening group "${name}"`);
+      await this.page.keyboard.press('Escape').catch(() => {});
       await this.page.waitForTimeout(1000);
     }
 

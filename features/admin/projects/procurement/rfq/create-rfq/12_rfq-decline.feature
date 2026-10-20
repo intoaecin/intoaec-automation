@@ -1,4 +1,4 @@
-@regression @rfq @decline
+@regression @rfq @decline @ashraf-modules
 Feature: RFQ - decline from list
 
   Create and send an RFQ through compose email, then expand the created RFQ card,

@@ -7,3 +7,4 @@ reports/cucumber-report.html
 screenshots/
 
 fixtures/google-integration/storage-state.json
+support/.vendor-rfq-session.json

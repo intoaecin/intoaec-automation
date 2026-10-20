@@ -1,4 +1,4 @@
-@smoke @regression @po @procurement @create-po @po-create
+@smoke @regression @po @procurement @create-po @po-create @ashraf-modules
 Feature: Purchase Order — create PO via Action menu Create
 
   Create from scratch, add vendor and line item, submit via Action → Create (not Compose email).

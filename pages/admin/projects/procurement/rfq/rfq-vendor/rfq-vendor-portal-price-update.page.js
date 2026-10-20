@@ -267,6 +267,36 @@ class RfqVendorPortalPriceUpdatePage extends BasePage {
     return n;
   }
 
+  /**
+   * Fill each Material row with sample prices (defaults: 1000, 2000, 3000…).
+   * @param {string[]} [samplePrices]
+   * @returns {Promise<string[]>} prices applied per row
+   */
+  async fillSamplePricesOnAllLineItemRows(samplePrices) {
+    const defaults = ['1000', '2000', '3000', '4000', '5000'];
+    const samples = (Array.isArray(samplePrices) ? samplePrices : [])
+      .map((p) => String(p || '').trim())
+      .filter(Boolean);
+
+    await this.openPriceUpdateEditorIfNeeded();
+    const rows = this.lineItemRows();
+    await expect(rows.first()).toBeVisible({ timeout: 60000 });
+    const count = Math.max(await rows.count(), 1);
+    const applied = [];
+
+    for (let i = 0; i < count; i += 1) {
+      const value =
+        samples[i] ||
+        defaults[i] ||
+        String((i + 1) * 1000);
+      // eslint-disable-next-line no-await-in-loop
+      await this.fillPriceOnLineItemRow(i, value);
+      applied.push(value);
+      console.log(`[RFQ Vendor] Sample price on line-item row ${i + 1}: ${value}`);
+    }
+    return applied;
+  }
+
   async clickSaveRateIfPresent(rowScope) {
     const p = this.page;
     const scope = rowScope || p;

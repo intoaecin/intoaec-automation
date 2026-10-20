@@ -66,7 +66,11 @@ class InviteVendorPage extends BasePage {
       .or(page.locator('input[name="taxName"]'))
       .or(page.getByLabel(/^tax name$/i))
       .first();
-    this.sendInviteButton = page.getByRole('dialog').getByRole('button', { name: /^send invite$/i }).first();
+    // Older UI had "Send Invite" inside the dialog; current UI sends via "Send Via Email" (WhatsApp is the other option).
+    this.sendInviteButton = page
+      .getByRole('dialog')
+      .getByRole('button', { name: /^send via email$|^send invite$/i })
+      .first();
 
     this.searchInput = page
       .getByPlaceholder(/search/i)
@@ -318,10 +322,19 @@ class InviteVendorPage extends BasePage {
   }
 
   async clickSendInvite() {
-    const form = this._inviteFormDialog();
-    const btn = form.getByRole('button', { name: /^send invite$/i }).first();
+    const btn = this.sendInviteButton;
     await expect(btn).toBeVisible({ timeout: this.defaultTimeout });
-    await expect(btn).toBeEnabled({ timeout: this.uiTimeout });
+    await expect(btn)
+      .toBeEnabled({ timeout: this.uiTimeout })
+      .catch(async (err) => {
+        const errors = await this._inviteFormDialog()
+          .locator('.Mui-error, .MuiFormHelperText-root')
+          .allInnerTexts()
+          .catch(() => []);
+        console.error(`[InviteVendor] Send Via Email stayed disabled. Form messages: ${errors.join(' | ') || '(none)'}`);
+        throw err;
+      });
+    const btnText = ((await btn.innerText().catch(() => '')) || 'Send Via Email').trim();
 
     const email = String(this.lastInvite?.email || '').toLowerCase();
     const posts = [];
@@ -338,7 +351,7 @@ class InviteVendorPage extends BasePage {
       .catch(() => null);
 
     await btn.click({ timeout: this.uiTimeout, force: true });
-    this.logStep('Clicked Send Invite on the invite form');
+    this.logStep(`Clicked "${btnText}" on the invite form`);
 
     const res = await responsePromise;
     this.page.off('response', onResponse);
@@ -690,9 +703,12 @@ class InviteVendorPage extends BasePage {
     this.logStep(`Vendor Registration page is displayed (${this.page.url()})`);
   }
 
+  /** INVITE_VENDOR_MOBILE overrides the feature value (a number already linked to a vendor cannot register again). */
   async fillRegistrationMobile(value) {
-    const digits = String(value || '').replace(/\D/g, '');
+    const override = String(process.env.INVITE_VENDOR_MOBILE || '').replace(/\D/g, '');
+    const digits = override || String(value || '').replace(/\D/g, '');
     const phone = digits || String(value || '').trim();
+    this.registrationMobile = phone;
     await this._fillText(this.registrationMobileInput, phone, 'Mobile Number');
     this.logStep(`Registration OTP mobile (SMS): ${phone}`);
   }
@@ -724,19 +740,47 @@ class InviteVendorPage extends BasePage {
 
   async waitForOtpEmail() {
     await this.page.bringToFront().catch(() => {});
-    this.logStep('OTP is sent by SMS to 7305570607 — enter it in the browser on the next step');
+    this.logStep(`OTP is sent by SMS to ${this.registrationMobile || 'the registration mobile'} — enter it in the browser on the next step`);
     return null;
+  }
+
+  async _mobileAlreadyExists() {
+    return this.page
+      .getByText(/already\s*(exists?|registered|in use|taken)|existing\s*(mobile|number|phone)/i)
+      .first()
+      .isVisible({ timeout: 2000 })
+      .catch(() => false);
   }
 
   async enterOtpManually() {
     await this.page.bringToFront().catch(() => {});
-    const firstOtp = this.otpInputs.first().or(this.page.getByPlaceholder(/otp|code/i).first());
-    if (await firstOtp.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await firstOtp.click({ timeout: this.uiTimeout }).catch(() => {});
+    const numberTaken = await this._mobileAlreadyExists();
+    if (numberTaken) {
+      this.logStep(`Mobile ${this.registrationMobile} is already registered — replace it manually in the browser`);
+    } else {
+      const firstOtp = this.otpInputs.first().or(this.page.getByPlaceholder(/otp|code/i).first());
+      if (await firstOtp.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await firstOtp.click({ timeout: this.uiTimeout }).catch(() => {});
+      }
     }
     await this.waitForEnterInTerminal(
-      'Type the SMS OTP for 7305570607 in the browser. When it is entered, press ENTER here to set password and continue.'
+      numberTaken
+        ? `Mobile ${this.registrationMobile} already exists. In the browser: enter a NEW mobile number, request the OTP, ` +
+            'type the SMS OTP (and click Verify if shown). Then press ENTER here to set password and continue.'
+        : `Type the SMS OTP for ${this.registrationMobile || 'the registration mobile'} in the browser (click Verify if shown). ` +
+            'When it is entered, press ENTER here to set password and continue.'
     );
+
+    const finalMobile = ((await this.registrationMobileInput.inputValue().catch(() => '')) || '').replace(/\D/g, '');
+    if (finalMobile && finalMobile !== this.registrationMobile) {
+      this.logStep(`Registration mobile changed manually: ${this.registrationMobile} → ${finalMobile}`);
+      this.registrationMobile = finalMobile;
+    }
+    if (await this._mobileAlreadyExists()) {
+      throw new Error(
+        `Mobile ${this.registrationMobile} is still shown as already existing — set INVITE_VENDOR_MOBILE to an unused number and rerun.`
+      );
+    }
     this.logStep('Manual OTP entry completed');
   }
 
@@ -744,24 +788,42 @@ class InviteVendorPage extends BasePage {
     if (await this.verifyOtpButton.isVisible({ timeout: 4000 }).catch(() => false)) {
       await this.verifyOtpButton.click({ timeout: this.uiTimeout });
       this.logStep('Clicked Verify OTP');
+      await this.waitForNetworkSettled();
     } else {
       this.logStep('No Verify OTP button — continuing after manual OTP');
     }
-    const passwordReady = await this.page
-      .locator('input[type="password"]')
-      .first()
-      .isVisible({ timeout: 8000 })
-      .catch(() => false);
-    if (passwordReady) {
-      this.logStep('Password fields are ready after OTP');
-      return;
-    }
-    this.logStep('Password fields not shown yet — they may already be on this same form');
+
+    await expect
+      .poll(
+        async () => {
+          const passwordReady = await this.page
+            .locator('input[type="password"]')
+            .first()
+            .isVisible({ timeout: 400 })
+            .catch(() => false);
+          if (passwordReady) return true;
+          const verified = await this.page
+            .getByText(/otp verified|verified successfully|mobile verified/i)
+            .first()
+            .isVisible({ timeout: 400 })
+            .catch(() => false);
+          if (verified) return true;
+          const proceed = this.page.getByRole('button', { name: /proceed\s*to\s*login|^proceed$/i }).first();
+          return proceed.isEnabled().catch(() => false);
+        },
+        { timeout: 30000, intervals: [500, 1000, 2000] }
+      )
+      .toBeTruthy()
+      .catch(() => {});
+
+    this.logStep('OTP step complete — password fields or Proceed should be ready');
   }
 
   async fillPassword(value) {
     const first = this.page.locator('input[type="password"]').first();
     await this._fillText(first, value, 'Password');
+    await first.blur().catch(() => {});
+    await this.page.keyboard.press('Tab').catch(() => {});
   }
 
   async fillConfirmPassword(value) {
@@ -769,24 +831,96 @@ class InviteVendorPage extends BasePage {
     const count = await inputs.count().catch(() => 0);
     if (count >= 2) {
       await this._fillText(inputs.nth(1), value, 'Confirm Password');
-      return;
-    }
-    if (await this.confirmPasswordInput.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await inputs.nth(1).blur().catch(() => {});
+    } else if (await this.confirmPasswordInput.isVisible({ timeout: 2000 }).catch(() => false)) {
       await this._fillText(this.confirmPasswordInput, value, 'Confirm Password');
+      await this.confirmPasswordInput.blur().catch(() => {});
     }
+    await this.page.keyboard.press('Tab').catch(() => {});
+  }
+
+  async _registrationProceedButton() {
+    const candidates = [
+      this.page.getByRole('button', { name: /proceed\s*to\s*login/i }),
+      this.page.getByRole('button', { name: /^proceed$/i }),
+      this.proceedLoginButton,
+      this.page
+        .getByRole('button', {
+          name: /login|sign in|continue|submit|create account|update|save|register|finish|set password/i,
+        })
+        .filter({ visible: true })
+        .last(),
+    ];
+    for (const loc of candidates) {
+      if (await loc.isVisible({ timeout: 1500 }).catch(() => false)) {
+        return loc.first();
+      }
+    }
+    return this.proceedLoginButton;
   }
 
   async clickProceedOrLogin() {
-    const btn = this.page
-      .getByRole('button', {
-        name: /proceed|login|sign in|continue|submit|create account|update|save|register|finish|set password/i,
-      })
-      .filter({ visible: true })
-      .last();
+    const btn = await this._registrationProceedButton();
     await expect(btn).toBeVisible({ timeout: this.defaultTimeout });
+
+    await expect
+      .poll(
+        async () => {
+          if (await btn.isEnabled().catch(() => false)) return true;
+          const pwds = this.page.locator('input[type="password"]');
+          const count = await pwds.count().catch(() => 0);
+          for (let i = 0; i < count; i++) {
+            await pwds.nth(i).blur().catch(() => {});
+          }
+          await this.page.keyboard.press('Tab').catch(() => {});
+          return btn.isEnabled().catch(() => false);
+        },
+        {
+          timeout: 60000,
+          intervals: [500, 1000, 2000],
+          message: 'Proceed To Login stayed disabled — verify OTP was accepted and both passwords match policy',
+        }
+      )
+      .toBeTruthy();
+
+    const responses = [];
+    const onResponse = async (res) => {
+      const method = res.request().method();
+      if (!['POST', 'PUT', 'PATCH'].includes(method) || this._isTrackingUrl(res.url())) return;
+      const body = await res.text().catch(() => '');
+      responses.push({ status: res.status(), url: res.url(), body: body.slice(0, 300) });
+    };
+    this.page.on('response', onResponse);
+
     await btn.click({ timeout: this.uiTimeout });
-    await this.waitForNetworkSettled();
     this.logStep('Clicked Proceed/Login on vendor registration');
+    await this.waitForNetworkSettled();
+    await this.page.waitForTimeout(1500);
+    this.page.off('response', onResponse);
+
+    for (const r of responses) this.logStep(`Registration API ${r.status} ${r.url} ${r.body}`);
+    const messages = await this._visibleMessages();
+    if (messages.length) this.logStep(`Registration page messages: ${messages.join(' | ')}`);
+
+    const failedApi = responses.find(
+      (r) => r.status >= 400 || /"success"\s*:\s*false|already\s*(exists?|registered|in use)|invalid|expired/i.test(r.body)
+    );
+    const errorText = messages.find((m) => /already|invalid|incorrect|expired|failed|error|wrong|not\s*match/i.test(m));
+    if (failedApi || errorText) {
+      throw new Error(
+        `Vendor registration did not complete — ${errorText || ''} ${
+          failedApi ? `(API ${failedApi.status}: ${failedApi.body})` : ''
+        }`.trim()
+      );
+    }
+  }
+
+  async _visibleMessages() {
+    const texts = await this.page
+      .locator('.Toastify__toast, .MuiAlert-root, [role="alert"], .MuiFormHelperText-root.Mui-error, .Mui-error .MuiFormHelperText-root')
+      .allInnerTexts()
+      .catch(() => []);
+    return [...new Set(texts.map((t) => t.replace(/\s+/g, ' ').trim()).filter(Boolean))];
   }
 
   async refreshAndSignInWithInvitedCredentials(email, password) {

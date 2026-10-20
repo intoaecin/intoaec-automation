@@ -1,4 +1,4 @@
-@regression @po @procurement @create-po @po-multi-line-item
+@regression @po @procurement @create-po @po-multi-line-item @ashraf-modules
 Feature: Purchase Order — create PO with multiple manual line items
 
   Same navigation as single-line create PO; adds ten manual rows via Add manually,

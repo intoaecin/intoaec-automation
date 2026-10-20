@@ -1,4 +1,4 @@
-@regression @rfq @rfq-vendor @rfq-vendor-comment
+@regression @rfq @rfq-vendor @rfq-vendor-comment @ashraf-modules
 Feature: RFQ Vendor - comment
 
   Create and send an RFQ to a Yopmail vendor, open Yopmail in a new tab, click View RFQ,

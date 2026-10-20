@@ -1,4 +1,4 @@
-@regression @po @procurement @create-po @po-default-terms-template
+@regression @po @procurement @create-po @po-default-terms-template @ashraf-modules
 Feature: Purchase Order — create PO with default terms from template and send email
 
   Does not type in the Terms & Conditions editor — only clicks "Choose from Template",

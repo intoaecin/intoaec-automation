@@ -54,19 +54,29 @@ When(
   { timeout: 240000 },
   async function () {
     const testData = require('../../../../../../utils/testData');
+    const vendorPoSession = require('../../../../../../support/vendor-po-session');
     const po = getPurchaseOrderCreatePoPage(this);
-    const yopmailFromRow = await po.addVendorDetailsWithFirstVendorRadio();
+    const preferEmail = String(testData.vendor?.rfqUser?.email || 'praveen@yopmail.com').trim();
+    const yopmailFromRow = await po.addVendorDetailsWithFirstVendorRadio({ preferEmail });
     if (yopmailFromRow) {
       this.vendorYopmailEmail = yopmailFromRow;
+      this.vendorRfqLoginEmail = yopmailFromRow;
+      po.lastAddedVendorEmail = yopmailFromRow;
     }
     if (!this.vendorYopmailEmail) {
       this.vendorYopmailEmail =
         process.env.PO_VENDOR_YOPMAIL_ID ||
         process.env.PO_VENDOR_YOPMAIL_LOGIN ||
-        testData.vendor?.rfqUser?.email ||
+        preferEmail ||
         null;
     }
-    console.log(`[PO] Vendor Yopmail for later inbox: ${this.vendorYopmailEmail || '(none)'}`);
+    if (this.vendorYopmailEmail) {
+      this.vendorRfqLoginEmail = this.vendorYopmailEmail;
+      vendorPoSession.setVendorEmail(this.vendorYopmailEmail);
+    }
+    console.log(
+      `[PO] Selected vendor for portal login: ${this.vendorYopmailEmail || '(none)'} (same pattern as RFQ)`
+    );
   }
 );
 
@@ -125,7 +135,7 @@ When(
       preferEmail: this.vendorYopmailEmail || testData.vendor?.rfqUser?.email,
       excludeEmails: [
         testData.admin?.validUser?.email,
-        'aadhi@yopmail.com',
+        'kumar@diy.in',
         'testintoaec@gmail.com',
       ],
     });
@@ -147,7 +157,7 @@ When(
       preferEmail: this.vendorYopmailEmail || testData.vendor?.rfqUser?.email,
       excludeEmails: [
         testData.admin?.validUser?.email,
-        'aadhi@yopmail.com',
+        'kumar@diy.in',
         'testintoaec@gmail.com',
       ],
     });
@@ -203,5 +213,116 @@ When(
   async function () {
     const po = getPurchaseOrderCreatePoPage(this);
     await po.waitForPurchaseOrderListAfterCreateRedirect();
+  }
+);
+
+When(
+  'I open Add Items on the Purchase Order form',
+  { timeout: 120000 },
+  async function () {
+    const po = getPurchaseOrderCreatePoPage(this);
+    await po.openAddItemsSectionAfterVendor();
+  }
+);
+
+When(
+  'I select {int} products from the Purchase Order Product Item dropdown',
+  { timeout: 240000 },
+  async function (count) {
+    const po = getPurchaseOrderCreatePoPage(this);
+    const selected = await po.selectProductsFromItemDropdown(count);
+    this.lastPoSelectedProducts = selected;
+    this.lastPoTitle = this.lastPoTitle || 'New PO 1';
+  }
+);
+
+When(
+  'I select {int} different products from the Purchase Order Product Item dropdown',
+  { timeout: 240000 },
+  async function (count) {
+    const po = getPurchaseOrderCreatePoPage(this);
+    const selected = await po.selectProductsFromItemDropdown(count);
+    this.lastPoSelectedProducts = selected;
+    this.lastPoTitle = this.lastPoTitle || 'New PO 1';
+  }
+);
+
+When(
+  'I create {int} new Material products in the Purchase Order cost catalog',
+  { timeout: 240000 },
+  async function (count) {
+    const po = getPurchaseOrderCreatePoPage(this);
+    this.lastPoSelectedProducts = await po.createProductsInCatalog(count);
+    this.lastPoTitle = this.lastPoTitle || 'New PO 1';
+  }
+);
+
+Then(
+  'I should see {int} selected products added to the Purchase Order',
+  { timeout: 120000 },
+  async function (count) {
+    const po = getPurchaseOrderCreatePoPage(this);
+    if (this.lastPoSelectedProducts) {
+      po.lastPoSelectedProducts = this.lastPoSelectedProducts;
+    }
+    await po.expectSelectedProductsAddedToPo(count);
+  }
+);
+
+When(
+  'I enter quantities 1 and 2 for the selected Purchase Order products',
+  { timeout: 120000 },
+  async function () {
+    const po = getPurchaseOrderCreatePoPage(this);
+    if (this.lastPoSelectedProducts) {
+      po.lastPoSelectedProducts = this.lastPoSelectedProducts;
+    }
+    await po.enterQuantitiesForSelectedPoProducts(['1', '2']);
+  }
+);
+
+When(
+  'I enter quantities 1, 2 and 3 for the selected Purchase Order products',
+  { timeout: 120000 },
+  async function () {
+    const po = getPurchaseOrderCreatePoPage(this);
+    if (this.lastPoSelectedProducts) {
+      po.lastPoSelectedProducts = this.lastPoSelectedProducts;
+    }
+    await po.enterQuantitiesForSelectedPoProducts(['1', '2', '3']);
+  }
+);
+
+When(
+  'I select unit {string} for each selected Purchase Order product',
+  { timeout: 120000 },
+  async function (unit) {
+    const po = getPurchaseOrderCreatePoPage(this);
+    if (this.lastPoSelectedProducts) {
+      po.lastPoSelectedProducts = this.lastPoSelectedProducts;
+    }
+    await po.selectUnitForSelectedPoProducts(unit);
+  }
+);
+
+When('I fill remaining required purchase order details', { timeout: 180000 }, async function () {
+  const po = getPurchaseOrderCreatePoPage(this);
+  if (this.lastPoSelectedProducts) {
+    po.lastPoSelectedProducts = this.lastPoSelectedProducts;
+  }
+  await po.fillRemainingRequiredPoDetails();
+});
+
+Then(
+  'I should see the purchase order titled {string} in the Purchase Order list',
+  { timeout: 180000 },
+  async function (title) {
+    const po = getPurchaseOrderCreatePoPage(this);
+    const wanted = String(this.lastPoTitle || title || '').trim();
+    this.lastPoTitle = wanted;
+    await po.expectPurchaseOrderTitleVisibleOnList(wanted);
+    if (po.lastPoNumber) {
+      this.lastPoNumber = po.lastPoNumber;
+    }
   }
 );

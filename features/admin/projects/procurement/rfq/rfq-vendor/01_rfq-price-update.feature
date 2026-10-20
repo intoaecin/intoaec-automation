@@ -1,4 +1,4 @@
-@regression @rfq @rfq-vendor @rfq-price-update
+@regression @rfq @rfq-vendor @rfq-price-update @ashraf-modules
 Feature: RFQ Vendor - price update
 
   Create and send an RFQ to a Yopmail vendor, open Yopmail in a new tab, click View RFQ,

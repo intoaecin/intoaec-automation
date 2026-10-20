@@ -1,4 +1,4 @@
-@regression @rfq @compose-rfq
+@regression @rfq @compose-rfq @ashraf-modules
 Feature: RFQ — compose email and send
 
   Same journey as create RFQ from scratch; finishes with Action → Compose email → Send email.

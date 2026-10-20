@@ -1,4 +1,4 @@
-@regression @rfq @rfq-notes
+@regression @rfq @rfq-notes @ashraf-modules
 Feature: RFQ — notes and compose email
 
   Same journey as compose RFQ; fills the Notes area with random medium-length text before Action → Compose email.

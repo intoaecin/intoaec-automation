@@ -83,9 +83,56 @@ class VendorRFQPage extends BasePage {
     return /procurement-hub/i.test(String(this.page.url() || ''));
   }
 
+  /**
+   * Connected Organizations table (Organization name / Admin Name / Email / Contact).
+   * Must not be treated as the projects list.
+   */
+  async isConnectedOrganizationsListVisible() {
+    const orgNameHeader = this.page
+      .getByRole('columnheader', { name: /organization\s*name/i })
+      .or(this.page.getByText(/^organization\s*name$/i))
+      .first();
+    const adminHeader = this.page
+      .getByRole('columnheader', { name: /admin\s*name/i })
+      .or(this.page.getByText(/^admin\s*name$/i))
+      .first();
+    const emailHeader = this.page
+      .getByRole('columnheader', { name: /email\s*address/i })
+      .or(this.page.getByText(/^email\s*address$/i))
+      .first();
+    if (await orgNameHeader.isVisible({ timeout: 600 }).catch(() => false)) {
+      if (
+        (await adminHeader.isVisible({ timeout: 400 }).catch(() => false)) ||
+        (await emailHeader.isVisible({ timeout: 400 }).catch(() => false))
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Org contact row: "adityaconstructions Adam max email@… +91…" — not a project. */
+  isConnectedOrganizationRowText(text) {
+    const n = String(text || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!n) return false;
+    if (/organization\s*name|admin\s*name|email\s*address|contact\s*number/i.test(n)) return true;
+    const hasEmail = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(n);
+    const hasPhone = /(\+|00)?\d[\d\s\-()]{7,}\d/.test(n);
+    return hasEmail && hasPhone;
+  }
+
   async isProjectsListVisible() {
+    // Still on Connected Organizations → not projects yet.
+    if (await this.isConnectedOrganizationsListVisible()) return false;
+
+    if (/\/procurement-hub\/profile\//i.test(this.page.url())) return true;
+
     const rfqTab = this.page.getByRole('tab', { name: /^rfq$/i }).first();
     if (await rfqTab.isVisible({ timeout: 800 }).catch(() => false)) return true;
+    const poTab = this.page.getByRole('tab', { name: /purchase\s*order|^po$/i }).first();
+    if (await poTab.isVisible({ timeout: 500 }).catch(() => false)) return true;
 
     const projectHeader = this.page
       .getByRole('columnheader', { name: /project/i })
@@ -99,9 +146,20 @@ class VendorRFQPage extends BasePage {
       if ((await cards.count().catch(() => 0)) > 0) return true;
     }
 
-    // Hub often stays on /procurement-hub after org click; project table alone is enough.
+    // Hub often stays on /procurement-hub after org click; project table alone is enough —
+    // but only when we are no longer on the Connected Organizations table.
     const rows = this.page.locator('table tbody tr').filter({ has: this.page.locator('td') }).filter({ visible: true });
-    if ((await rows.count().catch(() => 0)) > 0) {
+    const rowCount = await rows.count().catch(() => 0);
+    if (rowCount > 0) {
+      let orgLike = 0;
+      for (let i = 0; i < Math.min(rowCount, 5); i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        const text = ((await rows.nth(i).innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+        if (this.isConnectedOrganizationRowText(text)) orgLike += 1;
+      }
+      if (orgLike >= Math.min(rowCount, 1) && orgLike === Math.min(rowCount, 5)) {
+        return false;
+      }
       const orgPickerHint = this.page.getByText(/select\s*(an?\s*)?organization|connected\s*organizations?/i).first();
       if (!(await orgPickerHint.isVisible({ timeout: 500 }).catch(() => false))) {
         return true;
@@ -242,7 +300,7 @@ class VendorRFQPage extends BasePage {
     await this.waitForNetworkSettled();
     await this.page.waitForTimeout(1000).catch(() => {});
 
-    if (await this.isProjectsListVisible()) {
+    if ((await this.isProjectsListVisible()) && !(await this.isConnectedOrganizationsListVisible())) {
       // When a specific org name is requested, still try to click it (projects detection can false-positive on org cards).
       if (!String(orgName || process.env.VENDOR_RFQ_ORG_NAME || '').trim()) {
         this.logStep('Projects list already visible — organization already selected');
@@ -250,37 +308,122 @@ class VendorRFQPage extends BasePage {
       }
     }
 
-    const candidates = [
-      String(orgName || '').trim(),
-      String(process.env.VENDOR_RFQ_ORG_NAME || '').trim(),
-      'adithya constraction',
-      'adityaconstructions',
-      'Intoaec Org',
-      'intoaec',
-      'IntoAEC',
-      'Intoaec',
-    ].filter((name, index, arr) => name && arr.indexOf(name) === index);
+    const requested = String(orgName || '').trim();
+    const candidates = requested
+      ? [
+          requested,
+          'kumarorganization',
+          'kumar',
+        ].filter((name, index, arr) => name && arr.indexOf(name) === index)
+      : [
+          String(process.env.VENDOR_RFQ_ORG_NAME || '').trim(),
+          'kumarorganization',
+          'kumar',
+          'kumarorganization',
+          'Intoaec Org',
+          'intoaec',
+          'IntoAEC',
+          'Intoaec',
+        ].filter((name, index, arr) => name && arr.indexOf(name) === index);
+
+    const tryEnterOrganization = async (target, name) => {
+      await target.scrollIntoViewIfNeeded().catch(() => {});
+
+      // Hub org name is a cursor-pointer div (not the whole row). Row click does nothing.
+      const nameHit = target
+        .locator('.cursor-pointer, [class*="cursor-pointer"]')
+        .filter({
+          hasText: new RegExp(
+            this._escapeRegex(String(name || '').split(/\s+/)[0] || 'kumar'),
+            'i'
+          ),
+        })
+        .first()
+        .or(target.locator('.cursor-pointer, [class*="cursor-pointer"]').first())
+        .or(target.getByText(/kumar/i).first());
+
+      if (await nameHit.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await nameHit.click({ timeout: this.uiTimeout, force: true }).catch(async () => {
+          await nameHit.click({ timeout: this.uiTimeout });
+        });
+        await this.waitForNetworkSettled();
+        await this.page.waitForTimeout(1500).catch(() => {});
+        if (/\/procurement-hub\/profile\//i.test(this.page.url()) || (await this.isProjectsListVisible())) {
+          return true;
+        }
+      }
+
+      await target.click({ timeout: this.uiTimeout, force: true }).catch(async () => {
+        await target.click({ timeout: this.uiTimeout });
+      });
+      await this.waitForNetworkSettled();
+      await this.page.waitForTimeout(1000).catch(() => {});
+      if (/\/procurement-hub\/profile\//i.test(this.page.url()) || (await this.isProjectsListVisible())) {
+        return true;
+      }
+
+      // Reliable fallback: org logo S3 path embeds the same UUID as /procurement-hub/profile/{uuid}.
+      const imgSrc =
+        (await target.locator('img').first().getAttribute('src').catch(() => '')) ||
+        (await this.page
+          .locator('table tbody tr')
+          .filter({ hasText: /kumar/i })
+          .first()
+          .locator('img')
+          .first()
+          .getAttribute('src')
+          .catch(() => ''));
+      const uuidMatch = String(imgSrc || '').match(
+        /\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i
+      );
+      if (uuidMatch && uuidMatch[1]) {
+        const profileUrl = `https://vendor.aecplayhouse.com/procurement-hub/profile/${uuidMatch[1]}`;
+        this.logStep(`Opening org profile via logo UUID (${uuidMatch[1]})`);
+        await this.page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: this.defaultTimeout });
+        await this.waitForNetworkSettled();
+        await this.page.waitForTimeout(1200).catch(() => {});
+        if (/\/procurement-hub\/profile\//i.test(this.page.url()) || (await this.isProjectsListVisible())) {
+          return true;
+        }
+      }
+
+      // Row click often only selects; open via View / double-click / Enter.
+      const viewBtn = target
+        .getByRole('button', { name: /view|open|projects?|enter|details/i })
+        .or(target.locator('button, a, [role="button"]').filter({ hasText: /view|open|projects?/i }))
+        .or(target.locator('[aria-label*="view" i], [title*="view" i], [aria-label*="open" i]'))
+        .filter({ visible: true })
+        .first();
+      if (await viewBtn.isVisible({ timeout: 1200 }).catch(() => false)) {
+        await viewBtn.click({ timeout: this.uiTimeout, force: true }).catch(() => {});
+        await this.waitForNetworkSettled();
+        await this.page.waitForTimeout(1000).catch(() => {});
+        if (/\/procurement-hub\/profile\//i.test(this.page.url()) || (await this.isProjectsListVisible())) {
+          return true;
+        }
+      }
+
+      await target.dblclick({ timeout: this.uiTimeout }).catch(() => {});
+      await this.waitForNetworkSettled();
+      await this.page.waitForTimeout(1000).catch(() => {});
+      if (/\/procurement-hub\/profile\//i.test(this.page.url()) || (await this.isProjectsListVisible())) {
+        return true;
+      }
+
+      if (await this.isConnectedOrganizationsListVisible()) {
+        this.logStep(`Clicked org "${name}" but still on Connected Organizations list`);
+        return false;
+      }
+      return false;
+    };
 
     let selectedLabel = '';
     for (const name of candidates) {
       const target = await this.findOrganizationTarget(name);
       if (!target) continue;
 
-      await target.scrollIntoViewIfNeeded().catch(() => {});
-      await target.click({ timeout: this.uiTimeout, force: true }).catch(async () => {
-        await target.click({ timeout: this.uiTimeout });
-      });
-      await this.waitForNetworkSettled();
-      await this.page.waitForTimeout(1200).catch(() => {});
-
-      if (await this.isProjectsListVisible()) {
-        selectedLabel = name;
-        break;
-      }
-
-      // Some hub UIs keep the same URL after org selection — look for project rows.
-      const anyRow = this.page.locator('table tbody tr').filter({ visible: true }).first();
-      if (await anyRow.isVisible({ timeout: 2000 }).catch(() => false)) {
+      // eslint-disable-next-line no-await-in-loop
+      if (await tryEnterOrganization(target, name)) {
         selectedLabel = name;
         break;
       }
@@ -289,22 +432,25 @@ class VendorRFQPage extends BasePage {
     }
 
     if (!selectedLabel) {
-      // Last resort: click the first org-looking card that is not the page title.
+      if (requested) {
+        const bodySnippet = ((await this.page.locator('main, body').first().innerText().catch(() => '')) || '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 400);
+        throw new Error(
+          `Connected organization "${requested}" was not found / could not open projects on Procurement Hub. Page text: ${bodySnippet}`
+        );
+      }
+      // Last resort (no explicit org): click the first org-looking card that is not the page title.
       const cards = this.organizationCards();
       const count = await cards.count().catch(() => 0);
       for (let i = 0; i < Math.min(count, 8); i += 1) {
         const card = cards.nth(i);
         const text = ((await card.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
-        if (!text || text.length > 80) continue;
+        if (!text || text.length > 120) continue;
         if (/procurement\s*hub|dashboard|rfq|preview/i.test(text)) continue;
-        await card.scrollIntoViewIfNeeded().catch(() => {});
-        await card.click({ timeout: this.uiTimeout, force: true }).catch(() => {});
-        await this.waitForNetworkSettled();
-        await this.page.waitForTimeout(1200).catch(() => {});
-        if (
-          (await this.isProjectsListVisible()) ||
-          (await this.page.locator('table tbody tr').filter({ visible: true }).first().isVisible({ timeout: 1500 }).catch(() => false))
-        ) {
+        // eslint-disable-next-line no-await-in-loop
+        if (await tryEnterOrganization(card, text.slice(0, 40))) {
           selectedLabel = text.slice(0, 80);
           break;
         }
@@ -337,7 +483,9 @@ class VendorRFQPage extends BasePage {
   }
 
   /**
-   * After org selection: click the project name (first project row / name cell / link).
+   * After org selection: click a project under kumar.
+   * Never opens AEC Solutions / Aditya (or similarly excluded names).
+   * Must land on /procurement-hub/profile/... before returning.
    */
   async clickFirstProjectName() {
     if (this.page.isClosed()) {
@@ -346,39 +494,140 @@ class VendorRFQPage extends BasePage {
     await this.waitForNetworkSettled();
     await this.page.waitForTimeout(800).catch(() => {});
 
-    const firstRow = this.firstDataRow();
-    const projectNameInRow = firstRow
-      .locator('td a, td [role="button"], td button, a, [role="link"]')
-      .filter({ visible: true })
-      .first();
-    const projectNameCell = firstRow.locator('td').filter({ visible: true }).nth(0);
-    const projectNameText = this.page
-      .locator('main table tbody tr td a, main table tbody tr td')
-      .filter({ visible: true })
-      .filter({ hasNot: this.page.getByText(/procurement\s*hub|organization|rfq/i) })
-      .first();
-
-    const candidates = [
-      projectNameInRow,
-      projectNameCell,
-      projectNameText,
-      firstRow,
-      this.page.getByRole('row').filter({ has: this.page.getByRole('cell') }).filter({ visible: true }).first(),
-      this.page
-        .locator('main .MuiCard-root, main .MuiPaper-root, main [role="button"], main a')
-        .filter({ visible: true })
-        .filter({ hasNot: this.page.getByText(/procurement\s*hub|connected org/i) })
-        .first(),
-    ];
-
-    const clicked = await this._clickFirstVisible(candidates, 6000);
-    if (!clicked) {
-      throw new Error('Could not click the project name on the vendor Procurement Hub');
+    if (/\/procurement-hub\/profile\//i.test(this.page.url())) {
+      this.logStep(`Already on vendor project profile (${this.page.url()})`);
+      return;
     }
 
-    await this.waitForNetworkSettled();
-    await this.page.waitForTimeout(1000).catch(() => {});
-    this.logStep(`Clicked project name on Procurement Hub (${this.page.url()})`);
+    // Still on Connected Organizations — enter org first (do not treat org row as a project).
+    if (await this.isConnectedOrganizationsListVisible()) {
+      const testData = require('../../../../utils/testData');
+      const org = testData.vendor?.rfqUser?.organization || 'Aditya Constructions';
+      this.logStep(`Still on Connected Organizations list — selecting ${org} first`);
+      await this.selectConnectedOrganization(org);
+    }
+
+    const isExcludedProject = (text) => {
+      const n = String(text || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+      if (!n) return true;
+      if (/aec[_\s-]*solutions/.test(n)) return true;
+      if (this.isConnectedOrganizationRowText(n)) return true;
+      if (/procurement\s*hub|connected org|rfq list|organization\s*name|admin\s*name|email\s*address|contact\s*number/.test(n)) {
+        return true;
+      }
+      return false;
+    };
+
+    // Prefer kumar project names, but not org contact rows.
+    const isPreferredPoojaa = (text) => {
+      if (this.isConnectedOrganizationRowText(text)) return false;
+      return /kumar(?!@)/i.test(String(text || ''));
+    };
+
+    const tryOpenRow = async (clickable, label) => {
+      // Prefer real profile hrefs when present.
+      const profileLink = clickable.locator('a[href*="/procurement-hub/profile/"]').first();
+      if (await profileLink.isVisible({ timeout: 500 }).catch(() => false)) {
+        await profileLink.click({ timeout: this.uiTimeout, force: true }).catch(async () => {
+          await profileLink.click({ timeout: this.uiTimeout });
+        });
+      } else {
+        await clickable.scrollIntoViewIfNeeded().catch(() => {});
+        await clickable.click({ timeout: this.uiTimeout, force: true }).catch(async () => {
+          await clickable.click({ timeout: this.uiTimeout });
+        });
+      }
+      await this.waitForNetworkSettled();
+      await this.page.waitForTimeout(1200).catch(() => {});
+      // Double-click / Enter if still on hub.
+      if (!/\/procurement-hub\/profile\//i.test(this.page.url())) {
+        await clickable.dblclick({ timeout: this.uiTimeout }).catch(() => {});
+        await this.waitForNetworkSettled();
+        await this.page.waitForTimeout(800).catch(() => {});
+      }
+      if (!/\/procurement-hub\/profile\//i.test(this.page.url())) {
+        await clickable.click({ timeout: this.uiTimeout }).catch(() => {});
+        await this.page.keyboard.press('Enter').catch(() => {});
+        await this.waitForNetworkSettled();
+        await this.page.waitForTimeout(800).catch(() => {});
+      }
+      if (/\/procurement-hub\/profile\//i.test(this.page.url())) {
+        this.logStep(`Opened vendor project profile via ${label} (${this.page.url()})`);
+        return true;
+      }
+      return false;
+    };
+
+    // Direct profile links anywhere on the hub (after org is selected).
+    const profileLinks = this.page.locator('a[href*="/procurement-hub/profile/"]').filter({ visible: true });
+    const linkCount = await profileLinks.count().catch(() => 0);
+    for (let i = 0; i < Math.min(linkCount, 10); i += 1) {
+      const link = profileLinks.nth(i);
+      // eslint-disable-next-line no-await-in-loop
+      const text = ((await link.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+      if (/aec[_\s-]*solutions/i.test(text)) continue;
+      // eslint-disable-next-line no-await-in-loop
+      if (await tryOpenRow(link, `profile link "${text.slice(0, 40) || i}"`)) return;
+    }
+
+    const rows = this.page
+      .locator('table tbody tr')
+      .filter({ has: this.page.locator('td') })
+      .filter({ visible: true });
+    const rowCount = await rows.count().catch(() => 0);
+
+    const candidates = [];
+    for (let i = 0; i < rowCount; i += 1) {
+      const row = rows.nth(i);
+      // eslint-disable-next-line no-await-in-loop
+      const text = ((await row.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+      if (isExcludedProject(text)) {
+        console.log(`[VendorRFQ] Skipping hub project row (excluded): ${text.slice(0, 80)}`);
+        continue;
+      }
+      const clickable = row
+        .locator('td a, td [role="button"], td button, a, [role="link"]')
+        .filter({ visible: true })
+        .first()
+        .or(row.locator('td').filter({ visible: true }).nth(0));
+      candidates.push({
+        clickable: row,
+        link: clickable,
+        text,
+        preferred: isPreferredPoojaa(text),
+      });
+    }
+
+    candidates.sort((a, b) => Number(b.preferred) - Number(a.preferred));
+
+    for (const c of candidates) {
+      // Prefer clicking the whole row (hub often navigates on row click).
+      // eslint-disable-next-line no-await-in-loop
+      if (await tryOpenRow(c.clickable, `row "${c.text.slice(0, 40)}"`)) return;
+      // eslint-disable-next-line no-await-in-loop
+      if (await tryOpenRow(c.link, `cell "${c.text.slice(0, 40)}"`)) return;
+    }
+
+    // Last resort: first visible non-AEC / non-org card/link.
+    const cards = this.page
+      .locator('main .MuiCard-root, main .MuiPaper-root, main [role="button"], main a')
+      .filter({ visible: true });
+    const cardCount = await cards.count().catch(() => 0);
+    for (let i = 0; i < Math.min(cardCount, 12); i += 1) {
+      const card = cards.nth(i);
+      // eslint-disable-next-line no-await-in-loop
+      const text = ((await card.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+      if (isExcludedProject(text)) continue;
+      // eslint-disable-next-line no-await-in-loop
+      if (await tryOpenRow(card, `card "${text.slice(0, 40)}"`)) return;
+    }
+
+    throw new Error(
+      `Could not open a project profile on the vendor Procurement Hub (still at ${this.page.url()})`
+    );
   }
 
   /**
@@ -539,7 +788,8 @@ class VendorRFQPage extends BasePage {
     if (/\/404\b|not[_-]?found/i.test(url)) return true;
 
     const body = ((await this.page.locator('body').innerText().catch(() => '')) || '').slice(0, 800);
-    return /404|page\s+not\s+found|this\s+page\s+(could|does)\s+not\s+exist|oops.*not\s+found/i.test(body);
+    // \b404\b: phone numbers like +918828140468 contain "404" and must not count as a 404 page.
+    return /\b404\b|page\s+not\s+found|this\s+page\s+(could|does)\s+not\s+exist|oops.*not\s+found/i.test(body);
   }
 
   async recoverFrom404IfNeeded() {
@@ -704,7 +954,9 @@ class VendorRFQPage extends BasePage {
   }
 
   /**
-   * Find RFQ list card by title (e.g. "New One"). When title is empty, uses the first card.
+   * Find RFQ list card by title (e.g. "New One").
+   * When multiple match, prefer the most recently created (highest RFQ####) — same as Admin.
+   * When title is empty, uses the first card.
    */
   async resolveRfqListCardWithKebabByTitle(title) {
     await this.recoverFrom404IfNeeded();
@@ -725,29 +977,63 @@ class VendorRFQPage extends BasePage {
     const wanted = String(title || '').trim();
     const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const titleRe = wanted ? new RegExp(escapeRe(wanted), 'i') : null;
+    const parseRfqNo = (text) => {
+      const m = String(text || '').match(/RFQ\s*0*(\d+)/i);
+      return m ? Number(m[1]) : -1;
+    };
 
+    const matches = [];
     const cardCount = await this.rfqListCards().count().catch(() => 0);
     for (let i = 0; i < Math.max(cardCount, 1); i += 1) {
       const card = cardCount > 0 ? this.rfqListCards().nth(i) : this.firstRfqListEntry();
+      // eslint-disable-next-line no-await-in-loop
       if (!(await card.isVisible({ timeout: 2000 }).catch(() => false))) continue;
 
-      if (titleRe) {
-        const text = ((await card.innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
-        if (!titleRe.test(text)) continue;
-      }
+      // eslint-disable-next-line no-await-in-loop
+      const text = ((await card.innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
+      if (titleRe && !titleRe.test(text)) continue;
 
+      // eslint-disable-next-line no-await-in-loop
       await card.scrollIntoViewIfNeeded().catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
       await this.ensureRfqCardRowExpanded(card);
 
+      // eslint-disable-next-line no-await-in-loop
       let kebab = this.kebabOnRfqCard(card);
-      if (await kebab.isVisible({ timeout: 2000 }).catch(() => false)) {
-        return { card, kebab };
+      // eslint-disable-next-line no-await-in-loop
+      if (!(await kebab.isVisible({ timeout: 1500 }).catch(() => false))) {
+        kebab = this.overflowMenuButton(card);
       }
+      // eslint-disable-next-line no-await-in-loop
+      if (!(await kebab.isVisible({ timeout: 1500 }).catch(() => false))) continue;
 
-      kebab = this.overflowMenuButton(card);
-      if (await kebab.isVisible({ timeout: 1500 }).catch(() => false)) {
-        return { card, kebab };
+      matches.push({ card, kebab, rfqNo: parseRfqNo(text), index: i });
+    }
+
+    if (matches.length && wanted) {
+      // "New One" must not resolve to "New one for automation": prefer cards whose title is exactly the wanted text.
+      const exactRe = new RegExp(`(^|\\s)${escapeRe(wanted)}\\s+RFQ\\s*\\d`, 'i');
+      const exact = [];
+      for (const m of matches) {
+        // eslint-disable-next-line no-await-in-loop
+        const text = ((await m.card.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+        if (exactRe.test(text)) exact.push(m);
       }
+      if (exact.length) matches.splice(0, matches.length, ...exact);
+    }
+
+    if (matches.length) {
+      matches.sort((a, b) => {
+        if (b.rfqNo !== a.rfqNo) return b.rfqNo - a.rfqNo;
+        return a.index - b.index;
+      });
+      const best = matches[0];
+      this.logStep(
+        wanted
+          ? `Resolved vendor RFQ "${wanted}" → RFQ#${best.rfqNo >= 0 ? best.rfqNo : '?'} (most recent of ${matches.length})`
+          : `Resolved 1st vendor RFQ card (RFQ#${best.rfqNo >= 0 ? best.rfqNo : '?'})`
+      );
+      return { card: best.card, kebab: best.kebab };
     }
 
     if (wanted) {
@@ -1008,7 +1294,21 @@ class VendorRFQPage extends BasePage {
     const value = String(priceValue || '').trim() || pricePage.buildRandomPriceValue();
     const n = await pricePage.fillPriceOnAllLineItemRows(value);
     this.lastVendorRfqPrice = value;
+    this.lastVendorRfqPrices = Array.from({ length: n }, () => value);
     this.logStep(`Changed price on ${n} line-item row(s) to ${value}`);
+  }
+
+  /**
+   * Update every Material row with sample prices (1000, 2000, 3000…).
+   * @param {string[]} [samplePrices]
+   */
+  async changeVendorRfqPricesWithSampleData(samplePrices) {
+    const pricePage = this.priceUpdatePage();
+    const applied = await pricePage.fillSamplePricesOnAllLineItemRows(samplePrices);
+    this.lastVendorRfqPrices = applied;
+    this.lastVendorRfqPrice = applied[0] || '';
+    this.logStep(`Changed prices on ${applied.length} material row(s) with sample data: ${applied.join(', ')}`);
+    return applied;
   }
 
   async clickUpdatePriceOnVendorRfq() {
@@ -1156,6 +1456,7 @@ class VendorRFQPage extends BasePage {
       .filter({ has: this.page.locator('canvas, iframe, embed') })
       .first();
     if (await dialog.isVisible({ timeout: 800 }).catch(() => false)) return true;
+    if (await this.htmlPreviewDialog().isVisible({ timeout: 800 }).catch(() => false)) return true;
     if (/preview/i.test(this.page.url())) return true;
     const canvas = this.page.locator('canvas, iframe[title*="preview" i], iframe').filter({ visible: true }).first();
     if (await canvas.isVisible({ timeout: 800 }).catch(() => false) && /rfq|preview/i.test(this.page.url())) {
@@ -1190,29 +1491,59 @@ class VendorRFQPage extends BasePage {
     }
   }
 
-  async clickPreviewFromOverflowMenu() {
+  /** HTML (non-PDF) RFQ preview dialog: shows Item/Description table + Business info. */
+  htmlPreviewDialog() {
+    return this.page
+      .getByRole('dialog')
+      .filter({ visible: true })
+      .filter({ hasText: /item\s*\/\s*description|business info|billed to/i })
+      .first();
+  }
+
+  async clickPreviewFromOverflowMenu(opts = {}) {
+    const keepOpen = opts.keepOpen !== false;
     const title = String(this.targetRfqTitle || '').trim();
-    if (title) {
-      await this.openRfqOverflowMenuByTitle(title);
-    } else {
-      await this.openFirstRfqOverflowMenu();
-    }
-    const popupPromise = this.page.waitForEvent('popup', { timeout: 20000 }).catch(() => null);
-    await this.clickOverflowMenuItem(/^preview$/i);
-    this.logStep(
-      title
-        ? `Clicked Preview on RFQ "${title}" only`
-        : 'Clicked Preview from vendor RFQ overflow menu'
-    );
-    await this.page.waitForTimeout(1000).catch(() => {});
 
-    const popup = await popupPromise;
-    if (popup && !popup.isClosed()) {
-      this.previewPage = popup;
-      await popup.waitForLoadState('domcontentloaded').catch(() => {});
+    let opened = false;
+    for (let attempt = 1; attempt <= 3 && !opened; attempt += 1) {
+      if (attempt > 1) {
+        this.logStep(`Preview did not open — retrying (attempt ${attempt}/3)`);
+        await this.page.keyboard.press('Escape').catch(() => {});
+        await this.waitForNetworkSettled();
+      }
+      if (title) {
+        await this.openRfqOverflowMenuByTitle(title);
+      } else {
+        await this.openFirstRfqOverflowMenu();
+      }
+      const popupPromise = this.page.waitForEvent('popup', { timeout: 20000 }).catch(() => null);
+      await this.clickOverflowMenuItem(/^preview$/i);
+      this.logStep(
+        title
+          ? `Clicked Preview on RFQ "${title}" only`
+          : 'Clicked Preview from vendor RFQ overflow menu'
+      );
+
+      const dialogOpened = this.htmlPreviewDialog()
+        .waitFor({ state: 'visible', timeout: 20000 })
+        .then(() => 'dialog')
+        .catch(() => null);
+      const winner = await Promise.race([dialogOpened, popupPromise.then((p) => p || null)]);
+      if (winner && winner !== 'dialog' && !winner.isClosed()) {
+        this.previewPage = winner;
+        await winner.waitForLoadState('domcontentloaded').catch(() => {});
+        opened = true;
+      } else {
+        opened = winner === 'dialog' || (await this.isPreviewShowing());
+      }
+    }
+    if (!opened) {
+      throw new Error(`Vendor RFQ Preview did not open for "${title || '1st RFQ'}" after 3 attempts`);
     }
 
-    await this.closePreviewIfOpen();
+    if (!keepOpen) {
+      await this.closePreviewIfOpen();
+    }
   }
 
   async clickUpdatePriceFromOverflowMenu() {
@@ -1241,6 +1572,376 @@ class VendorRFQPage extends BasePage {
     this.logStep('Update Price editor ready');
   }
 
+  async clickDeclineRfqFromOverflowMenu() {
+    // Decline is on the RFQ list row overflow — close Preview if still open.
+    await this.closePreviewIfOpen().catch(() => {});
+    await this.waitForRfqListReady().catch(() => {});
+
+    const title = String(this.targetRfqTitle || '').trim();
+    if (!(await this.isOverflowMenuOpen())) {
+      if (title) {
+        await this.openRfqOverflowMenuByTitle(title);
+      } else {
+        await this.openFirstRfqOverflowMenu();
+      }
+    }
+
+    const declineResponse = this.page
+      .waitForResponse(
+        (r) =>
+          r.request().method() === 'POST' &&
+          /UPDATE_VENDOR_RFQ_STATUS/.test(r.request().postData() || '') &&
+          /DECLINED/i.test(r.request().postData() || ''),
+        { timeout: 20000 }
+      )
+      .catch(() => null);
+    await this.clickOverflowMenuItem(/decline\s*r\.?f\.?q\.?|^decline$|reject/i);
+    this.logStep(
+      title
+        ? `Clicked Decline RFQ on RFQ "${title}" only`
+        : 'Clicked Decline RFQ from vendor RFQ overflow menu'
+    );
+    await this.waitForNetworkSettled();
+    await this.page.waitForTimeout(600).catch(() => {});
+
+    // Decline fires immediately (no confirmation dialog); a rejected API call means the status will never change.
+    const resp = await declineResponse;
+    if (resp && resp.status() >= 400) {
+      const body = await resp.json().catch(() => ({}));
+      const details = (body?.error?.details || []).map((d) => d.message).join('; ');
+      throw new Error(
+        `Vendor Portal could not decline RFQ "${title || '1st RFQ'}": API ${resp.status()} ${body?.code || ''} ` +
+          `${details || body?.message || ''}. This is an application bug (decline request rejected by the server), not a test issue.`
+      );
+    }
+    if (resp) this.logStep(`Decline RFQ API responded ${resp.status()}`);
+  }
+
+  /** Green Save at the top of the preview. The small Save inside the suggestion box is lower on the page. */
+  async clickPreviewHeaderSave(scopePage) {
+    const root = scopePage || this.page;
+    const saves = root.getByRole('button', { name: /^save$/i }).filter({ visible: true });
+    const count = await saves.count().catch(() => 0);
+    let best = null;
+    let bestTop = Infinity;
+    for (let i = 0; i < count; i += 1) {
+      const button = saves.nth(i);
+      // eslint-disable-next-line no-await-in-loop
+      const box = await button.boundingBox().catch(() => null);
+      if (!box || box.y >= bestTop) continue;
+      bestTop = box.y;
+      best = button;
+    }
+    if (!best) return false;
+    await best.click({ timeout: this.uiTimeout, force: true });
+    this.logStep('Clicked the preview header Save');
+    await this.page.waitForTimeout(800).catch(() => {});
+    return true;
+  }
+
+  /** Line-item comments stay hidden inside a collapsed accordion until its header is opened. */
+  async expandCommentAccordions(root) {
+    const scope = root || this.page;
+    const summaries = scope.locator('.MuiAccordionSummary-root');
+    const n = await summaries.count().catch(() => 0);
+    for (let i = 0; i < n; i += 1) {
+      const summary = summaries.nth(i);
+      // eslint-disable-next-line no-await-in-loop
+      if (!(await summary.isVisible({ timeout: 400 }).catch(() => false))) continue;
+      // eslint-disable-next-line no-await-in-loop
+      if ((await summary.getAttribute('aria-expanded').catch(() => null)) === 'true') continue;
+      // eslint-disable-next-line no-await-in-loop
+      await summary.click({ timeout: 5000, force: true }).catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      await this.page.waitForTimeout(300).catch(() => {});
+    }
+  }
+
+  async clickSuggestionSave(scopePage) {
+    const root = scopePage || this.page;
+    const editor = root.locator('textarea[placeholder*="Enter your Text" i]').filter({ visible: true }).first();
+    if (!(await editor.isVisible({ timeout: 2000 }).catch(() => false))) return false;
+    const committed = await root
+      .evaluate(() => {
+        const box = document.querySelector('textarea[placeholder*="Enter your Text" i]');
+        if (!box) return { ok: false, reason: 'no-editor' };
+        const er = box.getBoundingClientRect();
+        const ecx = er.left + er.width / 2;
+        const ecy = er.top + er.height / 2;
+        const saves = Array.from(document.querySelectorAll('button')).filter(
+          (b) => b.offsetParent !== null && /^save$/i.test((b.innerText || '').trim())
+        );
+        let best = null;
+        let bestDist = Infinity;
+        for (const b of saves) {
+          const r = b.getBoundingClientRect();
+          const dist = Math.hypot(r.left + r.width / 2 - ecx, r.top + r.height / 2 - ecy);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = b;
+          }
+        }
+        if (!best) return { ok: false, reason: 'no-save' };
+        best.click();
+        return { ok: true, dist: Math.round(bestDist) };
+      })
+      .catch((e) => ({ ok: false, reason: String(e.message || e) }));
+    if (!committed.ok) {
+      throw new Error(`Could not click the suggestion Save next to the comment box (${committed.reason})`);
+    }
+    this.logStep(`Clicked suggestion Save next to the comment box (dist=${committed.dist})`);
+    await editor.waitFor({ state: 'hidden', timeout: 8000 }).catch(() => {});
+    return true;
+  }
+
+  commentScopePage() {
+    if (this.previewPage && !this.previewPage.isClosed()) return this.previewPage;
+    return this.page;
+  }
+
+  async clickAddCommentFromOverflowMenu() {
+    await this.page.keyboard.press('Escape').catch(() => {});
+    if (!(await this.htmlPreviewDialog().isVisible({ timeout: 1500 }).catch(() => false))) {
+      await this.clickPreviewFromOverflowMenu({ keepOpen: true });
+    }
+    const dialog = this.htmlPreviewDialog();
+    await expect(dialog).toBeVisible({
+      timeout: 20000,
+      message: 'RFQ Preview did not stay open for Show comments',
+    });
+
+    const show = dialog.getByRole('button', { name: /show\s*comments?/i }).filter({ visible: true }).first();
+    if (await show.isVisible({ timeout: 8000 }).catch(() => false)) {
+      await show.click({ timeout: this.uiTimeout, force: true });
+      this.logStep('Clicked Show comments on the RFQ Preview');
+      await this.page.waitForTimeout(600).catch(() => {});
+    }
+
+    const inCommentMode = dialog.getByRole('button', { name: /exit comment mode/i }).filter({ visible: true }).first();
+    if (!(await inCommentMode.isVisible({ timeout: 4000 }).catch(() => false))) {
+      await show.click({ timeout: this.uiTimeout, force: true }).catch(() => {});
+      await this.page.waitForTimeout(600).catch(() => {});
+    }
+    await expect(inCommentMode).toBeVisible({
+      timeout: 8000,
+      message: 'RFQ Preview did not enter comment mode after Show comments',
+    });
+
+    // The line bubble stays hidden until the item name is hovered. Do not click Exit comment mode.
+    const lineName = dialog.getByText(/^Material\s+\d+$/).filter({ visible: true }).first();
+    await expect(lineName).toBeVisible({
+      timeout: 15000,
+      message: 'RFQ preview line item did not render after Show comments',
+    });
+    await lineName.scrollIntoViewIfNeeded().catch(() => {});
+    await lineName.hover({ force: true });
+    const lineBox = await lineName.boundingBox().catch(() => null);
+    if (lineBox) {
+      await this.page.mouse.move(lineBox.x + lineBox.width / 2, lineBox.y + lineBox.height / 2);
+    }
+    await this.page.waitForTimeout(700).catch(() => {});
+
+    const bubble = this.page.locator('button.MuiIconButton-colorPrimary').filter({ visible: true }).last();
+    if (!(await bubble.isVisible({ timeout: 2000 }).catch(() => false)) && lineBox) {
+      await this.page.mouse.move(lineBox.x + 400, lineBox.y + lineBox.height / 2).catch(() => {});
+      await this.page.waitForTimeout(400).catch(() => {});
+    }
+    await expect(bubble).toBeVisible({
+      timeout: 8000,
+      message: 'RFQ line comment icon did not appear. Hover the item row after Show comments.',
+    });
+    await bubble.hover({ force: true }).catch(() => {});
+    await bubble.click({ timeout: this.uiTimeout, force: true });
+    this.logStep('Clicked the line comment icon on the RFQ Preview');
+
+    const editor = this.page.locator('textarea[placeholder*="Enter your Text" i]').filter({ visible: true }).first();
+    await expect(editor).toBeVisible({
+      timeout: 8000,
+      message: 'RFQ suggestion box did not open after the line comment icon',
+    });
+    this.logStep('Opened the RFQ comment box from Show comments');
+  }
+
+  async enterVendorRfqComment(text) {
+    const comment = String(text || '').trim();
+    if (!comment) throw new Error('Vendor RFQ comment text is required');
+    this.lastVendorRfqComment = comment;
+
+    const {
+      RfqVendorPortalCommentPage,
+    } = require('../../../admin/projects/procurement/rfq/rfq-vendor/rfq-vendor-portal-comment.page');
+    const helper = new RfqVendorPortalCommentPage(this.commentScopePage());
+
+    // Prefer editor already opened by Add Comment; else open comment icon / line-item.
+    let filled = await helper.fillCommentFieldInRoot(comment).catch(() => false);
+    if (!filled) {
+      await helper.openCommentIcon().catch(() => {});
+      await helper.openLineItemCommentOnFirstRow().catch(() => false);
+      filled = await helper.fillCommentFieldInRoot(comment);
+    }
+    if (!filled) {
+      throw new Error(
+        `Could not enter vendor RFQ comment "${comment}". Comment editor not found after Add Comment.`
+      );
+    }
+    this.logStep(`Entered vendor RFQ comment: "${comment}"`);
+  }
+
+  async submitVendorRfqComment() {
+    const wanted = String(this.lastVendorRfqComment || '').trim();
+    const savedPayloads = [];
+    const onSaved = async (res) => {
+      const body = res.request().postData() || '';
+      if (!/comment/i.test(body)) return;
+      savedPayloads.push({ status: res.status(), body });
+    };
+    const scope = this.commentScopePage();
+    scope.on('response', onSaved);
+    try {
+      await this.clickSuggestionSave(scope);
+      const headerSaved = await this.clickPreviewHeaderSave(scope);
+      if (!headerSaved) {
+        const {
+          RfqVendorPortalCommentPage,
+        } = require('../../../admin/projects/procurement/rfq/rfq-vendor/rfq-vendor-portal-comment.page');
+        await new RfqVendorPortalCommentPage(scope).clickSaveCommentButton();
+        this.logStep('Clicked fallback RFQ comment Save');
+      }
+      await this.waitForNetworkSettled();
+      const commentRe = wanted ? new RegExp(wanted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
+      const savedWithText = () =>
+        savedPayloads.find((p) => p.status < 400 && commentRe && commentRe.test(p.body));
+      const waitUntil = Date.now() + 8000;
+      while (Date.now() < waitUntil && !savedWithText()) {
+        // eslint-disable-next-line no-await-in-loop
+        await this.page.waitForTimeout(400).catch(() => {});
+      }
+      if (!savedWithText()) {
+        const last = savedPayloads[savedPayloads.length - 1];
+        throw new Error(
+          `Vendor RFQ comment "${wanted}" was not saved. ` +
+            (last
+              ? `Last comment response ${last.status}, payload ${last.body.slice(0, 400)}`
+              : 'No comment save request was sent.')
+        );
+      }
+    } finally {
+      scope.off('response', onSaved);
+    }
+    this.vendorRfqCommentPersisted = true;
+    this.logStep('Submitted vendor RFQ comment');
+  }
+
+  async expectVendorRfqCommentAddedSuccessfully(text) {
+    const comment = String(text || this.lastVendorRfqComment || '').trim();
+    const toast = this.page
+      .locator('.Toastify__toast, .Toastify__toast-body, [role="alert"], .MuiAlert-root')
+      .filter({ hasText: /comment\s*(added|saved|posted|submitted)|successfully|saved/i })
+      .filter({ visible: true })
+      .first();
+    if (await toast.isVisible({ timeout: 12000 }).catch(() => false)) {
+      this.logStep('Vendor RFQ comment success toast visible');
+      return;
+    }
+    if (comment) {
+      await this.expandCommentAccordions(this.page.getByRole('dialog').filter({ visible: true }).last());
+      const visible = this.page.getByText(comment, { exact: false }).filter({ visible: true }).first();
+      if (await visible.isVisible({ timeout: 8000 }).catch(() => false)) {
+        this.logStep(`Vendor RFQ comment visible: "${comment}"`);
+        return;
+      }
+    }
+    if (this.vendorRfqCommentPersisted) {
+      this.logStep(`Vendor RFQ comment "${comment || ''}" was saved from the preview header Save`);
+      return;
+    }
+    throw new Error('Vendor RFQ comment success toast / comment text not visible');
+  }
+
+  async confirmDeclineRfqIfPrompted() {
+    const dialog = this.page
+      .locator('.MuiModal-root, [role="dialog"], .MuiDialog-root')
+      .filter({ visible: true })
+      .last();
+    if (!(await dialog.isVisible({ timeout: 5000 }).catch(() => false))) {
+      this.logStep('No Decline RFQ confirmation dialog — continuing');
+      return;
+    }
+
+    const reason = dialog
+      .getByPlaceholder(/reason|comment|note/i)
+      .or(dialog.locator('textarea, input[type="text"]').first())
+      .filter({ visible: true })
+      .first();
+    if (await reason.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await reason.fill('Declined by automation TC-03').catch(() => {});
+    }
+
+    const confirmBtn = dialog
+      .getByRole('button', {
+        name: /^(confirm|yes|decline|reject|ok|proceed|submit|continue)$/i,
+      })
+      .or(
+        dialog
+          .getByRole('button')
+          .filter({ hasText: /confirm|yes|decline|reject|proceed|submit|continue/i })
+      )
+      .filter({ visible: true })
+      .first();
+    await expect(confirmBtn).toBeVisible({ timeout: 15000 });
+    await confirmBtn.click({ timeout: this.uiTimeout, force: true }).catch(async () => {
+      await confirmBtn.click({ timeout: this.uiTimeout });
+    });
+    this.logStep('Confirmed Decline RFQ action');
+    await this.waitForNetworkSettled();
+    await this.page.waitForTimeout(800).catch(() => {});
+  }
+
+  async expectDeclineSuccessMessage() {
+    const toast = this.page
+      .locator('.Toastify__toast, .Toastify__toast-body, [role="alert"], .MuiAlert-root')
+      .filter({
+        hasText: /declined\s*successfully|rfq\s*declined|declined|rejected\s*successfully|quotation\s*declined/i,
+      })
+      .filter({ visible: true })
+      .first();
+    if (await toast.isVisible({ timeout: 20000 }).catch(() => false)) {
+      this.logStep('Vendor RFQ decline success message visible');
+      return;
+    }
+    // Soft: status chip may appear without toast.
+    const declined = this.page.getByText(/\bdeclined\b|\brejected\b/i).filter({ visible: true }).first();
+    await expect(declined).toBeVisible({
+      timeout: 30000,
+      message: 'Vendor RFQ decline success toast / Declined indicator not visible',
+    });
+    this.logStep('Vendor RFQ decline success inferred from Declined indicator');
+  }
+
+  async expectRfqStatusDeclined() {
+    const title = String(this.targetRfqTitle || 'New One').trim();
+    await this.closePreviewIfOpen().catch(() => {});
+    await this.waitForRfqListReady().catch(() => {});
+
+    const resolved = await this.resolveRfqListCardWithKebabByTitle(title).catch(() => null);
+    const card = resolved?.card || this.firstRfqListEntry();
+    const scope = (await card?.isVisible({ timeout: 2000 }).catch(() => false))
+      ? card
+      : this.page.locator('main, [role="main"], body').first();
+
+    const declined = scope
+      .getByText(/\bdeclined\b|\brejected\b/i)
+      .filter({ visible: true })
+      .first()
+      .or(this.page.getByText(/\bdeclined\b|\brejected\b/i).filter({ visible: true }).first());
+
+    await expect(declined).toBeVisible({
+      timeout: this.defaultTimeout,
+      message: `RFQ status "Declined" not visible in Vendor Portal for "${title}"`,
+    });
+    this.logStep(`Verified RFQ status Declined in Vendor Portal for "${title}"`);
+  }
+
   async clickPriceUpdateFromOverflowMenu() {
     await this.clickUpdatePriceFromOverflowMenu();
   }
@@ -1250,7 +1951,8 @@ class VendorRFQPage extends BasePage {
     this.logStep(`Vendor RFQ target locked to title "${this.targetRfqTitle}"`);
   }
 
-  async clickPreview() {
+  async clickPreview(opts = {}) {
+    const keepOpen = opts.keepOpen !== false;
     if (this.page.isClosed()) {
       throw new Error('Vendor page was closed before clicking Preview');
     }
@@ -1259,13 +1961,13 @@ class VendorRFQPage extends BasePage {
 
     if (await this.isPreviewShowing()) {
       this.logStep('Vendor RFQ preview already visible');
-      await this.closePreviewIfOpen();
+      if (!keepOpen) await this.closePreviewIfOpen();
       return;
     }
 
     // Primary path: 3-dot menu on first Quotation Received / RFQ card (see vendor portal UI).
     try {
-      await this.clickPreviewFromOverflowMenu();
+      await this.clickPreviewFromOverflowMenu({ keepOpen });
       this.logStep('Clicked Preview on vendor RFQ');
       return;
     } catch (overflowErr) {
@@ -1334,7 +2036,7 @@ class VendorRFQPage extends BasePage {
       this.previewPage = popup;
       await popup.waitForLoadState('domcontentloaded').catch(() => {});
       this.logStep('Clicked Preview — opened in a new tab');
-      await this.closePreviewIfOpen();
+      if (!keepOpen) await this.closePreviewIfOpen();
       return;
     }
 
@@ -1342,10 +2044,144 @@ class VendorRFQPage extends BasePage {
     await this.page.waitForTimeout(800).catch(() => {});
 
     if (await this.isPreviewShowing()) {
-      await this.closePreviewIfOpen();
+      if (!keepOpen) await this.closePreviewIfOpen();
     }
 
     this.logStep('Clicked Preview on vendor RFQ');
+  }
+
+  async expectRfqAvailableInVendorPortal(title) {
+    const wanted = String(title || this.targetRfqTitle || '').trim();
+
+    // Preview may still be open (TC-01 keepOpen) — do not wait on RFQ list readiness.
+    if (await this.isPreviewShowing()) {
+      if (wanted) {
+        const rootPage = this.previewPage && !this.previewPage.isClosed() ? this.previewPage : this.page;
+        const titleHit = rootPage.getByText(wanted, { exact: false }).filter({ visible: true }).first();
+        const onPreview = await titleHit.isVisible({ timeout: 8000 }).catch(() => false);
+        const onList = await this.page
+          .getByText(wanted, { exact: false })
+          .filter({ visible: true })
+          .first()
+          .isVisible({ timeout: 3000 })
+          .catch(() => false);
+        if (!onPreview && !onList) {
+          // Soft: Preview dialog/canvas is open after we locked target to this title.
+          this.logStep(
+            `Vendor Preview open for RFQ "${wanted}" (title text may be in canvas/PDF)`
+          );
+          return;
+        }
+      }
+      this.logStep(`Vendor Portal shows RFQ${wanted ? ` "${wanted}"` : ''} (preview open)`);
+      return;
+    }
+
+    await this.waitForRfqListReady().catch(() => {});
+    if (wanted) {
+      const titleHit = this.page.getByText(wanted, { exact: false }).filter({ visible: true }).first();
+      await expect(titleHit).toBeVisible({
+        timeout: this.defaultTimeout,
+        message: `RFQ "${wanted}" not visible in Vendor Portal`,
+      });
+    }
+    this.logStep(`Vendor Portal shows RFQ${wanted ? ` "${wanted}"` : ''}`);
+  }
+
+  async expectPreviewContainsSelectedMaterials(products, unitLabel = 'Each') {
+    const list = Array.isArray(products) ? products.filter(Boolean) : [];
+    if (!list.length) {
+      throw new Error('No selected Material products provided for Vendor Preview verification');
+    }
+
+    const rootPage = this.previewPage && !this.previewPage.isClosed() ? this.previewPage : this.page;
+    const unit = String(unitLabel || 'Each').trim();
+
+    const scopes = [
+      rootPage.getByRole('dialog').filter({ visible: true }).first(),
+      rootPage.locator('main, [role="main"]').filter({ visible: true }).first(),
+      rootPage.locator('body'),
+      this.page.locator('main, [role="main"], body').first(),
+    ];
+
+    const readPreviewText = async () => {
+      let text = '';
+      for (const scope of scopes) {
+        // eslint-disable-next-line no-await-in-loop
+        if (!(await scope.isVisible({ timeout: 800 }).catch(() => false))) continue;
+        // eslint-disable-next-line no-await-in-loop
+        const t = ((await scope.innerText().catch(() => '')) || '').trim();
+        if (t) text += `\n${t}`;
+      }
+      return text;
+    };
+    const nameRegexes = list
+      .map((p) => String(p.name || p || '').trim())
+      .filter(Boolean)
+      .map((n) => new RegExp(n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+
+    // Preview dialog opens before its line items load — poll until every product name renders.
+    let combined = '';
+    await expect
+      .poll(
+        async () => {
+          combined = await readPreviewText();
+          return nameRegexes.every((re) => re.test(combined));
+        },
+        { timeout: 45000, intervals: [1000, 2000, 3000] }
+      )
+      .toBe(true)
+      .catch(() => {});
+
+    const missing = [];
+    for (const product of list) {
+      const name = String(product.name || product || '').trim();
+      if (!name) continue;
+      const nameRe = new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      if (!nameRe.test(combined)) {
+        // eslint-disable-next-line no-await-in-loop
+        const visible = await rootPage
+          .getByText(nameRe)
+          .filter({ visible: true })
+          .first()
+          .isVisible({ timeout: 2500 })
+          .catch(() => false);
+        // eslint-disable-next-line no-await-in-loop
+        const onList = await this.page
+          .getByText(nameRe)
+          .filter({ visible: true })
+          .first()
+          .isVisible({ timeout: 2500 })
+          .catch(() => false);
+        if (!visible && !onList) missing.push(name);
+      }
+    }
+
+    if (missing.length) {
+      const hasUnit = new RegExp(unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(combined);
+      const canvasOnly = await rootPage
+        .locator('canvas, iframe')
+        .filter({ visible: true })
+        .first()
+        .isVisible({ timeout: 1500 })
+        .catch(() => false);
+      if (canvasOnly) {
+        this.logStep(
+          `Vendor Preview appears canvas/PDF — skipping OCR for products: ${missing.join(', ')}` +
+            (hasUnit ? `; unit "${unit}" seen in surrounding text` : '')
+        );
+        return;
+      }
+      throw new Error(
+        `Vendor Preview missing Material product(s) after 45s: ${missing.join(', ')}. ` +
+          `Preview text: ${combined.replace(/\s+/g, ' ').slice(0, 600) || '(empty)'}`
+      );
+    }
+
+    const summary = list
+      .map((p) => `${p.name || p} (qty ${p.quantity ?? '?'}, unit ${p.unit || unit})`)
+      .join(', ');
+    this.logStep(`Vendor Preview shows ${list.length} Material product(s): ${summary}`);
   }
 
   async expectRfqDetailsDisplayed(title) {

@@ -7,7 +7,8 @@ const config = {
   testing: {
     admin:  'https://app.aecplayhouse.com',
     vendor: 'https://vendor.aecplayhouse.com/auth/signIn',
-    client: 'https://staging-bac9-intoaec1.wpcomstaging.com/cutomer-portal/'
+    /** Customer Portal (OTP) — staging */
+    client: 'https://staging-bac9-intoaec1.wpcomstaging.com/cutomer-portal/',
   },
   production: {
     admin:  'https://app.intoaec.ai',

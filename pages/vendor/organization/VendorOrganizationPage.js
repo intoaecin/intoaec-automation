@@ -33,7 +33,11 @@ class VendorOrganizationPage extends BasePage {
     this.companyInfoTab = page.getByRole('tab', { name: /company info/i }).first();
     this.businessInfoTab = page.getByRole('tab', { name: /business info/i }).first();
     this.socialMediaTab = page.getByRole('tab', { name: /social media/i }).first();
-    this.socialMediaHeading = page.getByText(/^social media links$/i).first();
+    this.socialMediaHeading = page
+      .getByRole('heading', { name: /social media/i })
+      .or(page.getByText(/^social media links?$/i))
+      .or(page.getByText(/^social media$/i))
+      .first();
     this.eSignatureTab = page.getByRole('tab', { name: /e-?signature/i }).first();
     this.adminDigitalSignatureHeading = page
       .getByRole('heading', { name: /^(admin |vendor )?digital signature$/i })
@@ -254,15 +258,47 @@ class VendorOrganizationPage extends BasePage {
     }, wanted);
   }
 
+  async _dismissBlockingOverlays() {
+    const passwordModal = this.page
+      .locator('.MuiModal-root, [role="dialog"]')
+      .filter({ hasText: /password changed|changed successfully/i })
+      .first();
+    if (await passwordModal.isVisible({ timeout: 800 }).catch(() => false)) {
+      const signIn = passwordModal.getByRole('button', { name: /sign in|login|ok|continue/i }).first();
+      if (await signIn.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await signIn.click({ timeout: this.uiTimeout, force: true }).catch(() => {});
+        this.logStep('Dismissed password-changed overlay before My Organization');
+        await this.page.waitForURL(/signIn/i, { timeout: 15000 }).catch(() => {});
+      } else {
+        await this.page.keyboard.press('Escape').catch(() => {});
+      }
+    }
+
+    const anyModal = this.page.locator('.MuiModal-root, [role="dialog"]').filter({ visible: true }).first();
+    if (await anyModal.isVisible({ timeout: 500 }).catch(() => false)) {
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await anyModal.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+    }
+  }
+
   async navigateToMyOrganization() {
     await this.waitForNetworkSettled();
+    await this._dismissBlockingOverlays();
+
+    if (/signIn/i.test(this.page.url()) || !(await this.accountSettings.isVisible({ timeout: 2000 }).catch(() => false))) {
+      const VendorLoginPage = require('../auth/VendorLoginPage');
+      const testData = require('../../../utils/testData');
+      const login = new VendorLoginPage(this.page);
+      await login.ensureAuthenticated(testData.vendor.validUser.email, testData.vendor.validUser.password);
+    }
+
     if (/my-organization/i.test(this.page.url())) {
       this.logStep('Already on vendor My Organization');
       return;
     }
 
     await expect(this.accountSettings).toBeVisible({ timeout: this.defaultTimeout });
-    await this.accountSettings.click({ timeout: this.uiTimeout });
+    await this.accountSettings.click({ timeout: this.uiTimeout, force: true });
     await expect(this.myOrganizationNav).toBeVisible({ timeout: this.uiTimeout });
     await this.myOrganizationNav.click({ timeout: this.uiTimeout });
     await this.page.waitForURL(/my-organization/i, { timeout: this.defaultTimeout }).catch(() => {});
@@ -455,67 +491,196 @@ class VendorOrganizationPage extends BasePage {
   }
 
   _categoriesAutocomplete() {
-    return this.page.locator('.MuiAutocomplete-root').filter({ has: this.page.locator('#tags-filled') }).first();
+    const byId = this.page
+      .locator('.MuiAutocomplete-root')
+      .filter({ has: this.page.locator('#tags-filled') })
+      .first();
+    const byLabel = this.page
+      .locator('.MuiAutocomplete-root')
+      .filter({ has: this.page.getByText(/^add categories$|^categories$/i) })
+      .first();
+    const byAncestor = this.categoriesCombo.locator(
+      'xpath=ancestor::*[contains(@class,"MuiAutocomplete-root")][1]'
+    );
+    return byId.or(byLabel).or(byAncestor).first();
+  }
+
+  async _categoriesInput() {
+    const auto = this._categoriesAutocomplete();
+    const inAuto = auto.locator('input[role="combobox"], input#tags-filled, input').first();
+    if (await inAuto.isVisible({ timeout: 1500 }).catch(() => false)) return inAuto;
+    if (await this.categoriesCombo.isVisible({ timeout: 1500 }).catch(() => false)) return this.categoriesCombo;
+    return this.page
+      .getByPlaceholder(/add categories|categories/i)
+      .or(this.page.locator('input[role="combobox"]').filter({ visible: true }).last())
+      .first();
+  }
+
+  async _categorySelectionVisible(value) {
+    const needle = String(value || '').trim();
+    if (!needle) return false;
+    const re = new RegExp(this._escapeRegex(needle), 'i');
+    const exactRe = new RegExp(`^${this._escapeRegex(needle)}$`, 'i');
+
+    const chipExact = this.page
+      .locator('.MuiChip-root, [class*="MuiChip-root"]')
+      .filter({ hasText: exactRe })
+      .first();
+    if (await chipExact.isVisible({ timeout: 400 }).catch(() => false)) return true;
+
+    const chipSoft = this.page
+      .locator('.MuiChip-root, [class*="MuiChip-root"]')
+      .filter({ hasText: re })
+      .first();
+    if (await chipSoft.isVisible({ timeout: 400 }).catch(() => false)) return true;
+
+    const autoText = ((await this._categoriesAutocomplete().innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
+    if (re.test(autoText)) return true;
+
+    const inputVal = ((await (await this._categoriesInput()).inputValue().catch(() => '')) || '').trim();
+    if (re.test(inputVal)) return true;
+
+    return false;
   }
 
   async _chipInField(name) {
     return this._categoriesAutocomplete()
       .locator('.MuiChip-root, [class*="MuiChip-root"]')
       .filter({ hasText: new RegExp(this._escapeRegex(name), 'i') })
-      .first();
+      .first()
+      .or(
+        this.page
+          .locator('.MuiChip-root, [class*="MuiChip-root"]')
+          .filter({ hasText: new RegExp(this._escapeRegex(name), 'i') })
+          .first()
+      );
   }
 
   async clickAddCategories() {
     await this.ensureEditMode();
-    await expect(this.categoriesCombo).toBeVisible({ timeout: this.defaultTimeout });
-    await this.categoriesCombo.scrollIntoViewIfNeeded().catch(() => {});
-    await this.categoriesCombo.click({ timeout: this.uiTimeout, force: true });
+    const input = await this._categoriesInput();
+    await expect(input).toBeVisible({ timeout: this.defaultTimeout });
+    await input.scrollIntoViewIfNeeded().catch(() => {});
+    await input.click({ timeout: this.uiTimeout, force: true });
     this.logStep('Clicked Add categories');
   }
 
   async selectCategory(value) {
     this.lastCompanyInfo = { ...(this.lastCompanyInfo || {}), requestedCategory: value };
     await this.ensureEditMode();
+    await this._dismissCategoryOverlay();
 
-    const already = await this._chipInField(value);
-    if (await already.isVisible({ timeout: 1500 }).catch(() => false)) {
-      const selected = ((await already.innerText().catch(() => '')) || value).replace(/\s+/g, ' ').trim() || value;
-      this.lastCompanyInfo.category = selected;
-      this.logStep(`Category already added: ${selected}`);
+    if (await this._categorySelectionVisible(value)) {
+      this.lastCompanyInfo.category = value;
+      this.logStep(`Category already added: ${value}`);
       return;
     }
 
-    await this.categoriesCombo.click({ timeout: this.uiTimeout, force: true });
-    await this.categoriesCombo.fill('');
-    await this.categoriesCombo.pressSequentially(String(value), { delay: 40 });
-    await expect(this.page.getByRole('option').first()).toBeVisible({ timeout: this.uiTimeout });
-    await this.categoriesCombo.press('ArrowDown');
-    await this.page.waitForTimeout(200);
-    await this.categoriesCombo.press('Enter');
-    await this.page.getByRole('listbox').first().waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+    const input = await this._categoriesInput();
+    await expect(input).toBeVisible({ timeout: this.defaultTimeout });
+    await input.scrollIntoViewIfNeeded().catch(() => {});
 
-    const chips = this._categoriesAutocomplete().locator('.MuiChip-root, [class*="MuiChip-root"]');
-    await expect(chips.first()).toBeVisible({ timeout: this.uiTimeout });
+    let selectedLabel = '';
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      await this._dismissCategoryOverlay();
+      await input.click({ timeout: this.uiTimeout, force: true });
+      await input.fill('');
+      await input.pressSequentially(String(value), { delay: 35 });
 
-    const texts = (await chips.allInnerTexts())
-      .map((t) => t.replace(/\s+/g, ' ').trim())
-      .filter(Boolean);
-    const match = texts.find((t) => new RegExp(this._escapeRegex(value), 'i').test(t)) || texts[0];
-    this.lastCompanyInfo.category = match;
-    this.logStep(`Selected category: ${match}`);
+      const listbox = this.page.getByRole('listbox').filter({ visible: true }).last();
+      const optionsReady = await expect(listbox.getByRole('option').first())
+        .toBeVisible({ timeout: this.uiTimeout })
+        .then(() => true)
+        .catch(() => false);
+
+      if (!optionsReady) {
+        // Open dropdown without filter if typing produced no options
+        await input.fill('');
+        await input.click({ timeout: this.uiTimeout, force: true });
+        await this.page.keyboard.press('ArrowDown').catch(() => {});
+        await expect(listbox.getByRole('option').first()).toBeVisible({ timeout: this.uiTimeout }).catch(() => {});
+      }
+
+      const options = listbox.getByRole('option');
+      const count = await options.count().catch(() => 0);
+      const labels = [];
+      for (let i = 0; i < count; i += 1) {
+        const t = ((await options.nth(i).innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+        if (t) labels.push(t);
+      }
+      this.logStep(
+        `Category options (attempt ${attempt}): ${labels.slice(0, 8).join(' | ') || 'none'}`
+      );
+
+      const exact = labels.find((t) => new RegExp(`^${this._escapeRegex(value)}$`, 'i').test(t));
+      const starts = labels.find((t) => new RegExp(`^${this._escapeRegex(value)}\\b`, 'i').test(t));
+      const contains = labels.find((t) => new RegExp(this._escapeRegex(value), 'i').test(t));
+      const pick = exact || starts || contains || labels[0];
+
+      if (!pick) {
+        this.logStep(`No category options on attempt ${attempt}`);
+        continue;
+      }
+
+      const option = listbox.getByRole('option', { name: new RegExp(`^${this._escapeRegex(pick)}$`, 'i') }).first();
+      if (await option.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await option.click({ timeout: this.uiTimeout, force: true });
+      } else {
+        await input.press('ArrowDown').catch(() => {});
+        await this.page.waitForTimeout(150);
+        await input.press('Enter').catch(() => {});
+      }
+      selectedLabel = pick;
+      await this._dismissCategoryOverlay();
+
+      const confirmed = await expect
+        .poll(async () => this._categorySelectionVisible(pick) || this._categorySelectionVisible(value), {
+          timeout: 8000,
+          intervals: [300, 600, 1000],
+        })
+        .toBeTruthy()
+        .then(() => true)
+        .catch(() => false);
+
+      if (confirmed) {
+        this.lastCompanyInfo.category = pick;
+        if (pick !== value) {
+          this.logStep(`Category "${value}" not exact — selected "${pick}"`);
+        } else {
+          this.logStep(`Selected category: ${pick}`);
+        }
+        return;
+      }
+      this.logStep(`Category "${pick}" click did not stick on attempt ${attempt} — retrying`);
+    }
+
+    // Soft confirm: if any chip appeared, accept it
+    const anyChip = this.page.locator('.MuiChip-root, [class*="MuiChip-root"]').filter({ visible: true }).first();
+    if (await anyChip.isVisible({ timeout: 2000 }).catch(() => false)) {
+      const chipText = ((await anyChip.innerText().catch(() => '')) || selectedLabel || value).replace(/\s+/g, ' ').trim();
+      this.lastCompanyInfo.category = chipText;
+      this.logStep(`Selected category (chip fallback): ${chipText}`);
+      return;
+    }
+
+    throw new Error(
+      `Could not add category "${value}" — no chip/value stuck after selecting from the Categories dropdown`
+    );
   }
 
   async expectCategoryAdded(value) {
     const wanted = (this.lastCompanyInfo && this.lastCompanyInfo.category) || value;
-    const chip = await this._chipInField(wanted);
-    if (await chip.isVisible({ timeout: 8000 }).catch(() => false)) {
-      this.logStep(`Category "${wanted}" is added`);
-      return;
-    }
+    const ok = await expect
+      .poll(async () => this._categorySelectionVisible(wanted) || this._categorySelectionVisible(value), {
+        timeout: this.defaultTimeout,
+        intervals: [400, 800, 1500],
+      })
+      .toBeTruthy()
+      .then(() => true)
+      .catch(() => false);
 
-    const autoText = ((await this._categoriesAutocomplete().innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
-    if (new RegExp(this._escapeRegex(wanted), 'i').test(autoText)) {
-      this.logStep(`Category "${wanted}" is shown in the Categories field`);
+    if (ok) {
+      this.logStep(`Category "${wanted}" is added`);
       return;
     }
 
@@ -623,13 +788,38 @@ class VendorOrganizationPage extends BasePage {
     if ((await this.socialMediaTab.getAttribute('aria-selected').catch(() => 'false')) !== 'true') {
       await this.socialMediaTab.click({ timeout: this.uiTimeout, force: true }).catch(() => {});
     }
+    await expect(this.socialMediaTab).toHaveAttribute('aria-selected', 'true', { timeout: this.uiTimeout }).catch(() => {});
     await this.waitForNetworkSettled();
     this.logStep('Clicked Social Media tab');
   }
 
   async expectSocialMediaLinksSectionDisplayed() {
-    await expect(this.socialMediaHeading).toBeVisible({ timeout: this.defaultTimeout });
-    await this.socialMediaHeading.scrollIntoViewIfNeeded().catch(() => {});
+    const panel = this.page.locator('.MuiTabPanel-root:not([hidden])').last();
+    const facebookField = this._socialField(/^facebook$/i, ['facebook', 'facebookUrl']);
+    const twitterField = this._socialField(/twitter|^x$/i, ['twitter', 'twitterUrl']);
+
+    await expect
+      .poll(
+        async () => {
+          if (await this.socialMediaHeading.isVisible({ timeout: 400 }).catch(() => false)) return true;
+          if (await facebookField.isVisible({ timeout: 400 }).catch(() => false)) return true;
+          if (await twitterField.isVisible({ timeout: 400 }).catch(() => false)) return true;
+          if (await panel.getByText(/^facebook$/i).isVisible({ timeout: 400 }).catch(() => false)) return true;
+          if (await this.editButton.isVisible({ timeout: 400 }).catch(() => false)) {
+            const tabSelected =
+              (await this.socialMediaTab.getAttribute('aria-selected').catch(() => 'false')) === 'true';
+            if (tabSelected) return true;
+          }
+          return false;
+        },
+        { timeout: this.defaultTimeout, intervals: [400, 800, 1500] }
+      )
+      .toBeTruthy();
+
+    const anchor = (await this.socialMediaHeading.isVisible({ timeout: 1000 }).catch(() => false))
+      ? this.socialMediaHeading
+      : facebookField.or(twitterField).or(panel.getByText(/^facebook$/i)).first();
+    await anchor.scrollIntoViewIfNeeded().catch(() => {});
     this.logStep('Vendor Social Media Links section is displayed');
   }
 

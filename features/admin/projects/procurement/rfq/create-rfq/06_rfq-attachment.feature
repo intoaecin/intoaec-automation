@@ -1,4 +1,4 @@
-@regression @rfq @rfq-attachment
+@regression @rfq @rfq-attachment @ashraf-modules
 Feature: RFQ - attachment and compose email
 
   Same pattern as PO attachment (`04_purchase-order-attachment-po.feature`): attach below Terms & Conditions,

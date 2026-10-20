@@ -1,4 +1,4 @@
-@regression @rfq @rfq-ship-to
+@regression @rfq @rfq-ship-to @ashraf-modules
 Feature: RFQ — ship to address and compose email
 
   Same journey as compose RFQ; before Action → Compose email, opens/clicks Ship to address on the form.

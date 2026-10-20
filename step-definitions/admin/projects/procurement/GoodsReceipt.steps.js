@@ -1,17 +1,20 @@
-const { Before, When, Then, setDefaultTimeout } = require('@cucumber/cucumber');
+const { Before, After, When, Then, setDefaultTimeout } = require('@cucumber/cucumber');
 const { expect } = require('@playwright/test');
 const GoodsReceiptPage = require('../../../../pages/admin/projects/procurement/GoodsReceiptPage');
 const InventoryPage = require('../../../../pages/admin/projects/procurement/InventoryPage');
 const InventoryRequestPage = require('../../../../pages/admin/projects/procurement/InventoryRequestPage');
 const testData = require('../../../../utils/testData');
+const goodsReceiptSession = require('../../../../support/goods-receipt-session');
 
 setDefaultTimeout(120000);
 
 const GOODS_RECEIPT_TC_LOG = {
-  TC01: 'TC-01 — Create PO, vendor Accept, Goods Receipt from PO under For Sample Testing',
+  TC01: 'TC-01 — Create and send the Goods Receipt purchase order',
+  TC01A: 'TC-01A — Accept the purchase order from Yopmail and verify Accepted on Admin',
+  TC01B: 'TC-01B — Inventory group and goods receipt from the accepted PO',
   TC02: 'TC-02 — Request Items group → request products → Add to Group',
-  TC03: 'TC-03 — Inventory → Goods Receipts → Preview accepted PO',
-  TC04: 'TC-04 — Goods Receipts Preview → Download document',
+  TC03: 'TC-03 — Create/Accept PO via Yopmail → Inventory → Goods Receipts Preview',
+  TC04: 'TC-04 — Create/Accept PO via Yopmail → Inventory → Goods Receipts Preview → Download',
 };
 
 function getGoodsReceiptPage(world) {
@@ -41,26 +44,87 @@ function getInventoryRequestPage(world) {
   if (groupName) {
     world.inventoryRequestPage.lastCreatedGroupName = groupName;
   }
+  // Restore tracked request products if the page object was recreated mid-scenario.
+  if (
+    Array.isArray(world.lastRequestedProducts) &&
+    world.lastRequestedProducts.length &&
+    !(world.inventoryRequestPage.lastRequestedProducts || []).length
+  ) {
+    world.inventoryRequestPage.lastRequestedProducts = world.lastRequestedProducts;
+  }
   return world.inventoryRequestPage;
 }
 
 Before({ tags: '@goods-receipt' }, async function ({ pickle }) {
   const tags = (pickle.tags || []).map((t) => t.name.replace(/^@/, ''));
-  const tc = tags.find((t) => /^TC\d+$/i.test(t));
-  if (tc && GOODS_RECEIPT_TC_LOG[tc.toUpperCase()]) {
-    console.log(`\n>>> ${GOODS_RECEIPT_TC_LOG[tc.toUpperCase()]}\n`);
+  const tc = tags.find((t) => /^TC\d+[A-Z]?$/i.test(t));
+  const tcKey = tc ? tc.toUpperCase() : '';
+  if (tcKey && GOODS_RECEIPT_TC_LOG[tcKey]) {
+    console.log(`\n>>> ${GOODS_RECEIPT_TC_LOG[tcKey]}\n`);
   }
-  // Keep admin page so we can return after Mailinator / vendor portal tabs.
+  // Keep admin page so we can return after Yopmail / Mailinator / vendor portal tabs.
   this.adminPage = this.page;
   this.vendorMailinatorEmail =
     testData.vendor?.goodsReceiptMailinator?.email ||
     'bhavani123456@mailinator.com';
-  this.lastPoTitle = `New PO FOR Goods Receipt ${String(Date.now()).slice(-8)}`;
-  this.lastPoLineItems = [
-    { name: 'Wires', quantity: '10', rate: '1000', unit: 'Nos' },
-    { name: 'Lubbers', quantity: '15', rate: '2000', unit: 'Nos' },
-    { name: 'Motors', quantity: '3', rate: '3000', unit: 'Nos' },
-  ];
+  this.vendorYopmailEmail =
+    testData.vendor?.goodsReceiptYopmail?.email || 'poojaal002@yopmail.com';
+
+  const saved = goodsReceiptSession.load();
+  const continuesSavedPo = tcKey === 'TC01A' || tcKey === 'TC01B';
+  if (continuesSavedPo) {
+    if (!saved.title) {
+      throw new Error(
+        'No saved Goods Receipt purchase order. Run "@goods-receipt and @TC01" first, then TC-01A, then TC-01B.'
+      );
+    }
+    this.lastPoTitle = saved.title;
+    if (saved.email) this.vendorYopmailEmail = saved.email;
+    if (saved.poNumber) this.lastPoNumber = saved.poNumber;
+    console.log(
+      `[GoodsReceipt] Reusing saved PO "${this.lastPoTitle}"` +
+        (saved.poNumber ? ` (${saved.poNumber})` : '') +
+        (saved.email ? ` inbox ${saved.email}` : '')
+    );
+  } else {
+    this.lastPoTitle = `New PO FOR Goods Receipt ${String(Date.now()).slice(-8)}`;
+  }
+
+  // TC-01 sheet: single Wires line + Yopmail External Accept.
+  if (tcKey === 'TC01' || tcKey === 'TC01A' || tcKey === 'TC01B') {
+    this.lastPoLineItems = [
+      { name: 'Wires', quantity: '10', rate: '1000', unit: 'Nos' },
+    ];
+    // Org dropdown rarely lists "Yopmail" — unique PO title search is enough.
+    this.goodsReceiptPreferredVendorName = '';
+  } else {
+    this.lastPoLineItems = [
+      { name: 'Wires', quantity: '10', rate: '1000', unit: 'Nos' },
+      { name: 'Lubbers', quantity: '15', rate: '2000', unit: 'Nos' },
+      { name: 'Motors', quantity: '3', rate: '3000', unit: 'Nos' },
+    ];
+    this.goodsReceiptPreferredVendorName = '';
+  }
+});
+
+After({ tags: '@goods-receipt and @TC01' }, async function () {
+  const title = String(this.lastPoTitle || '').trim();
+  if (!title) return;
+  goodsReceiptSession.save({
+    title,
+    email: String(this.vendorYopmailEmail || '').trim(),
+    poNumber: String(this.lastPoNumber || '').trim(),
+  });
+  console.log(`[GoodsReceipt] Saved PO "${title}" for TC-01A / TC-01B`);
+});
+
+After({ tags: '@goods-receipt and @TC01A' }, async function () {
+  const saved = goodsReceiptSession.load();
+  goodsReceiptSession.save({
+    title: String(this.lastPoTitle || saved.title || '').trim(),
+    email: String(this.vendorYopmailEmail || saved.email || '').trim(),
+    poNumber: String(this.lastPoNumber || saved.poNumber || '').trim(),
+  });
 });
 
 When(
@@ -120,10 +184,10 @@ When(
   async function (status) {
     const title = String(this.lastPoTitle || '').trim();
     if (!title) throw new Error('lastPoTitle is empty — fill PO title first');
-    await getGoodsReceiptPage(this).refreshUntilPurchaseOrderShowsStatus(
-      title,
-      status || 'Accepted'
-    );
+    const gr = getGoodsReceiptPage(this);
+    await gr.refreshUntilPurchaseOrderShowsStatus(title, status || 'Accepted');
+    const poNo = await gr.capturePoNumberForTitle(title);
+    if (poNo) this.lastPoNumber = poNo;
   }
 );
 
@@ -136,9 +200,13 @@ Then(
     this.lastPoTitle = title;
     const gr = getGoodsReceiptPage(this);
     const statusRe = new RegExp(
-      `\\b${statusLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+      `(?<![a-z])${statusLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`,
       'i'
     );
+    if (await gr.purchaseOrderStatusVisibleNearTitle(title, statusRe)) {
+      console.log(`[GoodsReceipt] Verified Admin PO "${title}" status "${statusLabel}"`);
+      return;
+    }
     const card = gr.poListCardForTitle(title);
     if (await card.isVisible({ timeout: 15000 }).catch(() => false)) {
       await expect(card.getByText(statusRe).first()).toBeVisible({ timeout: 30000 });
@@ -163,9 +231,17 @@ Then(
     const statusLabel = String(status || 'Accepted').trim();
     const gr = getGoodsReceiptPage(this);
     const statusRe = new RegExp(
-      `\\b${statusLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+      `(?<![a-z])${statusLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`,
       'i'
     );
+    if (await gr.purchaseOrderStatusVisibleNearTitle(title, statusRe)) {
+      const poNo = await gr.capturePoNumberForTitle(title);
+      if (poNo) this.lastPoNumber = poNo;
+      console.log(
+        `[GoodsReceipt] Verified Admin PO "${title}" status "${statusLabel}"` + (poNo ? ` (${poNo})` : '')
+      );
+      return;
+    }
     const card = gr.poListCardForTitle(title);
     if (await card.isVisible({ timeout: 15000 }).catch(() => false)) {
       await expect(card.getByText(statusRe).first()).toBeVisible({ timeout: 30000 });
@@ -178,7 +254,12 @@ Then(
           .first()
       ).toBeVisible({ timeout: 60000 });
     }
-    console.log(`[GoodsReceipt] Verified Admin PO "${title}" status "${statusLabel}"`);
+    const poNo = await gr.capturePoNumberForTitle(title);
+    if (poNo) this.lastPoNumber = poNo;
+    console.log(
+      `[GoodsReceipt] Verified Admin PO "${title}" status "${statusLabel}"` +
+        (poNo ? ` (${poNo})` : '')
+    );
   }
 );
 
@@ -214,9 +295,9 @@ When('I enter inventory group name {string}', { timeout: 120000 }, async functio
 });
 
 When(
-  'I complete goods receipt from the accepted PO with vehicle {string} and notes {string}',
+  'I complete goods receipt from the accepted PO with notes {string}',
   { timeout: 360000 },
-  async function (vehicle, notes) {
+  async function (notes) {
     const gr = getGoodsReceiptPage(this);
     const inv = getInventoryPage(this);
     gr.lastCreatedGroupName =
@@ -224,21 +305,61 @@ When(
       this.lastCreatedInventoryGroupName ||
       inv.lastCreatedGroupName ||
       '';
-    // Feature already: open recently created group → Add Items; continue from Add from PO.
+    if (this.lastPoNumber) {
+      gr.lastPoNumber = this.lastPoNumber;
+    }
     await gr.completeGoodsReceiptFromAcceptedPoFlow({
       poTitle: this.lastPoTitle,
       lineItems: this.lastPoLineItems || [
         { name: 'Wires', quantity: '10' },
-        { name: 'Lubbers', quantity: '15' },
-        { name: 'Motors', quantity: '3' },
       ],
-      vehicleNumber: vehicle || '20022002',
       notes:
         notes ||
         `GR auto notes ${String(Date.now()).slice(-6)}`,
-      preferredVendorName: 'Mailinator',
+      preferredVendorName: '',
+      pickAnyAcceptedPo: true,
       openGroupAndAddItems: false,
     });
+    this.goodsReceiptAddCompleted = !!gr.goodsReceiptAddCompleted;
+    if (gr.lastSelectedGrPoTitle) {
+      this.lastSelectedGrPoTitle = gr.lastSelectedGrPoTitle;
+    }
+    if (gr.lastPoNumber) this.lastPoNumber = gr.lastPoNumber;
+  }
+);
+
+When(
+  'I complete goods receipt from the accepted PO with vehicle {string} and notes {string}',
+  { timeout: 360000 },
+  async function (_vehicle, notes) {
+    // Legacy step wording — vehicle is ignored; only notes / required qty are used.
+    const gr = getGoodsReceiptPage(this);
+    const inv = getInventoryPage(this);
+    gr.lastCreatedGroupName =
+      gr.lastCreatedGroupName ||
+      this.lastCreatedInventoryGroupName ||
+      inv.lastCreatedGroupName ||
+      '';
+    if (this.lastPoNumber) {
+      gr.lastPoNumber = this.lastPoNumber;
+    }
+    await gr.completeGoodsReceiptFromAcceptedPoFlow({
+      poTitle: this.lastPoTitle,
+      lineItems: this.lastPoLineItems || [
+        { name: 'Wires', quantity: '10' },
+      ],
+      notes:
+        notes ||
+        `GR auto notes ${String(Date.now()).slice(-6)}`,
+      preferredVendorName: '',
+      pickAnyAcceptedPo: true,
+      openGroupAndAddItems: false,
+    });
+    this.goodsReceiptAddCompleted = !!gr.goodsReceiptAddCompleted;
+    if (gr.lastSelectedGrPoTitle) {
+      this.lastSelectedGrPoTitle = gr.lastSelectedGrPoTitle;
+    }
+    if (gr.lastPoNumber) this.lastPoNumber = gr.lastPoNumber;
   }
 );
 
@@ -265,8 +386,9 @@ When('I enter received quantities matching the PO line items', { timeout: 180000
   await getGoodsReceiptPage(this).enterReceivedQuantities(items);
 });
 
-When('I enter goods receipt vehicle number {string}', { timeout: 120000 }, async function (vehicle) {
-  await getGoodsReceiptPage(this).enterVehicleNumber(vehicle);
+When('I enter goods receipt vehicle number {string}', { timeout: 60000 }, async function (_vehicle) {
+  // Vehicle number removed from Goods Receipt flow — no-op for legacy steps.
+  console.log('[GoodsReceipt] Skipping vehicle number (removed from flow)');
 });
 
 When('I enter goods receipt notes {string}', { timeout: 120000 }, async function (notes) {
@@ -278,7 +400,13 @@ When('I click Add on the goods receipt form', { timeout: 120000 }, async functio
 });
 
 Then('I should see the goods receipt added successfully', { timeout: 120000 }, async function () {
-  await getGoodsReceiptPage(this).expectGoodsReceiptAddedSuccess();
+  const gr = getGoodsReceiptPage(this);
+  // When-step may have already completed Add → Yes; keep flag across page-object refresh.
+  if (this.goodsReceiptAddCompleted) {
+    gr.goodsReceiptAddCompleted = true;
+  }
+  await gr.expectGoodsReceiptAddedSuccess();
+  this.goodsReceiptAddCompleted = gr.goodsReceiptAddCompleted;
 });
 
 Then(
@@ -370,6 +498,11 @@ When('I navigate back to the inventory module', { timeout: 180000 }, async funct
 
 When('I open the Requested Products section in inventory', { timeout: 180000 }, async function () {
   await getInventoryRequestPage(this).openRequestedProductsSection();
+});
+
+When('I open the Approved tab in Item Requests', { timeout: 120000 }, async function () {
+  await getInventoryRequestPage(this).selectItemRequestsStatusFilter('Approved');
+  await getInventoryRequestPage(this).clearItemRequestsSearch();
 });
 
 When('I locate the last requested product in Requested Products', { timeout: 180000 }, async function () {

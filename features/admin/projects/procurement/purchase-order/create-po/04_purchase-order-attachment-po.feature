@@ -1,4 +1,4 @@
-@regression @po @procurement @create-po @po-attachment
+@regression @po @procurement @create-po @po-attachment @ashraf-modules
 Feature: Purchase Order — create PO with terms template, attachment, and send email
 
   Same path as default terms template, then attach a file before Action → Compose email.

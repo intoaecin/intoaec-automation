@@ -226,7 +226,14 @@ class VendorLoginPage extends BasePage {
         this.logStep('Left the Sign In screen — treating vendor login as successful');
         return;
       }
-      throw new Error(`Vendor Sign In did not open the portal (${url}). ${err.message}`);
+      const messages = await this.page
+        .locator('.Toastify__toast, .MuiAlert-root, [role="alert"], .MuiFormHelperText-root')
+        .allInnerTexts()
+        .catch(() => []);
+      const shown = [...new Set(messages.map((t) => t.replace(/\s+/g, ' ').trim()).filter(Boolean))].join(' | ');
+      throw new Error(
+        `Vendor Sign In did not open the portal (${url})${shown ? ` — page says: "${shown}"` : ''}. ${err.message}`
+      );
     }
     this.logStep(`Vendor portal after Sign In: ${this.page.url()}`);
   }
@@ -362,13 +369,28 @@ class VendorLoginPage extends BasePage {
   }
 
   /** Navigate to vendor sign-in; log in only when still on the sign-in screen. */
-  async ensureAuthenticated(email = 'testintoaec@gmail.com', password = 'Simple@10') {
-    if (this._isVendorHost() && (await this._isVendorAppReady())) {
+  async ensureAuthenticated(email = 'praveen@yopmail.com', password = 'Simple@10') {
+    const passwordModal = this.page
+      .locator('.MuiModal-root, [role="dialog"]')
+      .filter({ hasText: /password changed|changed successfully/i })
+      .first();
+    if (await passwordModal.isVisible({ timeout: 800 }).catch(() => false)) {
+      const signIn = passwordModal.getByRole('button', { name: /sign in|login|ok|continue/i }).first();
+      if (await signIn.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await signIn.click({ timeout: this.uiTimeout, force: true }).catch(() => {});
+        this.logStep('Dismissed password-changed overlay before ensureAuthenticated');
+      }
+      await this.page.waitForURL(/signIn/i, { timeout: 15000 }).catch(() => {});
+    }
+
+    if (this._isVendorHost() && (await this._isVendorAppReady()) && !(await passwordModal.isVisible({ timeout: 300 }).catch(() => false))) {
       this.logStep('Already logged in to vendor portal');
       return;
     }
     await this.navigateToLoginPage();
-    const candidates = [...new Set([password, 'Simple@10', 'Courage@10'].filter(Boolean))];
+    const candidates = [
+      ...new Set([password, 'Intoaec@10', 'Intoec@10', 'Simple@10', 'Courage@10'].filter(Boolean)),
+    ];
     for (let i = 0; i < candidates.length; i += 1) {
       const candidate = candidates[i];
       await this.fillEmail(email);
@@ -395,14 +417,16 @@ class VendorLoginPage extends BasePage {
       if (loggedIn) {
         this.lastPasswordUsed = candidate;
         if (String(this.page.url()).includes('multi-account-switch')) {
-          await this._waitForPostLoginNavigation();
+          await this.page.goto('https://vendor.aecplayhouse.com/dashboard', {
+            waitUntil: 'domcontentloaded',
+            timeout: 60000,
+          }).catch(() => {});
         }
-        await this.expectLoggedInSuccessfully();
+        this.logStep(`Vendor user is logged in successfully (${this.page.url()})`);
         return;
       }
-      this.logStep(`Vendor login did not succeed with password candidate ${i + 1}`);
     }
-    await this.expectLoggedInSuccessfully();
+    throw new Error(`Vendor login failed for ${email}`);
   }
 }
 

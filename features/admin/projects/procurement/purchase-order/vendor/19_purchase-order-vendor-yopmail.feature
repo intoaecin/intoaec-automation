@@ -1,4 +1,4 @@
-@smoke @regression @po @procurement @vendor @po-vendor-yopmail
+@smoke @regression @po @procurement @vendor @po-vendor-yopmail @ashraf-modules
 Feature: Purchase Order — vendor accepts PO via Yopmail (same browser)
 
   Reuses the create-po journey (list → scratch → title → vendor → line item → compose → send), then opens Yopmail in a **new tab**,

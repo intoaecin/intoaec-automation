@@ -1,4 +1,4 @@
-@regression @rfq @rfq-super-admin-comment
+@regression @rfq @rfq-super-admin-comment @ashraf-modules
 Feature: RFQ — super admin line comment from preview
 
   Create an RFQ via Action → Compose email → Send email, open Preview from the RFQ card menu,

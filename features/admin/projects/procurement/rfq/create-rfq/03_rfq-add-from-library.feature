@@ -1,4 +1,4 @@
-@regression @rfq @rfq-add-from-library
+@regression @rfq @rfq-add-from-library @ashraf-modules
 Feature: RFQ — add from library and compose email
 
   Same navigation as compose RFQ; line items come from Add from library (two rows).

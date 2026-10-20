@@ -1,4 +1,4 @@
-@po @procurement @import-po @po-import-pdf
+@po @procurement @import-po @po-import-pdf @ashraf-modules
 Feature: Purchase Order — import from PDF
 
   From the PO list: Upload PDF → create form → title → vendor → prepare units → Action → Compose email → Send email.

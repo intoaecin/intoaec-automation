@@ -1033,6 +1033,30 @@ class TimeTrackingPage extends BasePage {
       'Timesheet was not created successfully. No success toast and create drawer still open (check mandatory fields).'
     );
   }
+
+  async expectCreatedTimesheetInList() {
+    await this.page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+    await expect(this.timesheetTableRows.first()).toBeVisible({ timeout: this.defaultTimeout });
+
+    const userName = (this.lastTimesheetUser || '').split('\n')[0].trim();
+    if (!userName) {
+      // eslint-disable-next-line no-console
+      console.log('[Time Tracking] Time sheet list has rows (user name not captured, skipping row match).');
+      return;
+    }
+
+    try {
+      await expect(this.timesheetTableRows.filter({ hasText: userName }).first()).toBeVisible({
+        timeout: this.defaultTimeout,
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.log(`[Time Tracking] Created time sheet for "${userName}" not found in list.`);
+      throw err;
+    }
+    // eslint-disable-next-line no-console
+    console.log(`[Time Tracking] Created time sheet for "${userName}" is displayed in the list.`);
+  }
 }
 
 module.exports = TimeTrackingPage;

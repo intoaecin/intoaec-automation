@@ -1,4 +1,4 @@
-@regression @po @procurement @create-po @po-ship-to
+@regression @po @procurement @create-po @po-ship-to @ashraf-modules
 Feature: Purchase Order — create PO with Ship To checked and send email
 
   Same as create PO; additionally checks the Ship To checkbox before Action → Compose email.

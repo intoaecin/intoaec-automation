@@ -1,4 +1,4 @@
-@regression @rfq @rfq-send-to-vendor
+@regression @rfq @rfq-send-to-vendor @ashraf-modules
 Feature: RFQ — send to vendor by email
 
   After creating an RFQ (same setup as compose RFQ), use **Send to vendor** on the RFQ view,

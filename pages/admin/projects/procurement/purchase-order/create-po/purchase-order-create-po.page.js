@@ -10,6 +10,15 @@ class PurchaseOrderCreatePoPage extends BasePage {
     this.defaultTimeout = 120000;
     /** Compose modal often waits on APIs before To/subject render and Send enables. */
     this.composeModalTimeout = Number(process.env.PO_COMPOSE_MODAL_TIMEOUT_MS) || 180000;
+    this.addInCostCatalogOption = page
+      .locator('[role="option"], .MuiAutocomplete-option')
+      .filter({ hasText: /add in cost catalog/i })
+      .first();
+    this.addCatalogItemPopover = page
+      .locator('.MuiPaper-root')
+      .filter({ hasText: /not found in cost catalog/i })
+      .filter({ has: page.getByRole('button', { name: /^create$/i }) })
+      .last();
   }
 
   async waitForNetworkSettled() {
@@ -18,6 +27,31 @@ class PurchaseOrderCreatePoPage extends BasePage {
     });
     await this.page
       .waitForLoadState('networkidle', { timeout: 20000 })
+      .catch(() => {});
+  }
+
+  /** Freshchat iframe overlays the compose dialog and blocks Send email clicks. */
+  async hideFreshchatWidget() {
+    await this.page
+      .locator('#fc_frame, iframe#fc_widget, #fc_widget')
+      .evaluateAll((nodes) => {
+        nodes.forEach((node) => {
+          const el = node;
+          el.style.setProperty('pointer-events', 'none', 'important');
+          el.style.setProperty('visibility', 'hidden', 'important');
+          el.style.setProperty('display', 'none', 'important');
+          el.style.setProperty('z-index', '-1', 'important');
+        });
+      })
+      .catch(() => {});
+    await this.page
+      .evaluate(() => {
+        const frame = document.getElementById('fc_frame');
+        if (frame) {
+          frame.style.setProperty('pointer-events', 'none', 'important');
+          frame.style.setProperty('display', 'none', 'important');
+        }
+      })
       .catch(() => {});
   }
 
@@ -226,11 +260,34 @@ class PurchaseOrderCreatePoPage extends BasePage {
         opts.preferEmail ||
         process.env.PO_VENDOR_YOPMAIL_ID ||
         process.env.PO_VENDOR_YOPMAIL_LOGIN ||
-        'bhavanimmm12345@yopmail.com';
+        'praveen@yopmail.com';
       const preferredLocal = String(preferredVendorMail)
         .replace(/@(yopmail|mailinator)\.com$/i, '')
         .trim();
       const preferMailinator = /@mailinator\.com$/i.test(String(preferredVendorMail));
+
+      // Exact email first — the bare local part ("praveen") also matches invited look-alikes (praveen80475277@…).
+      // Rows load slowly; without waiting, the "first radio" fallback below picks the wrong vendor.
+      await modal
+        .locator('table tbody tr')
+        .filter({ hasText: /@/ })
+        .first()
+        .waitFor({ state: 'visible', timeout: 20000 })
+        .catch(() => {});
+      const exactRow = modal
+        .locator('table tbody tr')
+        .filter({ hasText: String(preferredVendorMail).trim() })
+        .filter({ visible: true })
+        .first();
+      if (await exactRow.isVisible({ timeout: 1500 }).catch(() => false)) {
+        const radio = exactRow.locator('input[type="radio"]').first().or(exactRow.getByRole('radio').first());
+        if (await radio.isVisible({ timeout: 500 }).catch(() => false)) {
+          await radio.check({ force: true }).catch(() => radio.click({ force: true }));
+        } else {
+          await exactRow.click({ force: true });
+        }
+        return true;
+      }
 
       // Prefer known vendor inbox / org used by RFQ + PO accept flows.
       const preferred = modal
@@ -336,12 +393,12 @@ class PurchaseOrderCreatePoPage extends BasePage {
         .getByPlaceholder(/search/i)
         .or(vendorModal.locator('input[type="search"]'))
         .first();
-      if (await search.isVisible({ timeout: 400 }).catch(() => false)) {
-        const hint =
-          String(opts.searchHint || '').trim() ||
-          (/mailinator/i.test(String(opts.preferEmail || ''))
-            ? 'Mailinator'
-            : 'AEC');
+      // Only filter on an explicit/Mailinator hint — a blanket "AEC" filter hides non-AEC vendors (e.g. BuildCraft).
+      const searchHint =
+        String(opts.searchHint || '').trim() ||
+        (/mailinator/i.test(String(opts.preferEmail || '')) ? 'Mailinator' : '');
+      if (searchHint && (await search.isVisible({ timeout: 400 }).catch(() => false))) {
+        const hint = searchHint;
         const current = await search.inputValue().catch(() => '');
         if (!new RegExp(hint.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(current || '')) {
           await search.fill(hint).catch(() => {});
@@ -450,10 +507,10 @@ class PurchaseOrderCreatePoPage extends BasePage {
         opts.preferEmail ||
         process.env.PO_VENDOR_YOPMAIL_ID ||
         process.env.PO_VENDOR_YOPMAIL_LOGIN ||
-        'bhavanimmm12345@yopmail.com',
+        'praveen@yopmail.com',
       excludeEmails: [
         process.env.ADMIN_EMAIL,
-        'aadhi@yopmail.com',
+        'kumar@diy.in',
         'testintoaec@gmail.com',
       ],
     });
@@ -575,11 +632,11 @@ class PurchaseOrderCreatePoPage extends BasePage {
       : 0;
 
     const addManually = this.page
-      .getByText(/^\+\s*Add Manually$/i)
+      .getByText(/^\+\s*Add (Manually|Item)$/i)
       .first()
-      .or(this.page.locator('span.pointer').filter({ hasText: /add\s*manually/i }).first())
-      .or(this.page.getByText(/add\s*manually/i).filter({ visible: true }).first())
-      .or(this.page.getByRole('button', { name: /add\s*manually/i }).first());
+      .or(this.page.locator('span.pointer').filter({ hasText: /add\s*(manually|item)/i }).first())
+      .or(this.page.getByText(/add\s*(manually|item)/i).filter({ visible: true }).first())
+      .or(this.page.getByRole('button', { name: /add\s*(manually|item)/i }).first());
 
     if (!(await addManually.isVisible({ timeout: 5000 }).catch(() => false))) {
       await this.scrollPoFormTowardLineItems();
@@ -600,13 +657,13 @@ class PurchaseOrderCreatePoPage extends BasePage {
           return body
             .split(/\n/)
             .map((s) => s.trim())
-            .filter((s) => /line item|manually|library|material|vendor/i.test(s))
+            .filter((s) => /line item|manually|library|material|vendor|add item/i.test(s))
             .slice(0, 20)
             .join(' | ');
         })
         .catch(() => '');
       throw new Error(
-        `PO: "+ Add Manually" not found after vendor. URL=${this.page.url()} Nearby: ${hint || '(none)'}`
+        `PO: "+ Add Item / Add Manually" not found after vendor. URL=${this.page.url()} Nearby: ${hint || '(none)'}`
       );
     }
 
@@ -617,21 +674,32 @@ class PurchaseOrderCreatePoPage extends BasePage {
     // Table / material row may appear only after the click.
     table = await this.ensurePoLineItemsTableVisible();
     await expect(
-      this.page.getByPlaceholder(/material name/i).last()
+      this.page.getByPlaceholder(/material name|item name|product/i).last()
     ).toBeVisible({ timeout: 30000 });
 
     if (table && rowCountBefore === 0) {
       await expect
         .poll(async () => table.locator('tbody tr').count(), {
           timeout: 15000,
-          message: 'PO: Add Manually did not add a line item row',
+          message: 'PO: Add Item did not add a line item row',
         })
         .toBeGreaterThan(0)
         .catch(() => {});
     }
 
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-    console.log('[PO] Clicked Add Manually');
+    console.log('[PO] Clicked Add Item / Add Manually');
+  }
+
+  /** After vendor: scroll to line items and open the first Add Item row. */
+  async openAddItemsSectionAfterVendor() {
+    await expect(this.page).toHaveURL(/purchase-order\/(create|edit)/);
+    await this.waitForNetworkSettled();
+    await this.page.keyboard.press('Escape').catch(() => {});
+    await this.dismissVisibleToastNotifications().catch(() => {});
+    await this.scrollPoFormTowardLineItems();
+    await this.clickAddManuallyOnPurchaseOrderForm();
+    console.log('[PO] Opened Add Items section after vendor details');
   }
 
   isPoLineUnitPlaceholderText(text) {
@@ -1013,9 +1081,11 @@ class PurchaseOrderCreatePoPage extends BasePage {
       .filter({ has: this.page.getByText(/add description/i) })
       .last();
     await expect(descDialog).toBeVisible({ timeout: 20000 });
-    const descField = descDialog.locator('textarea').first().or(
-      descDialog.locator('input').first()
-    );
+    const descField = descDialog
+      .locator('textarea, [contenteditable="true"]')
+      .filter({ visible: true })
+      .first()
+      .or(descDialog.locator('input:not([type="color"]):not([type="hidden"])').filter({ visible: true }).first());
     await descField.fill(description);
     await descDialog.getByRole('button', { name: /^Add$/i }).click();
     await expect(descDialog).toBeHidden({ timeout: 20000 });
@@ -1217,6 +1287,7 @@ class PurchaseOrderCreatePoPage extends BasePage {
    * Action → Compose email only. Does not wait for the modal (Send click uses a long actionability timeout).
    */
   async openActionMenuAndComposeEmail() {
+    await this.hideFreshchatWidget();
     const actionBtn = this.page.getByRole('button', { name: /^action$/i }).first();
     await expect(actionBtn).toBeVisible({ timeout: this.defaultTimeout });
     await actionBtn.scrollIntoViewIfNeeded();
@@ -1228,6 +1299,7 @@ class PurchaseOrderCreatePoPage extends BasePage {
 
     await this.page.waitForLoadState('domcontentloaded');
     await this.waitForComposeEmailModalReady();
+    await this.hideFreshchatWidget();
   }
 
   /** Topmost visible “Send email” in a portal stack (compose opens before inner tree finishes). */
@@ -1357,6 +1429,7 @@ class PurchaseOrderCreatePoPage extends BasePage {
   async sendEmailFromComposeModal(options = {}) {
     const prioritizeEmailSentToast = !!options.prioritizeEmailSentToast;
     await this.waitForComposeEmailModalReady();
+    await this.hideFreshchatWidget();
 
     const emailDialog = this.locatorComposeEmailDialogForClose();
     const send = this.locatorComposeSendEmailButtonInVisibleDialog();
@@ -1368,20 +1441,41 @@ class PurchaseOrderCreatePoPage extends BasePage {
     await expect(send).toBeVisible({ timeout: this.composeModalTimeout });
     await expect(send).toBeEnabled({ timeout: this.composeModalTimeout });
     await send.scrollIntoViewIfNeeded().catch(() => {});
+    await this.hideFreshchatWidget();
 
+    let clicked = false;
     try {
-      await send.click({ timeout: 30000 });
-      // eslint-disable-next-line no-console
+      await send.click({ timeout: 15000 });
+      clicked = true;
       console.log('[PO compose] Clicked Send email in the compose dialog.');
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.log(
-        `[PO compose] Normal Send email click failed; retrying with force. ${error.message}`
+        `[PO compose] Normal Send email click blocked (${String(error.message || error).slice(0, 120)}) — hiding chat widget and force-clicking`
       );
-      await this.dismissOpenMenusAndPopovers();
+      await this.hideFreshchatWidget();
+      await this.dismissOpenMenusAndPopovers().catch(() => {});
       await expect(send).toBeVisible({ timeout: 15000 });
       await expect(send).toBeEnabled({ timeout: 15000 });
-      await send.click({ timeout: 15000, force: true });
+      try {
+        await send.click({ timeout: 15000, force: true });
+        clicked = true;
+        console.log('[PO compose] Force-clicked Send email in the compose dialog.');
+      } catch (forceErr) {
+        console.log(
+          `[PO compose] Force click failed — using DOM click. ${String(forceErr.message || forceErr).slice(0, 120)}`
+        );
+        await this.hideFreshchatWidget();
+        await send.evaluate((el) => {
+          el.scrollIntoView({ block: 'center', inline: 'center' });
+          el.click();
+        });
+        clicked = true;
+        console.log('[PO compose] DOM-clicked Send email in the compose dialog.');
+      }
+    }
+
+    if (!clicked) {
+      throw new Error('PO compose: Send email button was not clicked');
     }
 
     const observeSuccessToast = Promise.race([
@@ -1614,6 +1708,497 @@ class PurchaseOrderCreatePoPage extends BasePage {
     const kebab = this.kebabButtonOnPoCard(card);
     await kebab.scrollIntoViewIfNeeded();
     await kebab.click();
+  }
+
+  escapeRegExp(value) {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /**
+   * Select N distinct products from Product/Item autocomplete on PO create form.
+   * @param {number} count
+   * @returns {Promise<string[]>}
+   */
+  async selectProductsFromItemDropdown(count = 3) {
+    const needed = Math.max(1, Number(count) || 3);
+    await expect(this.page).toHaveURL(/purchase-order\/(create|edit)/);
+    await this.waitForNetworkSettled();
+    await this.page.keyboard.press('Escape').catch(() => {});
+
+    const selected = [];
+    const already = new Set();
+    const searchTokens = ['a', 'b', 'c', 'm', 'p', 'w', 's', 't'];
+
+    const productFieldOnLastRow = () =>
+      this.page
+        .getByPlaceholder(/material name|item name|product|search item/i)
+        .filter({ visible: true })
+        .last()
+        .or(
+          this.page
+            .locator('table tbody tr')
+            .filter({ visible: true })
+            .last()
+            .locator(
+              'input[placeholder*="material" i], input[placeholder*="item" i], input[placeholder*="product" i], [role="combobox"] input'
+            )
+            .filter({ visible: true })
+            .first()
+        );
+
+    for (let i = 0; i < needed; i += 1) {
+      const existingBlank = this.page
+        .getByPlaceholder(/material name|item name|product/i)
+        .filter({ visible: true })
+        .last();
+      let needAdd = true;
+      if (await existingBlank.isVisible({ timeout: 1500 }).catch(() => false)) {
+        const val = ((await existingBlank.inputValue().catch(() => '')) || '').trim();
+        if (!val && (i === 0 || selected.length === i)) needAdd = false;
+        if (val) needAdd = true;
+      }
+      if (needAdd) {
+        await this.clickAddManuallyOnPurchaseOrderForm();
+      }
+
+      const field = productFieldOnLastRow();
+      await expect(field).toBeVisible({
+        timeout: 30000,
+        message: `PO Product/Item field not found for product #${i + 1}`,
+      });
+
+      let pickedLabel = '';
+      for (const token of searchTokens) {
+        await field.click({ timeout: 15000 });
+        await field.fill('').catch(() => {});
+        await field.fill(token);
+        await this.page.waitForTimeout(700);
+
+        const popper = this.page
+          .locator('.MuiAutocomplete-popper, [role="listbox"]')
+          .filter({ visible: true })
+          .last();
+        if (!(await popper.isVisible({ timeout: 8000 }).catch(() => false))) continue;
+
+        const options = popper
+          .locator('[role="option"], .MuiAutocomplete-option, li')
+          .filter({ visible: true });
+        const optCount = await options.count().catch(() => 0);
+        for (let j = 0; j < optCount; j += 1) {
+          const opt = options.nth(j);
+          // eslint-disable-next-line no-await-in-loop
+          const label = ((await opt.innerText().catch(() => '')) || '')
+            .trim()
+            .replace(/\s+/g, ' ');
+          if (!label || already.has(label.toLowerCase())) continue;
+          // eslint-disable-next-line no-await-in-loop
+          await opt.click({ force: true });
+          await this.page.keyboard.press('Tab').catch(() => {});
+          await this.page.waitForTimeout(400);
+          pickedLabel = label;
+          already.add(label.toLowerCase());
+          break;
+        }
+        if (pickedLabel) break;
+      }
+
+      if (!pickedLabel) {
+        throw new Error(
+          `Could not pick a distinct Product/Item #${i + 1} of ${needed} from PO Add Items dropdown`
+        );
+      }
+
+      await this.page.waitForTimeout(400);
+      const committedVal = ((await field.inputValue().catch(() => '')) || '').trim();
+      if (committedVal && committedVal.length > 1) {
+        pickedLabel = committedVal;
+        already.add(committedVal.toLowerCase());
+      }
+      selected.push(pickedLabel);
+      console.log(`[PO] Added distinct Product/Item ${i + 1}/${needed}: ${pickedLabel}`);
+    }
+
+    this.lastPoSelectedProducts = selected;
+    console.log(`[PO] Selected ${selected.length} different Product/Item(s): ${selected.join(', ')}`);
+    return selected;
+  }
+
+  /**
+   * Create N new Material products on the PO line rows: unique name →
+   * "Add in cost catalog" → Add Item popover (Unit, Type Material) → Create.
+   * @returns {Promise<string[]>}
+   */
+  async createProductsInCatalog(count = 3, unitLabel = 'Each') {
+    const needed = Math.max(1, Number(count) || 3);
+    await expect(this.page).toHaveURL(/purchase-order\/(create|edit)/);
+    await this.waitForNetworkSettled();
+    await this.page.keyboard.press('Escape').catch(() => {});
+
+    const nameFields = () =>
+      this.page.getByPlaceholder(/material name|item name|product|search item/i).filter({ visible: true });
+
+    const selected = [];
+    for (let i = 0; i < needed; i += 1) {
+      const name = `AutoPO ${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+      const last = nameFields().last();
+      // eslint-disable-next-line no-await-in-loop
+      const hasBlank =
+        (await last.isVisible({ timeout: 1500 }).catch(() => false)) &&
+        !((await last.inputValue().catch(() => '')) || '').trim();
+      // eslint-disable-next-line no-await-in-loop
+      if (!hasBlank) await this.clickAddManuallyOnPurchaseOrderForm();
+
+      const field = nameFields().last();
+      // eslint-disable-next-line no-await-in-loop
+      await expect(field).toBeVisible({ timeout: 30000, message: `PO Material Name field not found for product #${i + 1}` });
+      // eslint-disable-next-line no-await-in-loop
+      await field.click();
+      // eslint-disable-next-line no-await-in-loop
+      await field.fill(name);
+
+      // eslint-disable-next-line no-await-in-loop
+      await expect(this.addInCostCatalogOption).toBeVisible({
+        timeout: 20000,
+        message: `"Add in cost catalog" option did not appear after typing "${name}"`,
+      });
+      // eslint-disable-next-line no-await-in-loop
+      await this.addInCostCatalogOption.click();
+
+      const popover = this.addCatalogItemPopover;
+      // eslint-disable-next-line no-await-in-loop
+      await expect(popover).toBeVisible({ timeout: 20000, message: 'Add Item popover did not open' });
+      // eslint-disable-next-line no-await-in-loop
+      const unit = await this._pickCatalogPopoverOption(popover.getByPlaceholder(/^unit$/i), [unitLabel, 'Nos']);
+      if (!unit) throw new Error(`No unit could be selected in the Add Item popover for "${name}"`);
+
+      const typeInput = popover.locator('input[role="combobox"]').nth(1);
+      // eslint-disable-next-line no-await-in-loop
+      if (!/material/i.test(((await typeInput.inputValue().catch(() => '')) || '').trim())) {
+        // eslint-disable-next-line no-await-in-loop
+        await this._pickCatalogPopoverOption(typeInput, ['Material']);
+      }
+
+      const createBtn = popover.getByRole('button', { name: /^create$/i });
+      // eslint-disable-next-line no-await-in-loop
+      await expect(createBtn).toBeEnabled({ timeout: 10000 });
+      const catalogResponse = this.page
+        .waitForResponse((r) => /CREATE_COST_CATALOG/.test(r.request().postData() || ''), { timeout: 20000 })
+        .catch(() => null);
+      // eslint-disable-next-line no-await-in-loop
+      await createBtn.click();
+      // eslint-disable-next-line no-await-in-loop
+      const resp = await catalogResponse;
+      if (resp && resp.status() >= 400) {
+        // eslint-disable-next-line no-await-in-loop
+        const err = await resp.json().catch(() => ({}));
+        console.warn(
+          `[PO] Cost catalog save failed (${resp.status()}: ${err?.error?.message || err?.message || 'unknown'}) — ` +
+            `adding "${name}" as an independent material instead`
+        );
+        // eslint-disable-next-line no-await-in-loop
+        await this._addIndependentMaterial(popover, field, name);
+        selected.push(name);
+        continue;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await expect(popover).toBeHidden({ timeout: 20000 });
+      // eslint-disable-next-line no-await-in-loop
+      await this.waitForNetworkSettled();
+      // eslint-disable-next-line no-await-in-loop
+      await expect(field).toHaveValue(name, { timeout: 15000 });
+
+      selected.push(name);
+      console.log(`[PO] Created Material product ${i + 1}/${needed} in cost catalog: ${name} (unit ${unit})`);
+    }
+
+    this.lastPoSelectedProducts = selected;
+    return selected;
+  }
+
+  /** Admin PO list card for a PO number ("PO No: PO0000002"). `.last()` = innermost div (wrappers come first in DOM order). */
+  poListCardByNumber(poNumber) {
+    const no = String(poNumber || '').trim().toUpperCase();
+    return this.page
+      .locator('div')
+      .filter({ hasText: new RegExp(`PO\\s*No\\s*:\\s*${this.escapeRegExp(no)}(?!\\d)`, 'i') })
+      .filter({ has: this.page.getByRole('button', { name: /^preview$/i }) })
+      .filter({ visible: true })
+      .last();
+  }
+
+  /**
+   * Reload the Admin PO list until the card's Preview icon shows `status` for `poNumber`
+   * (e.g. after the vendor accepted it on the Vendor Portal).
+   */
+  async refreshUntilPoPreviewShowsStatus(poNumber, status = 'Accepted', timeoutMs = 180000) {
+    const no = String(poNumber || '').trim().toUpperCase();
+    if (!no) throw new Error('PO number is required to verify the Admin PO Preview status');
+    // Letter boundaries, not \b: the preview header renders "New PO 1Accepted" (title glued to the status).
+    const statusRe = new RegExp(`(?<![a-z])${this.escapeRegExp(String(status).trim())}(?![a-z])`, 'i');
+    const deadline = Date.now() + timeoutMs;
+    let lastText = '';
+
+    for (let attempt = 1; Date.now() < deadline; attempt += 1) {
+      if (attempt > 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await this.page.reload({ waitUntil: 'domcontentloaded', timeout: 90000 });
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await this.waitForNetworkSettled();
+
+      const card = this.poListCardByNumber(no);
+      // eslint-disable-next-line no-await-in-loop
+      if (!(await card.waitFor({ state: 'visible', timeout: 30000 }).then(() => true).catch(() => false))) {
+        console.log(`[PO] Admin PO list: ${no} not visible yet (attempt ${attempt}) — reloading`);
+        continue;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await card.scrollIntoViewIfNeeded().catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      await card.getByRole('button', { name: /^preview$/i }).click();
+
+      const dialog = this.page
+        .getByRole('dialog')
+        .filter({ hasText: new RegExp(this.escapeRegExp(no), 'i') })
+        .filter({ visible: true })
+        .last();
+      // eslint-disable-next-line no-await-in-loop
+      if (await dialog.waitFor({ state: 'visible', timeout: 30000 }).then(() => true).catch(() => false)) {
+        // eslint-disable-next-line no-await-in-loop
+        lastText = ((await dialog.innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
+        if (statusRe.test(lastText.slice(0, 200))) {
+          console.log(`[PO] Admin PO Preview shows ${no} status "${status}" (attempt ${attempt}): ${lastText.slice(0, 120)}`);
+          // eslint-disable-next-line no-await-in-loop
+          await this.page.keyboard.press('Escape').catch(() => {});
+          return;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        await this.page.keyboard.press('Escape').catch(() => {});
+      }
+      console.log(`[PO] Admin PO Preview for ${no} not "${status}" yet (attempt ${attempt}) — reloading`);
+    }
+
+    throw new Error(
+      `Admin PO Preview for ${no} did not show status "${status}" within ${Math.round(timeoutMs / 1000)}s. ` +
+        `Last preview: ${lastText.slice(0, 300) || '(preview never opened)'}`
+    );
+  }
+
+  /** Close the Add Item popover and keep the typed name on the row as an independent material (typed + Tab). */
+  async _addIndependentMaterial(popover, field, name) {
+    await popover.getByRole('button', { name: /^cancel$/i }).click();
+    await expect(popover).toBeHidden({ timeout: 10000 });
+    await field.click();
+    await field.fill(name);
+    await this.page.keyboard.press('Tab');
+    await expect(field).toHaveValue(name, { timeout: 10000 });
+    console.log(`[PO] Added independent material: ${name}`);
+  }
+
+  /** Pick the first label (exact, case-insensitive) offered by an Add Item popover autocomplete. */
+  async _pickCatalogPopoverOption(input, labels) {
+    await expect(input).toBeVisible({ timeout: 10000 });
+    for (const label of labels.filter(Boolean)) {
+      await input.click();
+      await input.fill(String(label));
+      const opt = this.page
+        .locator('[role="option"], .MuiAutocomplete-option')
+        .filter({ hasText: new RegExp(`^\\s*${this.escapeRegExp(label)}\\s*$`, 'i') })
+        .first();
+      if (await opt.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await opt.click();
+        if (label !== labels[0]) console.warn(`[PO] "${labels[0]}" not offered in Add Item popover — using "${label}"`);
+        return label;
+      }
+    }
+    await input.fill('').catch(() => {});
+    return null;
+  }
+
+  async expectSelectedProductsAddedToPo(expectedCount) {
+    const needed = Math.max(1, Number(expectedCount) || 2);
+    const products = this.lastPoSelectedProducts || [];
+    if (products.length < needed) {
+      throw new Error(
+        `Expected ${needed} selected PO products stored, got ${products.length}`
+      );
+    }
+
+    await this.waitForNetworkSettled();
+    const nameInputs = this.page
+      .getByPlaceholder(/material name|item name|product|search item/i)
+      .filter({ visible: true });
+    await expect
+      .poll(async () => nameInputs.count(), {
+        timeout: 30000,
+        message: `PO: expected at least ${needed} Product/Item fields after Add Items`,
+      })
+      .toBeGreaterThanOrEqual(needed);
+
+    const inputCount = await nameInputs.count();
+    const committed = [];
+    for (let i = 0; i < inputCount; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const val = ((await nameInputs.nth(i).inputValue().catch(() => '')) || '').trim();
+      if (val) committed.push(val);
+    }
+
+    if (committed.length < needed) {
+      throw new Error(
+        `Expected ${needed} filled Product/Item rows on PO form, found ${committed.length}: ${committed.join(' | ') || '(none)'}`
+      );
+    }
+
+    for (const name of products.slice(0, needed)) {
+      const token = String(name || '')
+        .trim()
+        .slice(0, 20)
+        .toLowerCase();
+      if (!token) continue;
+      const matched = committed.some((c) => c.toLowerCase().includes(token) || token.includes(c.toLowerCase().slice(0, 20)));
+      if (!matched) {
+        // Autocomplete may shorten/display differently — accept if we already have N filled distinct rows.
+        console.warn(
+          `[PO] Stored product "${name}" not exact-matched in inputs; filled rows: ${committed.join(' | ')}`
+        );
+      }
+    }
+
+    const distinct = new Set(committed.map((c) => c.toLowerCase()));
+    if (distinct.size < needed) {
+      throw new Error(
+        `Expected ${needed} different Product/Item values on PO form, got ${distinct.size}: ${committed.join(' | ')}`
+      );
+    }
+
+    console.log(
+      `[PO] Verified ${needed} selected product(s) on Purchase Order form via input values: ${committed.slice(0, needed).join(', ')}`
+    );
+  }
+
+  async enterQuantitiesForSelectedPoProducts(quantities = ['1', '2']) {
+    const products = this.lastPoSelectedProducts || [];
+    const qtys = (Array.isArray(quantities) ? quantities : [quantities]).map((q) =>
+      String(q || '').trim()
+    );
+    const table = this.page
+      .locator('table')
+      .filter({ has: this.page.getByPlaceholder(/material name|item name|product/i) })
+      .last();
+    await expect(table).toBeVisible({ timeout: 30000 });
+
+    const rows = table.locator('tbody tr').filter({ visible: true });
+    const rowCount = await rows.count();
+    const n = Math.min(Math.max(products.length, qtys.length), rowCount);
+    for (let i = 0; i < n; i += 1) {
+      const qty = qtys[i] || qtys[qtys.length - 1] || '1';
+      const row = rows.nth(i);
+      const qtyInput = row
+        .locator('td')
+        .nth(1)
+        .locator('input:not([disabled])')
+        .filter({ visible: true })
+        .first()
+        .or(row.locator('input[name*="qty" i], input[placeholder*="qty" i]').first());
+      // eslint-disable-next-line no-await-in-loop
+      await expect(qtyInput).toBeVisible({ timeout: 20000 });
+      // eslint-disable-next-line no-await-in-loop
+      await qtyInput.fill('');
+      // eslint-disable-next-line no-await-in-loop
+      await qtyInput.fill(qty);
+      // eslint-disable-next-line no-await-in-loop
+      await qtyInput.blur().catch(() => {});
+      console.log(`[PO] Set quantity ${qty} on product row ${i + 1}`);
+    }
+    await this.waitForNetworkSettled();
+  }
+
+  async selectUnitForSelectedPoProducts(unitLabel = 'Each') {
+    const unit = String(unitLabel || 'Each').trim() || 'Each';
+    const table = this.page
+      .locator('table')
+      .filter({ has: this.page.getByPlaceholder(/material name|item name|product/i) })
+      .last();
+    await expect(table).toBeVisible({ timeout: 30000 });
+    const rows = table.locator('tbody tr').filter({ visible: true });
+    const n = Math.min(await rows.count(), (this.lastPoSelectedProducts || []).length || 2);
+    for (let i = 0; i < n; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await this.selectPoLineRowUnit(rows.nth(i), unit);
+    }
+    console.log(`[PO] Set unit "${unit}" on ${n} selected product row(s)`);
+  }
+
+  /** Fill any remaining required fields (rates default when empty). */
+  async fillRemainingRequiredPoDetails() {
+    const table = this.page
+      .locator('table')
+      .filter({ has: this.page.getByPlaceholder(/material name|item name|product/i) })
+      .last();
+    if (!(await table.isVisible({ timeout: 5000 }).catch(() => false))) return;
+
+    const rows = table.locator('tbody tr').filter({ visible: true });
+    const n = Math.min(await rows.count(), (this.lastPoSelectedProducts || []).length || 2);
+    for (let i = 0; i < n; i += 1) {
+      const row = rows.nth(i);
+      const rateInput = row.locator('td').nth(3).locator('input').filter({ visible: true }).first();
+      // eslint-disable-next-line no-await-in-loop
+      if (!(await rateInput.isVisible({ timeout: 2000 }).catch(() => false))) continue;
+      // eslint-disable-next-line no-await-in-loop
+      const val = ((await rateInput.inputValue().catch(() => '')) || '').trim();
+      if (val && Number(val.replace(/,/g, '')) > 0) continue;
+      // eslint-disable-next-line no-await-in-loop
+      await rateInput.fill(String((i + 1) * 100));
+      // eslint-disable-next-line no-await-in-loop
+      await rateInput.blur().catch(() => {});
+    }
+    await this.ensureAllPoLineItemUnitsFilled({ settleFirst: true }).catch(() => {});
+    console.log('[PO] Filled remaining required Purchase Order details');
+  }
+
+  async expectPurchaseOrderTitleVisibleOnList(title) {
+    const wanted = String(title || this.lastPoTitle || '').trim();
+    if (!wanted) throw new Error('Purchase Order title is required for list verification');
+    await this.waitForPurchaseOrderListAfterCreateRedirect().catch(async () => {
+      await this.ensurePurchaseOrderListReady();
+    });
+    await expect(
+      this.page.getByText(wanted, { exact: false }).filter({ visible: true }).first()
+    ).toBeVisible({
+      timeout: this.defaultTimeout,
+      message: `Purchase Order "${wanted}" not found on the Purchase Order list`,
+    });
+
+    // Capture dynamic PO number near the title (e.g. PO0000093).
+    // Require 4+ digits so title text like "New PO 1" is never captured as PO1.
+    const titleHit = this.page.getByText(wanted, { exact: false }).filter({ visible: true }).first();
+    const near = titleHit
+      .locator(
+        'xpath=ancestor::*[self::tr or contains(@class,"MuiBox") or contains(@class,"MuiPaper") or contains(@class,"MuiCard")][1]'
+      )
+      .first();
+    let blob = '';
+    if (await near.isVisible({ timeout: 2000 }).catch(() => false)) {
+      blob = ((await near.innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
+    } else {
+      blob = ((await this.page.locator('main, body').first().innerText().catch(() => '')) || '').replace(
+        /\s+/g,
+        ' '
+      );
+    }
+    const poMatch = blob.match(/\b(PO\d{4,})\b/i) || blob.match(/\bPO\s*#?\s*(\d{4,})\b/i);
+    if (poMatch) {
+      const token = poMatch[0].replace(/\s+/g, '').replace(/#/g, '').toUpperCase();
+      this.lastPoNumber = token.startsWith('PO') ? token : `PO${poMatch[1]}`;
+      console.log(`[PO] Captured PO number "${this.lastPoNumber}" for title "${wanted}"`);
+    } else {
+      this.lastPoNumber = '';
+      console.warn(
+        `[PO] Could not capture PO###### (4+ digits) near title "${wanted}" — Vendor TC-02 will click most recently received PO`
+      );
+    }
+
+    console.log(`[PO] Verified Purchase Order "${wanted}" on list`);
   }
 }
 

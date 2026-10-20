@@ -1,4 +1,4 @@
-@regression @po @procurement @create-po @po-terms-and-conditions
+@regression @po @procurement @create-po @po-terms-and-conditions @ashraf-modules
 Feature: Purchase Order — create PO with terms and conditions and send email
 
   Same as basic create PO; before Action → Compose email, fill Terms & Conditions with text.

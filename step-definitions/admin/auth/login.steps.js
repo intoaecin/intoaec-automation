@@ -7,9 +7,16 @@ setDefaultTimeout(60000);
 
 let loginPage;
 
+function getLoginPage(world) {
+  if (!loginPage || loginPage.page !== world.page) {
+    loginPage = new LoginPage(world.page);
+  }
+  return loginPage;
+}
+
 Given('I am on the login page', async function () {
-  loginPage = new LoginPage(this.page);
-  await loginPage.goto();
+  const page = getLoginPage(this);
+  await page.goto();
 });
 
 When('I enter email {string}', async function (email) {
@@ -21,15 +28,18 @@ When('I enter password {string}', async function (password) {
 });
 
 When('I click the Login button', async function () {
-  await loginPage.login(this.email, this.password);
+  const page = getLoginPage(this);
+  await page.login(this.email, this.password);
 });
 
 Then('I should be logged in successfully', async function () {
-  const result = await loginPage.isLoginSuccessful();
+  const page = getLoginPage(this);
+  const result = await page.isLoginSuccessful();
   expect(result).toBeTruthy();
 });
 
 Then('I should see an error message', async function () {
-  const result = await loginPage.isErrorVisible();
+  const page = getLoginPage(this);
+  const result = await page.isErrorVisible();
   expect(result).toBeTruthy();
 });

@@ -1,4 +1,4 @@
-@regression @rfq @rfq-vendor @rfq-vendor-to-wo
+@regression @rfq @rfq-vendor @rfq-vendor-to-wo @ashraf-modules
 Feature: RFQ Vendor - convert to WO after price update
 
   Create and send an RFQ to a Yopmail vendor, open Yopmail in a new tab, click View RFQ,

@@ -1,4 +1,4 @@
-@regression @po @procurement @create-po @po-download
+@regression @po @procurement @create-po @po-download @ashraf-modules
 Feature: Purchase Order — create PO, open preview, and download
 
   Create and send a PO, open Preview from the three dot menu, then click Download and finish.

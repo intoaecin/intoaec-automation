@@ -1,12 +1,19 @@
-const { Before, When, Then, setDefaultTimeout } = require('@cucumber/cucumber');
+const { Before, After, When, Then, setDefaultTimeout } = require('@cucumber/cucumber');
 const VendorRFQPage = require('../../../../pages/vendor/procurement/rfq/VendorRFQPage');
 const VendorLoginPage = require('../../../../pages/vendor/auth/VendorLoginPage');
+const testData = require('../../../../utils/testData');
+const vendorRfqSession = require('../../../../support/vendor-rfq-session');
 
 /** Heavy vendor RFQ list/preview after admin send. */
 setDefaultTimeout(120000);
 
 const VENDOR_RFQ_TEST_CASE_LOG = {
-  TC01: 'TC-01 — Create RFQ "New One" on BBB, vendor Update Price 1000, admin verifies',
+  TC01: 'TC-01 — Verify Admin Can Send RFQ to Accepted Vendor',
+  TC02: 'TC-02 — Vendor Update Price 1000 on "New One" → Admin verify status, vendor response, price 1000',
+  TC03: 'TC-03 — Vendor Declines RFQ "New One" → Declined on Vendor + Admin',
+  TC04: 'TC-04 — Admin creates and sends "Vendor Comment RFQ"',
+  TC05: 'TC-05 — Vendor adds comment "For Testing Process" on "Vendor Comment RFQ"',
+  TC06: 'TC-06 — Admin verifies the vendor comment on "Vendor Comment RFQ"',
 };
 
 Before({ tags: '@vendor-rfq' }, async function ({ pickle }) {
@@ -14,6 +21,31 @@ Before({ tags: '@vendor-rfq' }, async function ({ pickle }) {
   const tc = tags.find((t) => /^TC\d+$/i.test(t));
   if (tc && VENDOR_RFQ_TEST_CASE_LOG[tc.toUpperCase()]) {
     console.log(`\n>>> ${VENDOR_RFQ_TEST_CASE_LOG[tc.toUpperCase()]}\n`);
+  }
+});
+
+After({ tags: '@vendor-rfq and (@TC01 or @TC04)' }, async function () {
+  const url = String(this.lastVendorRfqAdminProjectUrl || '').trim();
+  const name = String(this.lastAdminProjectName || '').trim();
+  const vendorEmail = String(
+    this.vendorRfqLoginEmail ||
+      this.rfqPage?.lastAddedVendorEmail ||
+      this.rfqComposePage?.lastAddedVendorEmail ||
+      ''
+  )
+    .trim()
+    .toLowerCase();
+  const isAditya =
+    /aditya|malick|b042a8dd-51b2-4d16-b242-405158add775/i.test(`${url} ${name}`);
+  if (url && /client\/profile|projectId=/i.test(url) && !isAditya) {
+    vendorRfqSession.saveAdminProject({ url, name });
+    vendorRfqSession.setRfqTitle(this.lastRfqTitle || 'New One');
+    if (vendorEmail) vendorRfqSession.setVendorEmail(vendorEmail);
+    console.log(`[VendorRFQ] After: session persisted → ${vendorRfqSession.FILE}`);
+  } else {
+    console.warn(
+      `[VendorRFQ] After: skip persisting session (url="${url}" name="${name}")`
+    );
   }
 });
 
@@ -32,36 +64,49 @@ function getVendorLoginPage(world) {
 }
 
 When(
-  'I sign in to the vendor portal with mobile {string} or email {string} and password {string}',
+  'I login to the Vendor Portal using valid vendor credentials',
   { timeout: 180000 },
-  async function (mobile, email, password) {
+  async function () {
     const vendorLoginPage = getVendorLoginPage(this);
-    await vendorLoginPage.signInWithMobileOrEmail(mobile, email, password);
+    const adminEmail = String(testData.admin?.validUser?.email || 'kumar@diy.in')
+      .trim()
+      .toLowerCase();
+    const knownEmail = String(testData.vendor?.rfqUser?.email || 'praveen@yopmail.com')
+      .trim()
+      .toLowerCase();
+    const password = String(testData.vendor?.rfqUser?.password || 'Simple@10').trim();
+
+    // Same vendor email that was added on the RFQ and used for compose/send (TC-01 session for TC-02).
+    const sessionVendorEmail = vendorRfqSession.getVendorEmail();
+    const email = [
+      this.vendorRfqLoginEmail,
+      this.rfqPage?.lastAddedVendorEmail,
+      this.rfqComposePage?.lastAddedVendorEmail,
+      this.vendorYopmailEmail,
+      sessionVendorEmail,
+      knownEmail,
+    ]
+      .map((e) => String(e || '').trim().toLowerCase())
+      .find((e) => e && e !== adminEmail);
+
+    if (!email) {
+      throw new Error(
+        `Vendor RFQ login needs the vendor email added on the RFQ (expected ${knownEmail}). Do not use Admin.`
+      );
+    }
+    this.vendorRfqLoginEmail = email;
+    vendorRfqSession.setVendorEmail(email);
+    console.log(
+      `[VendorRFQ] Logging into Vendor Portal as the RFQ-added vendor: ${email}`
+    );
+    // Try Simple@10 first, then other known vendor passwords used in this suite.
+    await vendorLoginPage.ensureAuthenticated(email, password);
   }
 );
-
-When(
-  'I sign in to the vendor portal with email {string} and password {string}',
-  { timeout: 180000 },
-  async function (email, password) {
-    const vendorLoginPage = getVendorLoginPage(this);
-    await vendorLoginPage.signInWithEmail(email, password);
-  }
-);
-
-When('I navigate back to the Admin Portal', { timeout: 180000 }, async function () {
-  const vendorRfq = getVendorRfqPage(this);
-  await vendorRfq.navigateBackToAdminPortal();
-});
 
 When('I navigate to the Procurement Hub', { timeout: 180000 }, async function () {
   const vendorRfq = getVendorRfqPage(this);
   await vendorRfq.navigateToProcurementHub();
-});
-
-When('I select the connected organization', { timeout: 180000 }, async function () {
-  const vendorRfq = getVendorRfqPage(this);
-  await vendorRfq.selectConnectedOrganization();
 });
 
 When('I select the connected organization {string}', { timeout: 180000 }, async function (orgName) {
@@ -69,41 +114,14 @@ When('I select the connected organization {string}', { timeout: 180000 }, async 
   await vendorRfq.selectConnectedOrganization(orgName);
 });
 
-When('I click the first project on the vendor procurement hub', { timeout: 180000 }, async function () {
-  const vendorRfq = getVendorRfqPage(this);
-  await vendorRfq.clickFirstProjectOnHub();
-});
-
 When('I click the first project name on the vendor procurement hub', { timeout: 180000 }, async function () {
   const vendorRfq = getVendorRfqPage(this);
   await vendorRfq.clickFirstProjectName();
 });
 
-When('I click the project name {string} on the vendor procurement hub', { timeout: 180000 }, async function (projectName) {
-  const vendorRfq = getVendorRfqPage(this);
-  await vendorRfq.clickProjectName(projectName);
-});
-
 When('I click RFQ on the vendor project', { timeout: 180000 }, async function () {
   const vendorRfq = getVendorRfqPage(this);
   await vendorRfq.clickRfqOnProject();
-});
-
-When('I open the vendor RFQ overflow menu on the first RFQ', { timeout: 180000 }, async function () {
-  const vendorRfq = getVendorRfqPage(this);
-  await vendorRfq.openFirstRfqOverflowMenu();
-});
-
-When('I open the vendor RFQ overflow menu on the first list row', { timeout: 180000 }, async function () {
-  const vendorRfq = getVendorRfqPage(this);
-  await vendorRfq.openFirstRfqOverflowMenu();
-});
-
-When('I open the vendor RFQ overflow menu for {string}', { timeout: 180000 }, async function (title) {
-  const vendorRfq = getVendorRfqPage(this);
-  vendorRfq.targetRfqTitle = title;
-  this.lastRfqTitle = title;
-  await vendorRfq.openRfqOverflowMenuByTitle(title);
 });
 
 When('I work only on the vendor RFQ titled {string}', { timeout: 60000 }, async function (title) {
@@ -112,30 +130,16 @@ When('I work only on the vendor RFQ titled {string}', { timeout: 60000 }, async 
   this.lastRfqTitle = title;
 });
 
-When('I click Preview from the vendor RFQ overflow menu', { timeout: 180000 }, async function () {
+When('I open the vendor RFQ overflow menu for {string}', { timeout: 180000 }, async function (title) {
   const vendorRfq = getVendorRfqPage(this);
-  await vendorRfq.clickPreviewFromOverflowMenu();
-});
-
-When('I click Price Update from the vendor RFQ overflow menu', { timeout: 180000 }, async function () {
-  const vendorRfq = getVendorRfqPage(this);
-  await vendorRfq.clickPriceUpdateFromOverflowMenu();
+  await vendorRfq.setTargetRfqTitle(title);
+  this.lastRfqTitle = title;
+  await vendorRfq.openRfqOverflowMenuByTitle(title);
 });
 
 When('I click Update Price from the vendor RFQ overflow menu', { timeout: 180000 }, async function () {
   const vendorRfq = getVendorRfqPage(this);
   await vendorRfq.clickUpdatePriceFromOverflowMenu();
-});
-
-When('I open price update on the vendor RFQ module', { timeout: 180000 }, async function () {
-  const vendorRfq = getVendorRfqPage(this);
-  await vendorRfq.clickUpdatePriceFromOverflowMenu();
-});
-
-When('I change the vendor RFQ price to {string}', { timeout: 180000 }, async function (price) {
-  const vendorRfq = getVendorRfqPage(this);
-  await vendorRfq.changeVendorRfqPriceOnAllLineItems(price);
-  this.lastVendorRfqPrice = price;
 });
 
 When('I change the first row vendor RFQ price to {string}', { timeout: 180000 }, async function (price) {
@@ -154,17 +158,80 @@ Then('I should see the vendor RFQ price update success', { timeout: 180000 }, as
   await vendorRfq.expectVendorRfqPriceUpdateSuccess();
 });
 
-When('I open the first RFQ in the vendor list', { timeout: 180000 }, async function () {
+When('I navigate back to the Admin Portal', { timeout: 180000 }, async function () {
   const vendorRfq = getVendorRfqPage(this);
-  await vendorRfq.openFirstRfqRow();
+  await vendorRfq.navigateBackToAdminPortal();
 });
 
 When('I click Preview on the vendor RFQ', { timeout: 180000 }, async function () {
   const vendorRfq = getVendorRfqPage(this);
-  await vendorRfq.clickPreview();
+  await vendorRfq.clickPreview({ keepOpen: true });
 });
 
-Then('I should see the RFQ details displayed correctly', { timeout: 180000 }, async function () {
+Then(
+  'I should see the RFQ available in the Vendor Portal with title {string}',
+  { timeout: 180000 },
+  async function (title) {
+    const vendorRfq = getVendorRfqPage(this);
+    const wanted = String(this.lastRfqTitle || title || '').trim();
+    await vendorRfq.expectRfqAvailableInVendorPortal(wanted);
+  }
+);
+
+Then(
+  'I should see the vendor RFQ preview contains the selected Material products with unit {string}',
+  { timeout: 180000 },
+  async function (unit) {
+    const vendorRfq = getVendorRfqPage(this);
+    const products =
+      this.lastRfqSelectedProducts ||
+      this.rfqPage?.lastRfqSelectedProducts ||
+      [];
+    await vendorRfq.expectPreviewContainsSelectedMaterials(products, unit);
+  }
+);
+
+When('I click Decline RFQ from the vendor RFQ overflow menu', { timeout: 180000 }, async function () {
   const vendorRfq = getVendorRfqPage(this);
-  await vendorRfq.expectRfqDetailsDisplayed(this.lastRfqTitle);
+  await vendorRfq.clickDeclineRfqFromOverflowMenu();
+});
+
+When('I confirm the Decline RFQ action if confirmation is displayed', { timeout: 120000 }, async function () {
+  const vendorRfq = getVendorRfqPage(this);
+  await vendorRfq.confirmDeclineRfqIfPrompted();
+});
+
+Then('I should see the vendor RFQ decline success message', { timeout: 120000 }, async function () {
+  const vendorRfq = getVendorRfqPage(this);
+  await vendorRfq.expectDeclineSuccessMessage();
+});
+
+Then(
+  'I should see the RFQ status displayed as Declined in the Vendor Portal',
+  { timeout: 120000 },
+  async function () {
+    const vendorRfq = getVendorRfqPage(this);
+    await vendorRfq.expectRfqStatusDeclined();
+  }
+);
+
+When('I click Add Comment from the vendor RFQ overflow menu', { timeout: 180000 }, async function () {
+  const vendorRfq = getVendorRfqPage(this);
+  await vendorRfq.clickAddCommentFromOverflowMenu();
+});
+
+When('I enter the vendor RFQ comment {string}', { timeout: 120000 }, async function (comment) {
+  const vendorRfq = getVendorRfqPage(this);
+  this.lastRfqVendorComment = comment;
+  await vendorRfq.enterVendorRfqComment(comment);
+});
+
+When('I submit the vendor RFQ comment', { timeout: 120000 }, async function () {
+  const vendorRfq = getVendorRfqPage(this);
+  await vendorRfq.submitVendorRfqComment();
+});
+
+Then('I should see the vendor RFQ comment added successfully', { timeout: 120000 }, async function () {
+  const vendorRfq = getVendorRfqPage(this);
+  await vendorRfq.expectVendorRfqCommentAddedSuccessfully(this.lastRfqVendorComment);
 });

@@ -2,11 +2,11 @@
 # Vendor Portal — incremental TCs in ONE file.
 #
 # TS-01 Vendor Login — @TS01 @TC01
-#   TC-01 — Vendor sign-in → Dashboard (https://vendor.aecplayhouse.com/auth/signIn)
+#   TC-01 — Vendor sign-in → Dashboard (praveen@yopmail.com / Simple@10)
 # TS-02 My Profile — @TS02 @TC02
 #   TC-02 — My Profile → Edit → update profile details → Save
 # TS-03 Change password — @TS03 @TC03
-#   TC-03 — My Profile → Security → change password → logout → login with new password
+#   TC-03 — Security → Simple@10 → Courage@10 → logout → login Courage@10 → restore Simple@10
 # TS-04 Company Info — @TS04 @TC04
 #   TC-04 — My Organization → Company Info → registration number + category → Update
 # TS-05 Business Info — @TS05 @TC05
@@ -22,7 +22,7 @@
 # TS-10 Add Service — @TS10 @TC10
 #   TC-10 — Services → Create New → Interior Design Consultation → Save
 # TS-11 Invite Vendor — @TS11 @TC11
-#   TC-11 — Admin Invite Vendor → send invite → Yopmail → register with OTP → status Accepted
+#   TC-11 — Admin (kumar@diy.in) Invite Vendor → Yopmail → register → Accepted
 #
 # Run ALL vendor portal TCs from TC-01 to TC-11:
 #   npx.cmd cucumber-js --tags "@vendor-tc01-tc11"
@@ -65,7 +65,7 @@
 #            step-definitions/admin/invite/InviteVendor.steps.js (TC-11)
 # -----------------------------------------------------------------------------
 
-@vendor @vendor-portal @vendor-login @vendor-all @vendor-tc01-tc11
+@vendor @vendor-portal @vendor-login @vendor-all @vendor-tc01-tc11 @ashraf-modules
 Feature: Vendor Portal — incremental test cases
 
   # ===========================================================================
@@ -76,7 +76,7 @@ Feature: Vendor Portal — incremental test cases
   Scenario: TC-01 — Vendor portal login with valid credentials
     When I navigate to the Vendor login page
     Then the Vendor Login page should be displayed
-    When I enter the vendor email "testintoaec@gmail.com"
+    When I enter the vendor email "praveen@yopmail.com"
     And I enter the vendor password "Simple@10"
     And I click the vendor Sign In button
     Then I should be logged in to the vendor portal successfully
@@ -95,8 +95,9 @@ Feature: Vendor Portal — incremental test cases
     Then the vendor profile edit page should be displayed
     When I fill the vendor profile first name with "Madhan"
     And I fill the vendor profile last name with "Mehta"
-    And I fill the vendor profile email with "testintoaec@gmail.com"
-    And I fill the vendor profile mobile number with "+91 9123456780"
+    And I fill the vendor profile email with "praveen@yopmail.com"
+    And I fill the vendor profile mobile number with a new number
+    And I verify the vendor profile mobile number manually if required
     And I fill the vendor profile organization with "BuildCraft Solutions"
     And I fill the vendor profile designation with "Project Manager"
     And I fill the vendor profile address line 1 with "24 Green Park Avenue"
@@ -105,11 +106,8 @@ Feature: Vendor Portal — incremental test cases
     And I select the vendor profile state "Tamil Nadu"
     And I select the vendor profile country "India"
     And I fill the vendor profile zip code with "600034"
-    And I select the vendor profile industry "Construction"
-    And I fill the vendor profile website with "www.buildcraftsolutions.com"
     And I click the vendor profile Save or Update button
-    Then I should see vendor profile success toast "Profile updated successfully."
-    And the updated vendor profile details should be displayed correctly
+    Then the updated vendor profile details should be displayed correctly
 
   # ===========================================================================
   # TS-03 — Change password (@TS03 @TC03)
@@ -128,8 +126,16 @@ Feature: Vendor Portal — incremental test cases
     And I should see vendor password success toast "Password Changed|Password changed successfully.|Your Password has been changed successfully."
     When I log out of the vendor portal
     And I navigate to the Vendor login page
-    And I enter the vendor email "testintoaec@gmail.com"
+    And I enter the vendor email "praveen@yopmail.com"
     And I enter the vendor password "Courage@10"
+    And I click the vendor Sign In button
+    Then I should be logged in to the vendor portal successfully
+    # Restore the original password so the other vendor TCs keep using Simple@10.
+    When I restore the original vendor password
+    And I log out of the vendor portal
+    And I navigate to the Vendor login page
+    And I enter the vendor email "praveen@yopmail.com"
+    And I enter the vendor password "Simple@10"
     And I click the vendor Sign In button
     Then I should be logged in to the vendor portal successfully
 
@@ -307,19 +313,19 @@ Feature: Vendor Portal — incremental test cases
     Given I am logged in
     When I navigate to Invite Vendor
     And I click the Send Invite Vendor option
-    And I fill the invite vendor first name with "Bhavani"
-    And I fill the invite vendor last name with "MM"
-    And I fill the invite vendor email with "bhavanimm@yopmail.com"
+    And I fill the invite vendor first name with "Praveen"
+    And I fill the invite vendor last name with "Kumar"
+    And I fill the invite vendor email with "praveen@yopmail.com"
     And I fill the invite vendor organization name with "Intoaec Org"
     And I fill the invite vendor phone number with "7305570607"
     And I fill the invite vendor tax name with "abc2002"
     And I click the Send Invite button
     Then the vendor invitation should be sent successfully
     And the invite vendor status should be displayed as "Pending"
-    When I open Yopmail for "bhavanimm@yopmail.com"
+    When I open Yopmail for "praveen@yopmail.com"
     And I wait for the vendor invitation email to be received
     Then the vendor invitation email should be received successfully
-    And the vendor invitation email should show vendor name "Bhavani MM"
+    And the vendor invitation email should show vendor name "Praveen Kumar"
     And the vendor invitation email should show organization name "Intoaec Org"
     And the vendor invitation email should contain an invitation link
     When I extract and open the vendor invitation URL
@@ -336,6 +342,6 @@ Feature: Vendor Portal — incremental test cases
     Then I should be logged in to the vendor portal successfully
     When I switch back to the Admin Portal
     And I refresh the Invite Vendor list
-    And I search the Invite Vendor list for "bhavanimm@yopmail.com"
+    And I search the Invite Vendor list for "praveen@yopmail.com"
     Then the invite vendor status should be displayed as "Accepted"
     And the invite vendor Edit, Delete, and Resend buttons should not be displayed

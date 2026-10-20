@@ -8,6 +8,11 @@ class EventPage extends BasePage {
     this.defaultTimeout = 120000;
     this.navigationPage = new NavigationPage(page);
 
+    this.crmMenuButton = page.getByRole('button', { name: /^crm$/i }).first();
+    this.leadManagerMenuItem = page.getByRole('menuitem', { name: /^lead manager$/i }).first();
+    this.firstLeadNameText = page.locator('tbody tr').first().locator('td').nth(1).locator('span.text-dark').first();
+    this.eventNavButton = page.getByRole('button', { name: /^events?$/i }).first();
+
     this.selectFeaturesInput = page.getByRole('textbox', { name: /select feature\(s\)/i });
     this.eventsMenuItem = page.getByRole('menuitem', { name: /^events?$/i });
     this.eventsTab = page.getByRole('tab', { name: /^events?$/i });
@@ -85,7 +90,7 @@ class EventPage extends BasePage {
   }
 
   scheduleDateInputs() {
-    return this.panel().locator('input[placeholder="DD MMMM YYYY"]');
+    return this.panel().locator('input[placeholder="DD/MM/YYYY"], input[placeholder="DD MMMM YYYY"]');
   }
 
   scheduleStartDate() {
@@ -116,12 +121,19 @@ class EventPage extends BasePage {
       .first();
   }
 
+  scheduleTimeCombobox(dateInput, legacyPickerId) {
+    return dateInput
+      .locator('xpath=following::input[@role="combobox"][1]')
+      .or(this.panel().locator(`#${legacyPickerId}`))
+      .first();
+  }
+
   fromTimePickerTrigger() {
-    return this.timePickerTrigger('from-time-picker');
+    return this.scheduleTimeCombobox(this.scheduleStartDate(), 'from-time-picker');
   }
 
   toTimePickerTrigger() {
-    return this.timePickerTrigger('to-time-picker');
+    return this.scheduleTimeCombobox(this.scheduleEndDate(), 'to-time-picker');
   }
 
   timezoneCombobox() {
@@ -134,7 +146,18 @@ class EventPage extends BasePage {
       .first();
   }
 
+  companyLocationCheckbox() {
+    return this.panel().locator('label').filter({ hasText: /company location/i }).locator('input[type="checkbox"]').first();
+  }
+
   locationInput() {
+    return this.panel()
+      .locator('#meeting-location')
+      .or(this.legacyLocationInput())
+      .first();
+  }
+
+  legacyLocationInput() {
     return this.panel()
       .locator('label')
       .filter({ hasText: /^location$/i })
@@ -473,9 +496,38 @@ class EventPage extends BasePage {
       return;
     }
 
-    await this.navigationPage.clickCrmDropdown();
-    await this.navigationPage.clickLeadManager();
-    await this.navigationPage.clickFirstLeadFromTable();
+    await this.openLeadManager();
+    await this.openFirstLeadFromTable();
+  }
+
+  async openFirstLeadFromTable() {
+    console.log('[EventPage] Opening first lead from Lead Manager table');
+    try {
+      await expect(this.firstLeadNameText).toBeVisible({ timeout: 30000 });
+      const leadName = (await this.firstLeadNameText.innerText()).trim();
+      await this.firstLeadNameText.click();
+      await this.page.waitForURL(/leadmanager\/profile/i, { timeout: 30000 });
+      await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+      console.log(`[EventPage] Opened lead profile "${leadName}"`);
+    } catch (error) {
+      console.error(`[EventPage] Failed to open first lead profile: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async openLeadManager() {
+    console.log('[EventPage] Opening CRM → Lead Manager');
+    try {
+      await expect(this.crmMenuButton).toBeVisible({ timeout: 30000 });
+      await this.crmMenuButton.click();
+      await expect(this.leadManagerMenuItem).toBeVisible({ timeout: 15000 });
+      await this.leadManagerMenuItem.click();
+      await this.page.waitForURL(/leadmanager\/master/i, { timeout: 30000 });
+    } catch (error) {
+      console.error(`[EventPage] Failed to open Lead Manager from CRM menu: ${error.message}`);
+      throw error;
+    }
+    console.log(`[EventPage] Lead Manager opened (${this.page.url()})`);
   }
 
   async openEventsModule() {
@@ -497,6 +549,14 @@ class EventPage extends BasePage {
         console.log('[EventPage] Events module ready after refresh');
         return;
       }
+    }
+
+    if (await this.eventNavButton.isVisible({ timeout: 10000 }).catch(() => false)) {
+      await this.eventNavButton.click();
+      await this.page.waitForURL(/tab=Events/i, { timeout: 30000 }).catch(() => {});
+      await expect(this.actionButton.first()).toBeVisible({ timeout: 60000 });
+      console.log('[EventPage] Events module opened from lead profile menu');
+      return;
     }
 
     if (await this.eventsTab.isVisible({ timeout: 3000 }).catch(() => false)) {
@@ -635,6 +695,17 @@ class EventPage extends BasePage {
     await expect(chips.first()).toBeVisible({ timeout: this.defaultTimeout });
   }
 
+  async uncheckCompanyLocation() {
+    const checkbox = this.companyLocationCheckbox();
+    if (!(await checkbox.isVisible({ timeout: 2000 }).catch(() => false))) {
+      return;
+    }
+    if (await checkbox.isChecked().catch(() => false)) {
+      await checkbox.uncheck();
+      console.log('[EventPage] Unchecked Company Location');
+    }
+  }
+
   async fillLocationWithAutocomplete(locationText) {
     const location = this.locationInput();
     await location.fill(locationText);
@@ -690,10 +761,12 @@ class EventPage extends BasePage {
 
     const location = this.locationInput();
     if (await location.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await this.uncheckCompanyLocation();
       if (includeLocation) {
         await this.fillLocationWithAutocomplete(this.meetingData.location);
       } else {
         console.log('[EventPage] Leaving location empty');
+        await location.fill('');
         await expect(location).toHaveValue('');
       }
     }

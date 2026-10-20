@@ -164,6 +164,16 @@ When('I fill the vendor profile mobile number with {string}', async function (va
   await vendorProfilePage.fillMobileNumber(value);
 });
 
+When('I fill the vendor profile mobile number with a new number', async function () {
+  const vendorProfilePage = getVendorProfilePage(this);
+  await vendorProfilePage.fillNewMobileNumber();
+});
+
+When('I verify the vendor profile mobile number manually if required', { timeout: 600000 }, async function () {
+  const vendorProfilePage = getVendorProfilePage(this);
+  await vendorProfilePage.verifyMobileNumberIfRequired();
+});
+
 When('I fill the vendor profile organization with {string}', async function (value) {
   const vendorProfilePage = getVendorProfilePage(this);
   await vendorProfilePage.fillOrganization(value);
@@ -292,10 +302,13 @@ Then('the vendor password should be changed successfully', async function () {
 Then('I should see vendor password success toast {string}', async function (message) {
   const vendorProfilePage = getVendorProfilePage(this);
   await vendorProfilePage.expectSuccessToast(message);
+  await vendorProfilePage.dismissPasswordChangedOverlay().catch(() => {});
 });
 
 When('I log out of the vendor portal', async function () {
   await recoverVendorPage(this);
+  const vendorProfilePage = getVendorProfilePage(this);
+  await vendorProfilePage.dismissPasswordChangedOverlay().catch(() => {});
   const vendorLoginPage = getVendorLoginPage(this);
   await vendorLoginPage.logout();
 });
@@ -730,31 +743,49 @@ Then('the vendor service {string} should be displayed in the Service List', asyn
   await vendorServicesPage.expectServiceInList(name);
 });
 
-After({ tags: '@vendor-login and @TC03', timeout: 180000 }, async function () {
+/** Changes the vendor password back to testData.vendor.validUser.password after TC-03. */
+async function restoreOriginalVendorPassword(world) {
   const testData = require('../../../utils/testData');
-  const original = testData.vendor.validUser.password;
+  const { email, password: original } = testData.vendor.validUser;
+  await recoverVendorPage(world);
+  const vendorLoginPage = getVendorLoginPage(world);
+  const vendorProfilePage = getVendorProfilePage(world);
+  await vendorProfilePage._dismissBlockingOverlays();
+  await vendorLoginPage.ensureAuthenticated(email, vendorProfilePage.lastNewPassword || original);
+  await vendorProfilePage._dismissBlockingOverlays();
+  await vendorProfilePage.navigateToSecurity();
+  const current = vendorLoginPage.lastPasswordUsed || vendorProfilePage.lastNewPassword || original;
+  if (current === original) {
+    console.log(`[Vendor] Original vendor password (${original}) already in use`);
+    await vendorProfilePage.dismissPasswordChangedOverlay().catch(() => {});
+    world.vendorPasswordRestored = true;
+    return;
+  }
+  await vendorProfilePage.fillCurrentPassword(current);
+  await vendorProfilePage.fillNewPassword(original);
+  await vendorProfilePage.fillConfirmNewPassword(original);
+  await vendorProfilePage.clickChangePassword();
+  // Password-changed modal blocks Account Settings for TC-04+ — dismiss it.
+  await vendorProfilePage.dismissPasswordChangedOverlay().catch(() => {});
+  world.vendorPasswordRestored = true;
+  console.log(`[Vendor] Restored original vendor password ${current} → ${original}`);
+}
+
+When('I restore the original vendor password', { timeout: 180000 }, async function () {
+  await restoreOriginalVendorPassword(this);
+});
+
+After({ tags: '@vendor-login and @TC03', timeout: 180000 }, async function () {
+  if (this.vendorPasswordRestored) return;
+  const testData = require('../../../utils/testData');
   try {
-    await recoverVendorPage(this);
+    await restoreOriginalVendorPassword(this);
     const vendorLoginPage = getVendorLoginPage(this);
-    const vendorProfilePage = getVendorProfilePage(this);
-    await vendorProfilePage._dismissBlockingOverlays();
-    await vendorLoginPage.ensureAuthenticated(
-      testData.vendor.validUser.email,
-      vendorProfilePage.lastNewPassword || original
-    );
-    await vendorProfilePage._dismissBlockingOverlays();
-    await vendorProfilePage.navigateToSecurity();
-    const current = vendorLoginPage.lastPasswordUsed || vendorProfilePage.lastNewPassword || original;
-    if (current === original) {
-      console.log('[Vendor] Original vendor password already in use after TC-03');
-      return;
-    }
-    await vendorProfilePage.fillCurrentPassword(current);
-    await vendorProfilePage.fillNewPassword(original);
-    await vendorProfilePage.fillConfirmNewPassword(original);
-    await vendorProfilePage.clickChangePassword();
-    console.log('[Vendor] Restored original vendor password after TC-03');
+    await vendorLoginPage.ensureAuthenticated(testData.vendor.validUser.email, testData.vendor.validUser.password);
   } catch (err) {
-    console.log(`[Vendor] WARN could not restore original password after TC-03: ${err.message}`);
+    console.error(
+      `[Vendor] ERROR could not restore vendor password to "${testData.vendor.validUser.password}" after TC-03: ${err.message}. ` +
+        'Change it back manually in Vendor Portal → My Profile → Security (current password is probably "Courage@10").'
+    );
   }
 });
