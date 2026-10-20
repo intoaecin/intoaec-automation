@@ -6,43 +6,63 @@ class CallLogPage extends BasePage {
   constructor(page) {
     super(page);
     this.defaultTimeout = 120000;
-    this.main = page.locator('main, [role="main"]').first();
+    this.projectNavigationPage = new ProjectNavigationPage(page);
 
-    this.firstClientRow = page.getByRole('rowheader').first();
-    this.clientRowIconButton = page
-      .locator('tbody tr')
-      .first()
-      .locator('button.MuiIconButton-root.MuiIconButton-sizeSmall')
+    this.selectFeaturesInput = page.getByRole('textbox', { name: /select feature\(s\)/i });
+    this.callLogMenuItem = page.getByRole('menuitem', { name: /call log/i }).first();
+    this.callLogTab = page.getByRole('tab', { name: /^call\s*log$/i });
+    this.callLogOverviewLink = page
+      .locator('[id*="Overview"], .MuiTabPanel-root, div.MuiBox-root')
+      .getByText(/^call\s*log$/i)
       .first();
-
-    this.communicationDocsButton = page.getByRole('button', { name: 'Communication & Docs' }).first();
-    this.communicationDocsGrid = page
-      .locator('div.MuiGrid-root.MuiGrid-container.MuiGrid-spacing-xs-2')
+    this.clientMenuPanel = page.locator(
+      'nav, aside, .MuiDrawer-root, .MuiTabs-root, [class*="sidebar"], [class*="feature"]'
+    );
+    this.leadFeatureSidebar = page.locator('aside').filter({ visible: true });
+    this.classicUiToggle = page
+      .getByRole('button', { name: /classic ui/i })
+      .or(page.getByRole('switch', { name: /classic ui/i }))
+      .or(page.locator('label').filter({ hasText: /classic ui/i }))
       .first();
-    this.callLogModuleTile = this.communicationDocsGrid
-      .locator('div.MuiBox-root')
-      .filter({ has: page.locator('[data-testid="CallIcon"]') })
-      .filter({ hasText: /^call\s*log$/i })
-      .first();
+    this.overviewClientMenuPanel = page.locator('[id*="P-Overview"]').first();
 
     this.actionButton = page.getByRole('button', { name: 'Action', exact: true }).first();
-    this.callLogMenuItem = page.getByRole('menuitem', { name: /call log/i }).first();
     this.actionMenu = page.locator('[role="menu"]').filter({ visible: true }).first();
-    this.addLogButton = page.getByRole('button', { name: /^add log$/i }).first();
-
-    this.callPurposeInput = page.getByRole('textbox', { name: /call purpose/i });
-    this.callOutcomeCombobox = page.getByRole('combobox', { name: /what happened on this call/i });
-    this.commentInput = page.getByRole('textbox', { name: /^comment/i });
-    this.submitAddLogButton = page.getByRole('button', { name: /^add log$/i }).last();
-
-    this.searchInput = page
-      .getByRole('textbox', { name: /search/i })
-      .or(page.getByPlaceholder(/search/i))
+    this.addLogButton = page
+      .getByRole('button', { name: /^(add log|add call log)$/i })
+      .filter({ visible: true })
       .first();
 
-    this.callLogRows = page
-      .locator('tbody tr, .MuiDataGrid-row, .MuiTableRow-root, [role="row"]')
-      .filter({ hasNotText: /call purpose|no data found|header/i });
+    this.callLogDialog = page
+      .getByRole('dialog')
+      .filter({ has: page.getByPlaceholder(/enter call purpose/i) })
+      .first();
+    this.callPurposeInput = this.callLogDialog
+      .getByPlaceholder(/enter call purpose/i)
+      .or(this.callLogDialog.getByRole('textbox', { name: /^(enter )?call purpose$/i }))
+      .first();
+    this.callOutcomeCombobox = this.callLogDialog
+      .getByRole('combobox', { name: /what happened on this call/i })
+      .or(this.callLogDialog.getByLabel(/what happened on this call/i))
+      .first();
+    this.commentInput = this.callLogDialog
+      .getByRole('textbox', { name: /^comments?$/i })
+      .or(this.callLogDialog.getByPlaceholder(/leave a comment/i))
+      .first();
+    this.callLogCloseIcon = this.callLogDialog
+      .locator('button')
+      .filter({ has: page.locator('svg') })
+      .filter({ hasNotText: /add log|update log|summarize/i })
+      .or(this.callLogDialog.getByRole('button', { name: /^close$|×/i }))
+      .or(this.callLogDialog.locator('button:has(svg[data-testid="CloseIcon"])'))
+      .first();
+
+    this.searchInput = page
+      .getByRole('textbox', { name: /search on call purpose/i })
+      .or(page.getByPlaceholder(/search on call purpose/i))
+      .or(page.getByRole('textbox', { name: /^search$/i }))
+      .or(page.getByPlaceholder(/^search$/i))
+      .first();
 
     this.successToast = page
       .locator('.MuiAlert-root, .MuiSnackbar-root, [role="alert"], .MuiSnackbarContent-root')
@@ -61,12 +81,18 @@ class CallLogPage extends BasePage {
 
     this.confirmDialog = page
       .getByRole('dialog')
-      .filter({ hasText: /delete|confirm|remove|call\s*log/i })
+      .filter({ hasText: /delete|confirm|remove|are you sure/i })
+      .filter({ hasNot: page.getByPlaceholder(/enter call purpose/i) })
       .first();
 
     this.confirmYesButton = page
       .getByRole('button', { name: /^yes$/i })
       .or(page.locator('button').filter({ hasText: /^yes$/i }))
+      .first();
+
+    this.confirmCancelButton = page
+      .getByRole('button', { name: /^(no|cancel)$/i })
+      .or(page.locator('button').filter({ hasText: /^(no|cancel)$/i }))
       .first();
   }
 
@@ -77,75 +103,293 @@ class CallLogPage extends BasePage {
   buildCallLogData() {
     const suffix = this.buildRandomSuffix();
     return {
-      callPurpose: `Auto Call Purpose ${suffix}`,
-      callOutcome: 'Call Later',
-      comment: `Automation call log comment ${suffix}`,
+      callPurpose: `Site visit follow-up ${suffix}`,
+      callOutcome: 'Good Discussion',
+      comment: `Discussed project timeline, material delivery, and the next site visit. Ref ${suffix}`,
     };
   }
 
-  async isOnClientProjectProfile() {
-    if (!/client\/profile/i.test(this.page.url())) {
-      return false;
-    }
-    return this.communicationDocsButton.isVisible({ timeout: 3000 }).catch(() => false);
+  isOnLeadProfile() {
+    return this.isOnClientOrLeadProfile();
   }
 
-  async openClientsProjects() {
-    console.log('[CallLogPage] Opening Clients/Projects');
-    if (await this.isOnCallLogModule() || (await this.isOnClientProjectProfile())) {
-      console.log('[CallLogPage] Already on client project / Call Log module');
-      return;
-    }
-
-    const nav = new ProjectNavigationPage(this.page);
-    const rowCount = await nav.projectRows.count().catch(() => 0);
-    if (rowCount > 0) {
-      return;
-    }
-
-    await nav.navigateToProjects();
+  isOnClientOrLeadProfile() {
+    const url = this.page.url();
+    if (/leadmanager\/profile/i.test(url)) return true;
+    if (/\/client\/profile/i.test(url) && /projectId=/i.test(url)) return true;
+    if (/\/project\//i.test(url)) return true;
+    return false;
   }
 
-  async openFirstClientProfile() {
-    if (await this.isOnClientProjectProfile()) {
-      console.log('[CallLogPage] Client project profile already open');
-      return;
-    }
+  getCallLogSidebarEntry() {
+    return this.page
+      .locator('aside, .MuiListItemButton-root, div.MuiBox-root, div.MuiPaper-root')
+      .locator('div, button, a, label, span, p')
+      .filter({ hasText: /^call\s*log$/i })
+      .first();
+  }
 
-    console.log('[CallLogPage] Selecting first client from the list');
-    await expect(this.firstClientRow).toBeVisible({ timeout: this.defaultTimeout });
-    await this.firstClientRow.click();
+  getProjectSidebarScrollTarget() {
+    return this.page
+      .locator('.MuiListItemButton-root')
+      .filter({ hasText: /^overview$/i })
+      .first()
+      .locator('xpath=ancestor::div[contains(@style,"overflow")][1]');
+  }
 
-    if (await this.clientRowIconButton.isVisible({ timeout: 5000 }).catch(() => false)) {
-      console.log('[CallLogPage] Opening client profile from row action icon');
-      await this.clientRowIconButton.click();
-    }
+  getCallLogOverviewCard() {
+    return this.overviewClientMenuPanel
+      .locator('label, div, button, a, span')
+      .filter({ hasText: /^call\s*log$/i })
+      .first();
+  }
 
+  async isCallLogPresentInClientMenu() {
+    const menuItemVisible = await this.callLogMenuItem.isVisible().catch(() => false);
+    const tabVisible = await this.callLogTab.isVisible().catch(() => false);
+    const sidebarVisible = await this.getCallLogSidebarEntry().isVisible().catch(() => false);
+    const sidebarButtonVisible = await this.page
+      .getByRole('button', { name: /^call\s*log$/i })
+      .first()
+      .isVisible()
+      .catch(() => false);
+    const overviewVisible = await this.getCallLogOverviewCard().isVisible().catch(() => false);
+    const toolbarVisible =
+      (await this.actionButton.isVisible({ timeout: 1500 }).catch(() => false)) ||
+      (await this.addLogButton.isVisible({ timeout: 1500 }).catch(() => false));
+    return menuItemVisible || tabVisible || sidebarVisible || sidebarButtonVisible || overviewVisible || toolbarVisible;
+  }
+
+  async waitForLeadProfileReady() {
+    console.log('[CallLogPage] Waiting for client/project profile to be ready');
+    await this.page.waitForURL(/leadmanager\/profile|client\/profile|\/project\//i, {
+      timeout: this.defaultTimeout,
+    }).catch(() => {});
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-    await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-    await expect(this.communicationDocsButton).toBeVisible({ timeout: this.defaultTimeout });
+
+    await expect(async () => {
+      const featureInputVisible = await this.selectFeaturesInput.first().isVisible().catch(() => false);
+      const featureLabelVisible = await this.page.getByText(/select feature\(s\)/i).first().isVisible().catch(() => false);
+      const sidebarVisible = await this.leadFeatureSidebar.first().isVisible().catch(() => false);
+      const overviewVisible = await this.page
+        .getByRole('button', { name: /^overview$/i })
+        .first()
+        .isVisible()
+        .catch(() => false);
+      const classicUiVisible = await this.classicUiToggle.isVisible().catch(() => false);
+      const callLogVisible = await this.isCallLogPresentInClientMenu();
+      expect(
+        this.isOnClientOrLeadProfile() ||
+          featureInputVisible ||
+          featureLabelVisible ||
+          sidebarVisible ||
+          overviewVisible ||
+          classicUiVisible ||
+          callLogVisible
+      ).toBeTruthy();
+    }).toPass({ timeout: 30000, intervals: [500, 1000, 2000] });
   }
 
-  async openCallLogModule() {
-    console.log('[CallLogPage] Opening Communication & Docs > Call Log module');
+  async navigateToLeadProfileIfNeeded() {
+    if (this.isOnClientOrLeadProfile()) {
+      console.log('[CallLogPage] Client/project profile already open');
+      await this.waitForLeadProfileReady().catch(() => {});
+      return;
+    }
 
-    if (this.page.url().includes('tab=CallLog')) {
-      if (await this.isOnCallLogModule()) {
-        return;
+    console.log('[CallLogPage] Navigating to client profile via Clients/Projects');
+    await this.projectNavigationPage.navigateToProjects();
+    await this.projectNavigationPage.clickFirstProject();
+    await this.waitForLeadProfileReady();
+  }
+
+  async scrollClientMenuForCallLog() {
+    console.log('[CallLogPage] Scrolling client menu to find Call Log');
+    const scrollTargets = [
+      this.getProjectSidebarScrollTarget(),
+      this.leadFeatureSidebar.nth(1),
+      this.leadFeatureSidebar.first(),
+      this.clientMenuPanel.filter({ visible: true }).first(),
+    ];
+
+    for (const target of scrollTargets) {
+      if (!(await target.isVisible({ timeout: 2000 }).catch(() => false))) {
+        continue;
+      }
+
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        if (await this.isCallLogPresentInClientMenu()) {
+          return true;
+        }
+
+        await target.evaluate((el) => {
+          el.scrollBy(0, 350);
+        }).catch(() => {});
       }
     }
 
-    await expect(this.communicationDocsButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.communicationDocsButton.click();
-    await this.page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+    return this.isCallLogPresentInClientMenu();
+  }
 
-    await expect(this.communicationDocsGrid).toBeVisible({ timeout: this.defaultTimeout });
-    await expect(this.callLogModuleTile).toBeVisible({ timeout: this.defaultTimeout });
-    await this.callLogModuleTile.scrollIntoViewIfNeeded().catch(() => {});
-    await this.callLogModuleTile.click();
+  async openCallLogViaFeatureSelector() {
+    console.log('[CallLogPage] Opening Call Log via Select Feature(s) search');
+    const featureSelector = this.selectFeaturesInput.first();
+    await expect(featureSelector).toBeVisible({ timeout: this.defaultTimeout });
+    await featureSelector.click();
 
-    await this.page.waitForURL(/tab=CallLog/i, { timeout: this.defaultTimeout }).catch(() => {});
-    await this.page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+    const featureSearch = this.selectFeaturesInput.nth(1);
+    await expect(featureSearch).toBeVisible({ timeout: this.defaultTimeout });
+    await featureSearch.fill('call log');
+
+    const callLogInMenu = this.callLogMenuItem
+      .or(this.page.getByRole('menuitem', { name: /call log/i }))
+      .first();
+    await expect(callLogInMenu).toBeVisible({ timeout: this.defaultTimeout });
+    await callLogInMenu.scrollIntoViewIfNeeded().catch(() => {});
+    await callLogInMenu.click({ timeout: 15000 });
+    await expect(this.page).toHaveURL(/tab=CallLog/i, { timeout: 30000 });
+  }
+
+  async expandOthersSectionIfNeeded() {
+    const othersAccordion = this.page
+      .locator('.MuiAccordion-root')
+      .filter({ hasText: /others/i })
+      .first();
+
+    if (!(await othersAccordion.isVisible({ timeout: 2000 }).catch(() => false))) {
+      return;
+    }
+
+    const isExpanded = await othersAccordion
+      .evaluate((el) => el.classList.contains('Mui-expanded'))
+      .catch(() => true);
+
+    if (!isExpanded) {
+      console.log('[CallLogPage] Expanding Others section in project sidebar');
+      await othersAccordion.locator('.MuiAccordionSummary-root').click({ timeout: 15000 });
+      await expect(othersAccordion).toHaveClass(/Mui-expanded/, { timeout: 10000 });
+    }
+  }
+
+  async clickCallLogInSidebar() {
+    console.log('[CallLogPage] Opening Call Log from lead profile sidebar');
+    await this.dismissOpenMenus();
+    await this.expandOthersSectionIfNeeded();
+    await this.scrollClientMenuForCallLog();
+
+    const callLogEntry = this.getCallLogSidebarEntry()
+      .or(this.page.getByRole('button', { name: /^call\s*log$/i }))
+      .or(this.page.locator('.MuiListItemButton-root').filter({ hasText: /^call\s*log$/i }))
+      .or(this.page.locator('div.MuiBox-root, div.MuiPaper-root').filter({ hasText: /^call\s*log$/i }))
+      .first();
+
+    await expect(callLogEntry).toBeVisible({ timeout: this.defaultTimeout });
+    await callLogEntry.scrollIntoViewIfNeeded().catch(() => {});
+    await callLogEntry.click({ timeout: 15000, force: true });
+    await expect(this.page).toHaveURL(/tab=CallLog/i, { timeout: 30000 });
+  }
+
+  async switchToClassicUiIfNeeded() {
+    if (!(await this.classicUiToggle.isVisible({ timeout: 3000 }).catch(() => false))) {
+      return false;
+    }
+
+    console.log('[CallLogPage] Switching to Classic UI');
+    await this.classicUiToggle.scrollIntoViewIfNeeded().catch(() => {});
+    await this.classicUiToggle.click({ timeout: 15000 });
+    return true;
+  }
+
+  async openCallLogFromClassicOverview() {
+    console.log('[CallLogPage] Opening Call Log from Classic UI Overview client menu');
+    await this.switchToClassicUiIfNeeded();
+
+    const callLogCard = this.getCallLogOverviewCard()
+      .or(this.callLogOverviewLink)
+      .first();
+
+    await expect(callLogCard).toBeVisible({ timeout: this.defaultTimeout });
+    await callLogCard.scrollIntoViewIfNeeded().catch(() => {});
+    await callLogCard.click({ timeout: 15000 });
+    await expect(this.page).toHaveURL(/tab=CallLog/i, { timeout: 30000 });
+  }
+
+  async openCallLogViaUrlFallback() {
+    console.log('[CallLogPage] Opening Call Log via tab URL fallback');
+    const url = new URL(this.page.url());
+    url.searchParams.set('tab', 'CallLog');
+    await this.page.goto(url.toString(), {
+      waitUntil: 'domcontentloaded',
+      timeout: this.defaultTimeout,
+    });
+    await expect(this.page).toHaveURL(/tab=CallLog/i, { timeout: this.defaultTimeout });
+  }
+
+  async openCallLogModule() {
+    console.log('[CallLogPage] Opening Call Log module on lead profile');
+    await this.dismissOpenMenus();
+
+    if (await this.isOnCallLogModule()) {
+      await this.waitForCallLogModuleReady();
+      return;
+    }
+
+    await this.navigateToLeadProfileIfNeeded();
+
+    if (await this.getCallLogSidebarEntry().isVisible({ timeout: 3000 }).catch(() => false)) {
+      try {
+        await this.clickCallLogInSidebar();
+        await this.waitForCallLogModuleReady();
+        return;
+      } catch (error) {
+        console.warn(`[CallLogPage] Sidebar path failed: ${error.message}`);
+      }
+    } else {
+      try {
+        await this.clickCallLogInSidebar();
+        await this.waitForCallLogModuleReady();
+        return;
+      } catch (error) {
+        console.warn(`[CallLogPage] Sidebar scroll path failed: ${error.message}`);
+      }
+    }
+
+    if (await this.callLogTab.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await this.callLogTab.click();
+      await this.waitForCallLogModuleReady();
+      return;
+    }
+
+    if (await this.selectFeaturesInput.first().isVisible({ timeout: 5000 }).catch(() => false)) {
+      try {
+        await this.openCallLogViaFeatureSelector();
+        await this.waitForCallLogModuleReady();
+        return;
+      } catch (error) {
+        console.warn(`[CallLogPage] Select Feature(s) path failed: ${error.message}`);
+      }
+    }
+
+    try {
+      await this.openCallLogFromClassicOverview();
+      await this.waitForCallLogModuleReady();
+      return;
+    } catch (error) {
+      console.warn(`[CallLogPage] Classic UI Overview path failed: ${error.message}`);
+    }
+
+    await this.dismissOpenMenus();
+    if (await this.callLogOverviewLink.isVisible({ timeout: 3000 }).catch(() => false)) {
+      try {
+        await this.callLogOverviewLink.click({ timeout: 8000, force: true });
+        await this.waitForCallLogModuleReady();
+        return;
+      } catch (error) {
+        console.warn(`[CallLogPage] Overview Call Log click failed: ${error.message}`);
+      }
+    }
+
+    await this.openCallLogViaUrlFallback();
     await this.waitForCallLogModuleReady();
   }
 
@@ -158,6 +402,7 @@ class CallLogPage extends BasePage {
 
   async waitForCallLogModuleReady() {
     console.log('[CallLogPage] Waiting for Call Log module toolbar');
+    await this.page.waitForURL(/tab=CallLog/i, { timeout: this.defaultTimeout }).catch(() => {});
     await expect(async () => {
       const actionVisible = await this.actionButton.isVisible().catch(() => false);
       const addLogVisible = await this.addLogButton.isVisible().catch(() => false);
@@ -165,9 +410,32 @@ class CallLogPage extends BasePage {
     }).toPass({ timeout: this.defaultTimeout, intervals: [500, 1000, 2000, 3000] });
   }
 
+  async clickAddCallLog() {
+    console.log('[CallLogPage] Clicking Add Call Log');
+    if (await this.isCallLogFormOpen()) {
+      await this.waitForCallLogFormReady();
+      return;
+    }
+
+    await this.openCallLogFormFromActionMenu();
+  }
+
   async openCallLogFormFromActionMenu() {
     console.log('[CallLogPage] Opening Call Log form via Action > Call Log');
     await this.dismissOpenMenus();
+
+    if (await this.isCallLogFormOpen()) {
+      await this.waitForCallLogFormReady();
+      return;
+    }
+
+    if (await this.addLogButton.isVisible({ timeout: 3000 }).catch(() => false)) {
+      if (!(await this.actionButton.isVisible({ timeout: 1500 }).catch(() => false))) {
+        await this.addLogButton.click();
+        await this.waitForCallLogFormReady();
+        return;
+      }
+    }
 
     if (!(await this.actionButton.isVisible({ timeout: 5000 }).catch(() => false))) {
       console.log('[CallLogPage] Action not visible; using Add Log toolbar button');
@@ -187,38 +455,58 @@ class CallLogPage extends BasePage {
       await this.actionButton.click(
         attempt === 0 ? { timeout: 15000 } : { timeout: 15000, force: true }
       );
-      await this.page.waitForTimeout(attempt === 0 ? 300 : 500);
 
-      const menuVisible = await this.actionMenu.isVisible({ timeout: 4000 }).catch(() => false);
+      const menu = this.page.locator('[role="menu"]').filter({ visible: true }).first();
+      const menuVisible = await menu.isVisible({ timeout: 5000 }).catch(() => false);
       if (!menuVisible) {
         continue;
       }
 
-      const callLogInMenu = this.actionMenu
-        .getByRole('menuitem', { name: /call log/i })
-        .or(this.page.getByRole('menuitem', { name: /call log/i }))
+      const callLogInMenu = menu
+        .getByRole('menuitem', { name: /^call\s*log$/i })
+        .or(menu.getByRole('menuitem', { name: /call log|add call log|create call log/i }))
         .first();
 
       if (await callLogInMenu.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await callLogInMenu.click({ timeout: 15000, force: true });
-        opened = true;
-        break;
+        await callLogInMenu.click({ timeout: 15000 });
+        opened = await this.callLogDialog.isVisible({ timeout: 8000 }).catch(() => false);
+        if (opened) {
+          break;
+        }
       }
     }
 
     if (!opened) {
-      console.log('[CallLogPage] Action menu Call Log not found; falling back to Add Log');
+      console.log('[CallLogPage] Action menu Call Log did not open form; falling back to Add Log');
       await this.dismissOpenMenus();
-      await expect(this.addLogButton).toBeVisible({ timeout: this.defaultTimeout });
-      await this.addLogButton.click();
+      if (await this.addLogButton.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await this.addLogButton.click();
+      }
     }
 
     await this.waitForCallLogFormReady();
   }
 
   async dismissOpenMenus() {
-    await this.page.keyboard.press('Escape').catch(() => {});
-    await this.page.locator('[role="menu"]').filter({ visible: true }).waitFor({ state: 'hidden', timeout: 2000 }).catch(() => {});
+    const menuRoot = this.page.locator(
+      '.MuiModal-root.MuiMenu-root, .MuiPopover-root.MuiMenu-root, [role="menu"]'
+    );
+
+    for (let i = 0; i < 4; i += 1) {
+      const menuVisible = await menuRoot.filter({ visible: true }).first().isVisible().catch(() => false);
+      const backdrop = this.page.locator('.MuiMenu-root .MuiBackdrop-root').filter({ visible: true }).first();
+      const backdropVisible = await backdrop.isVisible().catch(() => false);
+      if (!menuVisible && !backdropVisible) {
+        break;
+      }
+
+      await this.page.keyboard.press('Escape').catch(() => {});
+      if (backdropVisible) {
+        await backdrop.click({ force: true, timeout: 2000 }).catch(() => {});
+      }
+    }
+
+    await menuRoot.filter({ visible: true }).first().waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
   }
 
   getCallLogRow(identifier) {
@@ -242,18 +530,58 @@ class CallLogPage extends BasePage {
       .first();
   }
 
+  async isCallLogFormOpen() {
+    return this.callLogDialog.isVisible({ timeout: 1500 }).catch(() => false);
+  }
+
+  async closeCallLogFormIfOpen() {
+    if (!(await this.isCallLogFormOpen())) {
+      return;
+    }
+
+    console.log('[CallLogPage] Closing open Call Log form');
+    const cancelButton = this.page
+      .getByRole('button', { name: /^cancel$/i })
+      .filter({ visible: true })
+      .first();
+    if (await this.callLogCloseIcon.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await this.callLogCloseIcon.click({ timeout: 15000 }).catch(() => {});
+    } else if (await cancelButton.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await cancelButton.click({ timeout: 15000 }).catch(() => {});
+    } else {
+      await this.page.keyboard.press('Escape').catch(() => {});
+    }
+
+    await this.dismissOpenMenus();
+    await expect(this.callLogDialog).toBeHidden({ timeout: 15000 }).catch(() => {});
+  }
+
+  async clearCallLogSearch() {
+    if (!(await this.searchInput.isVisible({ timeout: 2000 }).catch(() => false))) {
+      return;
+    }
+
+    await this.searchInput.click().catch(() => {});
+    await this.searchInput.press('Control+A').catch(() => {});
+    await this.searchInput.fill('');
+    await expect(this.searchInput).toHaveValue('', { timeout: this.defaultTimeout });
+  }
+
+  async ensureCallLogListReadyForCreate() {
+    await this.openCallLogModule();
+    await this.dismissOpenMenus();
+    await this.closeCallLogFormIfOpen();
+    await this.clearCallLogSearch();
+    await this.waitForCallLogModuleReady();
+  }
+
   async ensureOnCallLogModuleList() {
     if (!(await this.isOnCallLogModule())) {
-      if (await this.isOnClientProjectProfile()) {
-        await this.openCallLogModule();
-      } else {
-        await this.openClientsProjects();
-        await this.openFirstClientProfile();
-        await this.openCallLogModule();
-      }
+      await this.openCallLogModule();
     }
+    await this.dismissOpenMenus();
+    await this.closeCallLogFormIfOpen();
     await this.waitForCallLogModuleReady();
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
   }
 
   async openRowActionMenuForCallLog(identifier) {
@@ -276,7 +604,6 @@ class CallLogPage extends BasePage {
       }
 
       await actionButton.click({ timeout: 15000, force: attempt > 0 });
-      await this.page.waitForTimeout(300);
 
       if (await this.actionMenu.isVisible({ timeout: 4000 }).catch(() => false)) {
         return;
@@ -312,80 +639,87 @@ class CallLogPage extends BasePage {
     await this.searchInput.fill('');
     await this.searchInput.fill(String(identifier));
     await this.searchInput.press('Tab').catch(() => {});
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-  }
-
-  async waitForCallLogInList(identifier) {
-    console.log(`[CallLogPage] Waiting for call log in list: ${identifier}`);
-    let reloaded = false;
-
-    await expect(async () => {
-      await this.searchForCallLog(identifier);
-
-      const rowVisible = await this.getCallLogRow(identifier).isVisible().catch(() => false);
-      const cardVisible = await this.page
-        .locator('.MuiCard-root')
-        .filter({ hasText: String(identifier) })
-        .first()
-        .isVisible()
-        .catch(() => false);
-      const textVisible = await this.page
-        .getByText(String(identifier), { exact: false })
-        .first()
-        .isVisible()
-        .catch(() => false);
-      const toastVisible = await this.successToast.isVisible().catch(() => false);
-      const noDataVisible = await this.page
-        .getByText(/no data found/i)
-        .first()
-        .isVisible()
-        .catch(() => false);
-
-      if (!rowVisible && !textVisible && !toastVisible && noDataVisible && !reloaded) {
-        reloaded = true;
-        await this.page.reload().catch(() => {});
-        await this.page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-        await this.waitForCallLogModuleReady().catch(() => {});
-        await this.searchForCallLog(identifier);
-      }
-
-      expect(rowVisible || cardVisible || textVisible || toastVisible).toBeTruthy();
-    }).toPass({ timeout: this.defaultTimeout, intervals: [1000, 2000, 4000] });
+    await expect(this.searchInput).toHaveValue(String(identifier), { timeout: this.defaultTimeout });
   }
 
   async navigateToCallLogForm() {
     console.log('[CallLogPage] Navigating to Call Log form');
-    if (await this.callPurposeInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-      console.log('[CallLogPage] Call Log form already open');
-      return;
+    if (await this.isCallLogFormOpen()) {
+      console.log('[CallLogPage] Call Log form already open — closing before reopening');
+      await this.closeCallLogFormIfOpen();
     }
 
-    await this.openClientsProjects();
-    await this.openFirstClientProfile();
-    await this.openCallLogModule();
-    await this.openCallLogFormFromActionMenu();
+    await this.ensureCallLogListReadyForCreate();
+
+    if (!(await this.isCallLogFormOpen())) {
+      await this.openCallLogFormFromActionMenu();
+    }
   }
 
   async waitForCallLogFormReady() {
     console.log('[CallLogPage] Waiting for Call Log form');
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await expect(this.callLogDialog).toBeVisible({ timeout: this.defaultTimeout });
     await expect(this.callPurposeInput).toBeVisible({ timeout: this.defaultTimeout });
+  }
+
+  async clickCallLogCloseIcon() {
+    console.log('[CallLogPage] Clicking Call Log close icon');
+    await expect(this.callLogDialog).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(this.callLogCloseIcon).toBeVisible({ timeout: this.defaultTimeout });
+    await this.callLogCloseIcon.click({ timeout: 15000 });
+    await expect(this.callLogDialog).toBeHidden({ timeout: this.defaultTimeout });
+  }
+
+  async expectCallLogPopupClosed() {
+    console.log('[CallLogPage] Verifying Call Log popup is closed');
+    await expect(this.callLogDialog).toBeHidden({ timeout: this.defaultTimeout });
+    await expect(this.actionButton.or(this.addLogButton).first()).toBeVisible({
+      timeout: this.defaultTimeout,
+    });
+  }
+
+  async expectEnteredCallLogNotInList() {
+    const purpose = this.callLogData?.callPurpose;
+    if (!purpose) {
+      throw new Error('[CallLogPage] Missing call purpose for not-saved verification');
+    }
+
+    console.log(`[CallLogPage] Verifying call log was not saved: ${purpose}`);
+    await this.ensureOnCallLogModuleList();
+    await this.searchForCallLog(purpose);
+
+    await expect(async () => {
+      const rowVisible = await this.getCallLogRow(purpose).isVisible().catch(() => false);
+      expect(rowVisible).toBeFalsy();
+    }).toPass({ timeout: 20000, intervals: [500, 1000, 2000] });
   }
 
   async fillMandatoryCallLogFields() {
     this.callLogData = this.buildCallLogData();
     console.log(`[CallLogPage] Filling call log form: ${this.callLogData.callPurpose}`);
 
+    if (!(await this.isCallLogFormOpen())) {
+      await this.navigateToCallLogForm();
+    }
+
     await expect(this.callPurposeInput).toBeVisible({ timeout: this.defaultTimeout });
     await this.callPurposeInput.click();
+    await this.callPurposeInput.press('Control+A').catch(() => {});
     await this.callPurposeInput.fill(this.callLogData.callPurpose);
 
     await expect(this.callOutcomeCombobox).toBeVisible({ timeout: this.defaultTimeout });
     await this.callOutcomeCombobox.click();
-    await this.page.getByRole('option', { name: this.callLogData.callOutcome }).click();
+    const outcomeOption = this.page
+      .getByRole('option', { name: this.callLogData.callOutcome, exact: true })
+      .or(this.page.getByRole('menuitem', { name: this.callLogData.callOutcome, exact: true }))
+      .first();
+    await expect(outcomeOption).toBeVisible({ timeout: this.defaultTimeout });
+    await outcomeOption.click();
 
     await expect(this.commentInput).toBeVisible({ timeout: this.defaultTimeout });
     await this.commentInput.click();
+    await this.commentInput.press('Control+A').catch(() => {});
     await this.commentInput.fill(this.callLogData.comment);
   }
 
@@ -424,23 +758,15 @@ class CallLogPage extends BasePage {
       console.warn('[CallLogPage] CREATE_CALL_LOG response was not captured');
     }
 
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-    await expect(this.callPurposeInput).toBeHidden({ timeout: 30000 }).catch(() => {});
-
-    await this.page
-      .locator('.MuiSnackbar-root, .MuiAlert-root')
-      .filter({ hasText: /success|added|created/i })
-      .first()
-      .waitFor({ state: 'visible', timeout: 10000 })
-      .catch(() => {});
-
+    await expect(this.callLogDialog).toBeHidden({ timeout: 30000 });
     await this.ensureOnCallLogModuleList();
+    await this.closeCallLogFormIfOpen();
   }
 
   async verifyCallLogCreatedSuccessfully() {
-    console.log('[CallLogPage] Verifying call log created successfully');
-    const purpose = this.callLogData?.callPurpose;
-    if (!purpose) {
+    console.log('[CallLogPage] Verifying created call log in the list');
+    const data = this.callLogData;
+    if (!data?.callPurpose) {
       throw new Error('[CallLogPage] Missing call purpose data for verification');
     }
 
@@ -448,7 +774,16 @@ class CallLogPage extends BasePage {
       throw new Error('[CallLogPage] Call log create API did not succeed; list verification skipped');
     }
 
-    await this.waitForCallLogInList(purpose);
+    await this.ensureOnCallLogModuleList();
+
+    await expect(async () => {
+      await this.searchForCallLog(data.callPurpose);
+      const row = this.getCallLogRow(data.callPurpose);
+      await expect(row).toBeVisible();
+      await expect(row.getByText(data.callPurpose, { exact: false })).toBeVisible();
+      await expect(row.getByText(data.callOutcome, { exact: false })).toBeVisible();
+      await expect(row.getByText(data.comment, { exact: false })).toBeVisible();
+    }).toPass({ timeout: this.defaultTimeout, intervals: [1000, 2000, 4000] });
   }
 }
 

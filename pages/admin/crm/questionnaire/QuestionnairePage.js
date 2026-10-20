@@ -1,14 +1,13 @@
 const { expect } = require('@playwright/test');
 const BasePage = require('../../../BasePage');
+const NavigationPage = require('../../common/NavigationPage');
 
 class QuestionnairePage extends BasePage {
   constructor(page) {
     super(page);
     this.defaultTimeout = 120000;
+    this.navigationPage = new NavigationPage(page);
 
-    this.crmMenuButton = page.locator('button').filter({ hasText: 'CRM' }).first();
-    this.leadManagerButton = page.getByLabel('Lead Manager').getByRole('button', { name: 'Lead Manager' });
-    this.leadRows = page.locator('tbody tr');
     this.selectFeatureInput = page.getByRole('textbox', { name: /select feature\(s\)/i });
     this.questionnaireFeatureOption = page.getByRole('menuitem').getByText('Questionnaire').first();
     this.clientFeatureMenu = page.locator(
@@ -19,6 +18,7 @@ class QuestionnairePage extends BasePage {
     );
 
     this.questionnaireTab = page.getByRole('tab', { name: /^questionnaire$/i });
+    this.questionnaireSidebarButton = page.getByRole('button', { name: /^questionnaire$/i }).first();
     this.questionnaireOverviewLink = page
       .locator('[id*="Overview"], .MuiTabPanel-root, div.MuiBox-root')
       .getByText(/^questionnaire$/i)
@@ -33,6 +33,10 @@ class QuestionnairePage extends BasePage {
     this.emailOption = page.getByRole('menuitem', { name: /^email$/i });
     this.composeEmailHeader = page.getByText(/compose email/i).first();
     this.sendEmailButton = page.getByRole('button', { name: /^send email$/i });
+    this.errorToast = page
+      .locator('.Toastify__toast, .MuiAlert-root, [role="alert"]')
+      .filter({ hasText: /something went wrong/i })
+      .first();
     this.successToast = page
       .locator('.MuiAlert-root, .MuiSnackbar-root, [role="alert"]')
       .filter({ hasText: /questionnaire sent successfully/i })
@@ -44,14 +48,9 @@ class QuestionnairePage extends BasePage {
     this.emailDetails = page.getByText(/email details|sent via email|to:|subject:|recipient/i).first();
   }
 
-  resolveLeadName() {
-    const fromEnv = process.env.LEAD_NAME || process.env.TEST_LEAD_NAME;
-    return fromEnv ? String(fromEnv).trim() : '';
-  }
-
   resolveQuestionnaireName() {
     const fromEnv = process.env.QUESTIONNAIRE_TEMPLATE_NAME;
-    return fromEnv ? String(fromEnv).trim() : '';
+    return fromEnv ? String(fromEnv).trim() : 'Quality Control';
   }
 
   getChooseQuestionnaireTemplateDropdown() {
@@ -71,11 +70,10 @@ class QuestionnairePage extends BasePage {
   }
 
   async selectQuestionnaireCategory(category = 'Default') {
-    const dialog = this.getChooseQuestionnaireDialog();
     const categoryDropdown = this.getQuestionnaireCategoryDropdown();
 
     await expect(categoryDropdown).toBeVisible({ timeout: this.defaultTimeout });
-    const selectedCategory = (await categoryDropdown.innerText().catch(() => '')).trim();
+    const selectedCategory = (await categoryDropdown.inputValue().catch(() => '')).trim();
     if (selectedCategory.toLowerCase() === category.toLowerCase()) {
       console.log(`[QuestionnairePage] Questionnaire category already selected: ${category}`);
       return;
@@ -87,7 +85,9 @@ class QuestionnairePage extends BasePage {
     const categoryOption = this.page.getByRole('option', { name: category, exact: true }).last();
     await expect(categoryOption).toBeVisible({ timeout: this.defaultTimeout });
     await categoryOption.click();
-    await expect(dialog.getByText(category, { exact: true }).first()).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(categoryDropdown).toHaveValue(new RegExp(`^\\s*${this.escapeRegex(category)}\\s*$`, 'i'), {
+      timeout: this.defaultTimeout,
+    });
   }
 
   getVisibleQuestionnaireTemplateOptions() {
@@ -153,83 +153,21 @@ class QuestionnairePage extends BasePage {
     return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  getLeadCellByName(leadName) {
-    return this.page.getByRole('cell', { name: leadName }).first();
-  }
-
-  async findFirstAvailableLead() {
-    console.log('[QuestionnairePage] Finding first available lead in Lead Manager');
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-
-    const firstRow = this.leadRows.first();
-    await expect(firstRow).toBeVisible({ timeout: this.defaultTimeout });
-
-    const nameCell = firstRow.getByRole('cell').nth(1);
-    await expect(nameCell).toBeVisible({ timeout: this.defaultTimeout });
-
-    const name = (await nameCell.innerText()).trim();
-    if (!name) {
-      throw new Error('[QuestionnairePage] First lead name cell is empty.');
-    }
-
-    return { cell: nameCell, name };
-  }
-
-  async openFirstAvailableLead() {
-    const { cell, name } = await this.findFirstAvailableLead();
-    this.selectedLeadName = name;
-    console.log(`[QuestionnairePage] Opening first available lead: ${name}`);
-    await cell.scrollIntoViewIfNeeded().catch(() => {});
-    await cell.click({ timeout: 15000 });
-    await this.page.waitForURL(/leadmanager\/profile/i, { timeout: this.defaultTimeout }).catch(() => {});
-    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-  }
-
-  async openLeadByName(leadName) {
-    console.log(`[QuestionnairePage] Opening lead profile by name: ${leadName}`);
-    const leadCell = this.getLeadCellByName(leadName);
-    await expect(leadCell).toBeVisible({ timeout: this.defaultTimeout });
-    await leadCell.scrollIntoViewIfNeeded().catch(() => {});
-    await leadCell.click({ timeout: 15000 });
-    this.selectedLeadName = leadName;
-    await this.page.waitForURL(/leadmanager\/profile/i, { timeout: this.defaultTimeout }).catch(() => {});
-    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-  }
-
-  async openLead() {
-    const leadName = this.resolveLeadName();
-    if (leadName) {
-      await this.openLeadByName(leadName);
-      return;
-    }
-    await this.openFirstAvailableLead();
-  }
-
-  async openCrmMenu() {
-    console.log('[QuestionnairePage] Opening CRM menu');
-    await expect(this.crmMenuButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.crmMenuButton.click();
-  }
-
-  async openLeadManager() {
-    console.log('[QuestionnairePage] Opening Lead Manager');
-    await expect(this.leadManagerButton).toBeVisible({ timeout: this.defaultTimeout });
-    await this.leadManagerButton.click();
-    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-    await this.page.waitForURL(/leadmanager\/master/i, { timeout: this.defaultTimeout }).catch(() => {});
-  }
-
   async navigateToLeadProfileIfNeeded() {
     if (/leadmanager\/profile/i.test(this.page.url())) {
-      console.log('[QuestionnairePage] Lead profile already open');
+      if (!(await this.navigationPage.overviewSidebarItem.isVisible({ timeout: 5000 }).catch(() => false))) {
+        // The shared tab can be left inside a full-screen questionnaire view (and CSS zoom) by a previous scenario.
+        console.log('[QuestionnairePage] Lead profile sidebar not visible; reloading the lead profile');
+        await this.page.reload({ waitUntil: 'domcontentloaded' });
+      } else {
+        console.log('[QuestionnairePage] Lead profile already open');
+      }
       await this.waitForLeadProfileReady().catch(() => {});
       return;
     }
 
     console.log('[QuestionnairePage] Navigating to lead profile');
-    await this.openCrmMenu();
-    await this.openLeadManager();
-    await this.openLead();
+    await this.navigationPage.navigateToFirstLead();
     await this.waitForLeadProfileReady();
   }
 
@@ -342,7 +280,8 @@ class QuestionnairePage extends BasePage {
       const featureLabelVisible = await this.page.getByText(/select feature\(s\)/i).first().isVisible().catch(() => false);
       const tabVisible = await this.questionnaireTab.isVisible().catch(() => false);
       const chooseVisible = await this.chooseQuestionnaireButton.isVisible().catch(() => false);
-      expect(featureInputVisible || featureLabelVisible || tabVisible || chooseVisible).toBeTruthy();
+      const sidebarVisible = await this.questionnaireSidebarButton.isVisible().catch(() => false);
+      expect(featureInputVisible || featureLabelVisible || tabVisible || chooseVisible || sidebarVisible).toBeTruthy();
     }).toPass({ timeout: 30000, intervals: [500, 1000, 2000] });
   }
 
@@ -439,6 +378,15 @@ class QuestionnairePage extends BasePage {
       return;
     }
 
+    if (await this.questionnaireSidebarButton.isVisible({ timeout: 5000 }).catch(() => false)) {
+      console.log('[QuestionnairePage] Opening Questionnaire from lead sidebar');
+      await this.questionnaireSidebarButton.scrollIntoViewIfNeeded().catch(() => {});
+      await this.questionnaireSidebarButton.click({ timeout: 15000 });
+      await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+      await this.ensureQuestionnaireModuleLoaded();
+      return;
+    }
+
     if (await this.selectFeatureInput.first().isVisible({ timeout: 5000 }).catch(() => false)) {
       await this.openQuestionnaireViaFeatureSelector();
       return;
@@ -463,6 +411,7 @@ class QuestionnairePage extends BasePage {
   async openQuestionnaireTab() {
     console.log('[QuestionnairePage] Opening Questionnaire module');
     await this.navigateToLeadProfileIfNeeded();
+    this.leadEmail = await this.navigationPage.ensureLeadEmailIsNotDummy();
 
     try {
       await this.openQuestionnaireModuleFromClientMenu();
@@ -498,16 +447,88 @@ class QuestionnairePage extends BasePage {
 
   async sendQuestionnaireViaEmail() {
     console.log('[QuestionnairePage] Sending questionnaire via email');
+    await this.openComposeEmailForQuestionnaire();
+    await this.clickSendEmail();
+  }
+
+  async sendQuestionnaireViaEmailWithManualExpiry(minutes) {
+    console.log(`[QuestionnairePage] Sending questionnaire via email with a manual expiry of ${minutes} minute(s)`);
+    await this.openComposeEmailForQuestionnaire();
+    this.manualExpiryAppliedAt = Date.now();
+    await this.setManualExpiryInMinutes(minutes);
+    await this.clickSendEmail();
+  }
+
+  async openComposeEmailForQuestionnaire() {
     await expect(this.sendViaButton).toBeVisible({ timeout: this.defaultTimeout });
     await this.sendViaButton.click();
 
     await expect(this.emailOption).toBeVisible({ timeout: this.defaultTimeout });
     await this.emailOption.click();
 
-    await expect(this.composeEmailHeader).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(this.composeEmailHeader.or(this.errorToast)).toBeVisible({ timeout: 90000 });
+    if (await this.errorToast.isVisible().catch(() => false)) {
+      const message = (await this.errorToast.innerText().catch(() => '')).trim();
+      throw new Error(`[QuestionnairePage] Compose email did not open after choosing Email. App error: ${message}`);
+    }
+  }
+
+  async setManualExpiryInMinutes(minutes) {
+    const manualExpiryButton = this.page.getByRole('button', { name: /^manual expiry$/i }).first();
+    await expect(manualExpiryButton).toBeVisible({ timeout: this.defaultTimeout });
+    await this.hideFreshchatWidget();
+    await manualExpiryButton.click();
+
+    const expiryDialog = this.page.getByRole('dialog').filter({ hasText: /link expires in/i }).last();
+    await expect(expiryDialog).toBeVisible({ timeout: this.defaultTimeout });
+
+    const timeRadio = expiryDialog.getByRole('radio', { name: /^time$/i });
+    if (await timeRadio.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await timeRadio.check();
+    }
+
+    const valueInput = expiryDialog.getByRole('spinbutton').first();
+    await expect(valueInput).toBeVisible({ timeout: this.defaultTimeout });
+    await valueInput.fill(String(minutes));
+
+    const unitDropdown = expiryDialog.getByRole('combobox', { name: /unit/i }).first();
+    await expect(unitDropdown).toBeVisible({ timeout: this.defaultTimeout });
+    await unitDropdown.click();
+    const minutesOption = this.page.getByRole('option', { name: /^minutes$/i }).last();
+    await expect(minutesOption).toBeVisible({ timeout: this.defaultTimeout });
+    await minutesOption.click();
+    await expect(unitDropdown).toHaveValue(/^minutes$/i);
+
+    const applyButton = expiryDialog.getByRole('button', { name: /^apply$/i });
+    await expect(applyButton).toBeEnabled({ timeout: this.defaultTimeout });
+    await applyButton.click();
+    await expect(expiryDialog).toBeHidden({ timeout: this.defaultTimeout });
+
+    const unitPattern = minutes === 1 ? 'minute' : 'minutes';
+    await expect(
+      this.page.getByText(new RegExp(`manual expiry\\s+set to\\s*${minutes}\\s*${unitPattern}`, 'i')).first()
+    ).toBeVisible({ timeout: this.defaultTimeout });
+  }
+
+  async clickSendEmail() {
     await expect(this.sendEmailButton).toBeVisible({ timeout: this.defaultTimeout });
+    await this.hideFreshchatWidget();
     await this.sendEmailButton.click();
     await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  }
+
+  /** Freshchat iframe sits over the Compose email footer and intercepts the Send Email click. */
+  async hideFreshchatWidget() {
+    await this.page
+      .locator('#fc_frame, iframe#fc_widget')
+      .evaluateAll((nodes) => {
+        nodes.forEach((node) => {
+          const el = node;
+          el.style.setProperty('pointer-events', 'none', 'important');
+          el.style.setProperty('visibility', 'hidden', 'important');
+        });
+      })
+      .catch(() => {});
   }
 
   async expectQuestionnaireSentSuccessfully() {

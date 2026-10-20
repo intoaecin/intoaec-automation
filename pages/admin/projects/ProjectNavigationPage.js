@@ -1,7 +1,7 @@
 // pages/admin/projects/ProjectNavigationPage.js
 const BasePage = require('../../BasePage');
 const { expect } = require('@playwright/test');
-const env = require('../../../config/env');
+const urls = require('../../../config/urls');
 
 class ProjectNavigationPage extends BasePage {
   constructor(page) {
@@ -55,6 +55,9 @@ class ProjectNavigationPage extends BasePage {
   }
 
   async _isClientsProjectsListVisible() {
+    const url = this.page.url();
+    if (urls.isAdminDashboard(url)) return false;
+    if (urls.isClientProjectProfile(url)) return false;
     if (await this.firstClientName.isVisible({ timeout: 800 }).catch(() => false)) return true;
     if (await this.addClientButton.isVisible({ timeout: 500 }).catch(() => false)) return true;
     if (
@@ -86,6 +89,12 @@ class ProjectNavigationPage extends BasePage {
   }
 
   async openClientsProjectsList() {
+    if (urls.isAdminDashboard(this.page.url())) {
+      // eslint-disable-next-line no-console
+      console.log('[nav] On admin dashboard — opening Clients/Projects list URL');
+      await this._gotoClientsProjectsListByUrl();
+    }
+
     if (await this._isClientsProjectsListVisible()) {
       // eslint-disable-next-line no-console
       console.log('[nav] Clients/Projects list already visible');
@@ -187,11 +196,14 @@ class ProjectNavigationPage extends BasePage {
   }
 
   async _gotoClientsProjectsListByUrl() {
-    const base = String(env.admin || '').replace(/\/$/, '');
+    if (this.page.isClosed()) {
+      throw new Error('[nav] Cannot open Clients/Projects list — browser page is closed');
+    }
     await this.page
-      .goto(`${base}/client/profile`, { waitUntil: 'domcontentloaded', timeout: 60000 })
-      .catch(async () => {
-        await this.page.goto(base, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      .goto(urls.clientsProjectsList, { waitUntil: 'domcontentloaded', timeout: 60000 })
+      .catch(async (error) => {
+        if (this.page.isClosed()) throw error;
+        await this.page.goto(urls.adminBase, { waitUntil: 'domcontentloaded', timeout: 60000 });
       });
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
   }
@@ -206,6 +218,66 @@ class ProjectNavigationPage extends BasePage {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * True after opening a row from Clients/Projects — either the project hub
+   * (Design & Estimates / Procurement / …) or the client/lead profile used by Call Log.
+   */
+  async _isOpenedClientOrProjectProfile() {
+    if (await this._profilePage().isInsideProjectProfile()) return true;
+    const url = this.page.url();
+    if (urls.isClientProjectProfile(url)) return true;
+
+    if (urls.isClientsProjectsList(url) || urls.isAdminDashboard(url)) return false;
+
+    const overviewVisible = await this.page
+      .getByRole('button', { name: /^overview$/i })
+      .first()
+      .isVisible({ timeout: 400 })
+      .catch(() => false);
+    const callLogVisible = await this.page
+      .getByRole('button', { name: /^call\s*log$/i })
+      .or(this.page.getByText(/^call\s*log$/i))
+      .first()
+      .isVisible({ timeout: 300 })
+      .catch(() => false);
+    return overviewVisible || callLogVisible;
+  }
+
+  async _waitForOpenedClientOrProject(timeout = 15000) {
+    try {
+      await expect(async () => {
+        expect(await this._isOpenedClientOrProjectProfile()).toBeTruthy();
+      }).toPass({ timeout, intervals: [400, 800, 1500] });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async _gotoFirstClientProjectFromRowHref() {
+    const link = this.page
+      .locator(
+        'tbody tr a[href*="projectId"], tbody tr a[href*="/client/profile"], tbody tr a[href*="/project/"], tbody tr a[href*="leadmanager/profile"]'
+      )
+      .filter({ visible: true })
+      .first();
+    const href = await link.getAttribute('href').catch(() => null);
+    if (!href) return false;
+
+    let absolute;
+    try {
+      absolute = new URL(href, this.page.url()).toString();
+    } catch {
+      return false;
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(`[nav] Opening client/project via row href`);
+    await this.page.goto(absolute, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    return true;
   }
 
   _sidebarScopes() {
@@ -390,7 +462,7 @@ class ProjectNavigationPage extends BasePage {
   }
 
   async _clickFirstProjectUnderClient(nameCountBefore, urlBefore) {
-    if (await this._profilePage().isInsideProjectProfile()) {
+    if (await this._isOpenedClientOrProjectProfile()) {
       return true;
     }
 
@@ -399,7 +471,7 @@ class ProjectNavigationPage extends BasePage {
       await expect
         .poll(
           async () => {
-            if (await this._profilePage().isInsideProjectProfile()) {
+            if (await this._isOpenedClientOrProjectProfile()) {
               return true;
             }
             nameCountAfter = await this._clientNameCells().count();
@@ -412,7 +484,7 @@ class ProjectNavigationPage extends BasePage {
       nameCountAfter = await this._clientNameCells().count().catch(() => nameCountBefore);
     }
 
-    if (await this._profilePage().isInsideProjectProfile()) {
+    if (await this._isOpenedClientOrProjectProfile()) {
       return true;
     }
 
@@ -440,7 +512,7 @@ class ProjectNavigationPage extends BasePage {
     if (
       urlAfter !== urlBefore &&
       (await this._clientNameCells().first().isVisible({ timeout: 1500 }).catch(() => false)) &&
-      !(await this._profilePage().isInsideProjectProfile())
+      !(await this._isOpenedClientOrProjectProfile())
     ) {
       const projectName = this._clientNameCells().first();
       const clicked = await projectName
@@ -500,47 +572,81 @@ class ProjectNavigationPage extends BasePage {
   }
 
   async clickFirstProject() {
-    const profile = this._profilePage();
-    if (await profile.isInsideProjectProfile()) {
+    if (this.page.isClosed()) {
+      throw new Error('[nav] Cannot open first client/project — browser page is closed');
+    }
+
+    if (await this._isOpenedClientOrProjectProfile()) {
       // eslint-disable-next-line no-console
-      console.log('[nav] Already on project profile hub — skip client/project click');
+      console.log('[nav] Already on client/project profile — skip client/project click');
       return;
     }
 
-    const listVisible = await this._isClientsProjectsListVisible();
-    if (!listVisible) {
-      if (this._isDeepModuleUrl() && (await this.returnToProjectProfile())) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (this.page.isClosed()) {
+        throw new Error('[nav] Browser page closed while opening first client/project');
+      }
+
+      if (await this._isOpenedClientOrProjectProfile()) {
         return;
       }
-      await this.openClientsProjectsList();
-    }
 
-    if (await profile.isInsideProjectProfile()) {
-      return;
-    }
+      const listVisible = await this._isClientsProjectsListVisible();
+      if (!listVisible) {
+        if (this._isDeepModuleUrl() && (await this.returnToProjectProfile())) {
+          return;
+        }
+        await this.openClientsProjectsList();
+      }
 
-    const urlBefore = this.page.url();
-    const nameCountBefore = await this._clientNameCells().count().catch(() => 0);
+      if (await this._isOpenedClientOrProjectProfile()) {
+        return;
+      }
 
-    await this._clickFirstClientName();
-    if (await this._waitForProjectProfile(5000)) {
-      return;
-    }
+      const urlBefore = this.page.url();
+      const nameCountBefore = await this._clientNameCells().count().catch(() => 0);
 
-    await this._clickFirstProjectUnderClient(nameCountBefore, urlBefore);
-    if (await this._waitForProjectProfile(4000)) {
-      return;
-    }
+      await this._clickFirstClientName();
+      if (await this._waitForOpenedClientOrProject(attempt === 0 ? 8000 : 12000)) {
+        return;
+      }
 
-    await this._clickSelectedRowProfileIcon();
-    if (await this._waitForProjectProfile()) {
-      return;
+      await this._clickFirstProjectUnderClient(nameCountBefore, urlBefore);
+      if (await this._waitForOpenedClientOrProject(6000)) {
+        return;
+      }
+
+      await this._clickSelectedRowProfileIcon();
+      if (await this._waitForOpenedClientOrProject(8000)) {
+        return;
+      }
+
+      if (await this._gotoFirstClientProjectFromRowHref()) {
+        if (await this._waitForOpenedClientOrProject(12000)) {
+          return;
+        }
+      }
+
+      // eslint-disable-next-line no-console
+      console.log(
+        `[nav] First client/project did not open hub (attempt ${attempt + 1}/2). URL=${this.page.url()}`
+      );
+
+      // Refresh list only when still on the list URL — avoid redundant gotos that can drop the session.
+      if (attempt === 0 && !(await this._isOpenedClientOrProjectProfile())) {
+        if (await this._isClientsProjectsListVisible()) {
+          await this.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+          await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+        } else if (!this.page.isClosed()) {
+          await this.openClientsProjectsList();
+        }
+      }
     }
 
     // eslint-disable-next-line no-console
     console.log(`[nav] First client/project did not open hub. URL=${this.page.url()}`);
     await expect(async () => {
-      expect(await profile.isInsideProjectProfile()).toBeTruthy();
+      expect(await this._isOpenedClientOrProjectProfile()).toBeTruthy();
     }).toPass({ timeout: 20000, intervals: [500, 1000, 2000] });
   }
 

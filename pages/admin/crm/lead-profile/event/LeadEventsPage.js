@@ -2,16 +2,12 @@ const { expect } = require('@playwright/test');
 const EventPage = require('./EventPage');
 
 class LeadEventsPage extends EventPage {
-  connectGoogleMeetButton() {
-    return this.panel().getByRole('button', { name: /^connect google meet$/i });
+  connectCalendarButton() {
+    return this.panel().getByRole('button', { name: /^connect calendar$/i });
   }
 
   connectCalendarHeading() {
     return this.panel().getByText(/connect your calendar/i);
-  }
-
-  connectCalendarDescription() {
-    return this.panel().getByText(/schedule appointments online/i);
   }
 
   async openCreateMeetingFromEvents() {
@@ -25,69 +21,55 @@ class LeadEventsPage extends EventPage {
 
   async clickOnlineMeetingTab() {
     console.log('[LeadEventsPage] Clicking Online meeting tab');
-    const onlineTab = this.meetingTypeTab('online');
-    if (await onlineTab.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await onlineTab.click({ force: true });
-      await this.page.waitForTimeout(500);
-      return;
-    }
-
     await this.clickMeetingTab('online');
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
   }
 
   async clickMeetingTab(tabName) {
     await this.ensureMeetingTabSelected(String(tabName).toLowerCase());
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
   }
 
-  async isConnectGoogleMeetScreenVisible() {
-    const connectButtonVisible = await this.connectGoogleMeetButton()
-      .isVisible({ timeout: 5000 })
-      .catch(() => false);
-    const headingVisible = await this.connectCalendarHeading()
-      .isVisible({ timeout: 3000 })
-      .catch(() => false);
+  async isConnectCalendarScreenVisible() {
+    const connectButtonVisible = await this.connectCalendarButton().isVisible().catch(() => false);
+    const headingVisible = await this.connectCalendarHeading().isVisible().catch(() => false);
     return connectButtonVisible || headingVisible;
   }
 
   async isOnlineMeetingFormVisible() {
-    const titleVisible = await this.titleInput().isVisible({ timeout: 3000 }).catch(() => false);
-    const fromTimeVisible = await this.fromTimePickerTrigger()
-      .isVisible({ timeout: 3000 })
-      .catch(() => false);
-    const connectVisible = await this.isConnectGoogleMeetScreenVisible();
+    const titleVisible = await this.titleInput().isVisible().catch(() => false);
+    const fromTimeVisible = await this.fromTimePickerTrigger().isVisible().catch(() => false);
+    const connectVisible = await this.isConnectCalendarScreenVisible();
     return (titleVisible || fromTimeVisible) && !connectVisible;
   }
 
+  // Any connected calendar (Google or Outlook) unlocks the online meeting form.
   async isGoogleCalendarConnected() {
+    await expect(this.titleInput().or(this.connectCalendarButton()).first()).toBeVisible({
+      timeout: this.defaultTimeout,
+    });
     return this.isOnlineMeetingFormVisible();
   }
 
   async expectGoogleCalendarConnected() {
-    console.log('[LeadEventsPage] Verifying Google Calendar is connected');
-    await expect(async () => {
-      expect(await this.isGoogleCalendarConnected()).toBe(true);
-    }).toPass({ timeout: this.defaultTimeout, intervals: [1000, 2000, 3000] });
+    console.log('[LeadEventsPage] Verifying a calendar (Google or Outlook) is connected');
+    expect(await this.isGoogleCalendarConnected()).toBe(true);
     await this.expectConnectGoogleMeetScreenNotDisplayed();
   }
 
   async expectGoogleCalendarNotConnected() {
-    console.log('[LeadEventsPage] Verifying Google Calendar is not connected');
+    console.log('[LeadEventsPage] Verifying no calendar is connected');
     expect(await this.isGoogleCalendarConnected()).toBe(false);
     await this.expectConnectGoogleMeetScreenDisplayed();
   }
 
   async expectConnectGoogleMeetScreenDisplayed() {
-    console.log('[LeadEventsPage] Verifying Connect Google Meet screen is displayed');
-    await expect(this.connectGoogleMeetButton()).toBeVisible({ timeout: this.defaultTimeout });
+    console.log('[LeadEventsPage] Verifying Connect your calendar screen is displayed');
     await expect(this.connectCalendarHeading()).toBeVisible({ timeout: this.defaultTimeout });
-    await expect(this.connectCalendarDescription()).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(this.connectCalendarButton()).toBeVisible({ timeout: this.defaultTimeout });
   }
 
   async expectConnectGoogleMeetScreenNotDisplayed() {
-    console.log('[LeadEventsPage] Verifying Connect Google Meet screen is not displayed');
-    await expect(this.connectGoogleMeetButton()).toBeHidden({ timeout: this.defaultTimeout });
+    console.log('[LeadEventsPage] Verifying Connect your calendar screen is not displayed');
+    await expect(this.connectCalendarButton()).toBeHidden({ timeout: this.defaultTimeout });
     await expect(this.connectCalendarHeading()).toBeHidden({ timeout: this.defaultTimeout });
   }
 

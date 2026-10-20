@@ -72,7 +72,7 @@ class RepeatMeetingPage extends EventPage {
   }
 
   editPageScheduleDateInputs() {
-    return this.page.locator('input[placeholder="DD MMMM YYYY"]');
+    return this.page.locator('input[placeholder="DD MMMM YYYY"], input[placeholder="DD/MM/YYYY"]');
   }
 
   editPageScheduleStartDate() {
@@ -87,12 +87,35 @@ class RepeatMeetingPage extends EventPage {
     return this.page.locator(`#${pickerId}`).first();
   }
 
+  editPageTimeCombobox(pickerId) {
+    const captionLabel = pickerId.startsWith('from') ? 'From' : 'To';
+    return this.page
+      .locator(`#${pickerId}[role="combobox"]`)
+      .or(this.scheduleTimeCombobox(this.page, captionLabel))
+      .first();
+  }
+
   editPageFromTimePickerTrigger() {
-    return this.page.locator('#from-time-picker[role="combobox"]');
+    return this.editPageTimeCombobox('from-time-picker');
   }
 
   editPageToTimePickerTrigger() {
-    return this.page.locator('#to-time-picker[role="combobox"]');
+    return this.editPageTimeCombobox('to-time-picker');
+  }
+
+  dateValueMatches(value, displayDate) {
+    const normalized = String(value).replace(/\s+/g, ' ').trim();
+    const target = this.parseDisplayDate(displayDate);
+    const numeric = [
+      String(target.getDate()).padStart(2, '0'),
+      String(target.getMonth() + 1).padStart(2, '0'),
+      target.getFullYear(),
+    ].join('/');
+    const monthName = displayDate.split(/\s+/)[1];
+    return (
+      normalized === numeric ||
+      (new RegExp(`\\b0?${target.getDate()}\\b`).test(normalized) && new RegExp(monthName, 'i').test(normalized))
+    );
   }
 
   editPageLocationInput() {
@@ -326,7 +349,7 @@ class RepeatMeetingPage extends EventPage {
     await popper.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
 
     const value = (await dateInput.inputValue()).replace(/\s+/g, ' ').trim();
-    if (!value.match(new RegExp(String(targetDay))) || !value.match(new RegExp(displayDate.split(/\s+/)[1], 'i'))) {
+    if (!this.dateValueMatches(value, displayDate)) {
       throw new Error(`Schedule date not updated. Expected ${displayDate}, got ${value}`);
     }
   }
@@ -342,12 +365,14 @@ class RepeatMeetingPage extends EventPage {
     await expect(async () => {
       await this.dismissEditMeetingOverlays();
 
-      const pickerTrigger = this.page.locator(`#${pickerId}[role="combobox"]`);
+      const pickerTrigger = this.editPageTimeCombobox(pickerId);
       await pickerTrigger.scrollIntoViewIfNeeded().catch(() => {});
       await expect(pickerTrigger).toBeVisible({ timeout: 10000 });
       await pickerTrigger.click();
 
-      const listbox = this.editPageTimeListbox(pickerId);
+      const listbox = this.editPageTimeListbox(pickerId)
+        .or(this.page.getByRole('listbox').filter({ visible: true }))
+        .first();
       await expect(listbox).toBeVisible({ timeout: 10000 });
 
       const escapedTime = normalizedTime.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -443,7 +468,6 @@ class RepeatMeetingPage extends EventPage {
     }
 
     await this.openEventsMeetingTypeTab(normalizedMeetingType);
-    await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
   }
 
   async verifyMeetingVisibleInScheduleTab(title, tabName) {
@@ -480,16 +504,10 @@ class RepeatMeetingPage extends EventPage {
       const repeatItem = this.repeatMenuItem();
       await expect(repeatItem).toBeVisible({ timeout: 8000 });
 
-      const navigationPromise = this.page
-        .waitForURL(/edit/i, { timeout: 45000 })
-        .catch(() => this.page.waitForLoadState('networkidle', { timeout: 45000 }).catch(() => {}));
-
       await repeatItem.click();
-      await navigationPromise;
       await this.page.waitForLoadState('domcontentloaded');
-      await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
 
-      if (!(await this.isEditMeetingPageVisible())) {
+      if (!(await this.isShownWithin(this.saveMeetingButton(), 30000))) {
         throw new Error('[RepeatMeetingPage] Edit Meeting page not visible after Repeat');
       }
     }).toPass({ timeout: 90000, intervals: [2000, 3000, 5000] });
@@ -529,9 +547,8 @@ class RepeatMeetingPage extends EventPage {
     await expect(async () => {
       const startValue = await this.editPageScheduleStartDate().inputValue();
       const endValue = await this.editPageScheduleEndDate().inputValue();
-      expect(startValue).toMatch(new RegExp(schedule.startDate.split(/\s+/)[1], 'i'));
-      expect(endValue).toMatch(new RegExp(schedule.endDate.split(/\s+/)[1], 'i'));
-      expect(startValue).toContain(String(schedule.startDate.split(/\s+/)[0]).replace(/^0/, ''));
+      expect(this.dateValueMatches(startValue, schedule.startDate), `start date ${startValue}`).toBeTruthy();
+      expect(this.dateValueMatches(endValue, schedule.endDate), `end date ${endValue}`).toBeTruthy();
     }).toPass({ timeout: this.defaultTimeout });
 
     await this.scrollEditMeetingFormToSaveButton();
@@ -582,8 +599,6 @@ class RepeatMeetingPage extends EventPage {
       const body = await response.text().catch(() => '');
       throw new Error(`[RepeatMeetingPage] Save meeting API failed (${response.status()}): ${body.slice(0, 500)}`);
     }
-
-    await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
   }
 
   async verifyRepeatedMeetingSavedSuccessfully() {

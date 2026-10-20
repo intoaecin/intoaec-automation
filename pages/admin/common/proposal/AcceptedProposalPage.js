@@ -1,17 +1,38 @@
 const { expect } = require('@playwright/test');
 const BasePage = require('../../../BasePage');
 const ProposalPage = require('../../../admin/common/ProposalPage');
+const NavigationPage = require('../NavigationPage');
 
 function escapeRegExp(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function isSendProposalRequest(response) {
+  const request = response.request();
+  if (request.method() !== 'POST') return false;
+  return /"eventType"\s*:\s*"(SEND_PROPOSAL|RESEND_PROPOSAL)"/.test(request.postData() || '');
+}
+
+/**
+ * Proposal sent by email to the first lead, opened from the lead's Yopmail inbox.
+ * Base class for the accepted, declined, lead comment, AEC reply and revision flows.
+ */
 class AcceptedProposalPage extends BasePage {
   constructor(page) {
     super(page);
     this.page = page;
     this.defaultTimeout = 180000;
     this.proposalPage = new ProposalPage(page);
+    this.navigationPage = new NavigationPage(page);
+    this.mailTimeoutMs = parseInt(process.env.PROPOSAL_MAIL_TIMEOUT_MS || '240000', 10);
+    this.humanCheckTimeoutMs = parseInt(process.env.YOPMAIL_HUMAN_CHECK_TIMEOUT_MS || '180000', 10);
+
+    this.clientData = null;
+    this.sentProposal = null;
+    this.yopmailPage = null;
+    this.proposalPreviewPage = null;
+    this.proposalMailId = null;
+    this.checkedMailIds = new Set();
 
     this.clientsTab = page.getByLabel('Clients/Projects').first();
     this.projectsHeading = page
@@ -98,7 +119,7 @@ class AcceptedProposalPage extends BasePage {
       .or(page.getByLabel(/search/i))
       .first();
     this.sentProposalStatusText = page.getByText(/accepted/i).first();
-    this.yopmailLoginInput = page.locator('#login, input#login, input[name="login"]').first();
+    this.composeToInput = page.locator('input[placeholder="To"]').first();
   }
 
   buildRandomClientData() {
@@ -116,21 +137,20 @@ class AcceptedProposalPage extends BasePage {
     };
   }
 
+  /**
+   * Opens the first lead (CRM → Lead Manager → first lead) and makes sure its email is a real yopmail inbox.
+   * The recipient address is read again from the compose email "To" field when sending.
+   */
   async createClientWithYopmail() {
-    this.clientData = {
-      name: 'Automation Test Client'
-    };
-
-    await this.openClientsSection();
-
-    // Use precisely the provided locator for the first client name cell
-    const firstClientName = this.page.locator('th[scope="row"] span.text-dark').first();
-
-    await expect(firstClientName).toBeVisible({ timeout: 15000 });
-    await firstClientName.click({ force: true });
-
-    // Quick load check without long enforced idle
-    await this.page.waitForLoadState('domcontentloaded').catch(() => { });
+    const onLeadProfile = /leadmanager\/profile/i.test(this.page.url());
+    if (onLeadProfile && !(await this.navigationPage.overviewSidebarItem.isVisible({ timeout: 5000 }).catch(() => false))) {
+      // The shared tab can be left inside a full-screen proposal or questionnaire view by a previous scenario.
+      console.log('[Proposal] Lead profile sidebar not visible; returning to Lead Manager');
+      await this.page.goto(new URL('/leadmanager/master', this.page.url()).toString(), { waitUntil: 'domcontentloaded' });
+    }
+    await this.navigationPage.navigateToFirstLead();
+    const leadEmail = await this.navigationPage.ensureLeadEmailIsNotDummy();
+    this.clientData = { email: leadEmail, yopmailLocalPart: leadEmail.split('@')[0] };
   }
 
   async waitForPageReady() {
@@ -257,14 +277,12 @@ class AcceptedProposalPage extends BasePage {
     await expect(this.createClientButton).toBeEnabled({ timeout: this.defaultTimeout });
     await this.clickElement(this.createClientButton);
     await this.waitForPageReady();
-    await this.page.waitForTimeout(1500);
   }
 
   async openCreatedClientProfile() {
     if (await this.searchLeadInput.isVisible({ timeout: 5000 }).catch(() => false)) {
       await this.fillField(this.searchLeadInput, this.clientData.name);
       await this.searchLeadInput.press('Tab').catch(() => { });
-      await this.page.waitForTimeout(1000);
     }
 
     const createdRow = this.page
@@ -294,78 +312,197 @@ class AcceptedProposalPage extends BasePage {
     await this.proposalPage.openSendMenu();
     await this.proposalPage.selectEmailFromSendMenu();
 
-    // Explicit targeting based on the precise custom Compose Email UI structure
-    const toInput = this.page.locator('input[placeholder="To"]').first();
-    await expect(toInput).toBeVisible({ timeout: 15000 });
-
-    // Retrieve the exact value property from the disabled input field
-    const capturedEmail = await toInput.inputValue();
-
-    if (capturedEmail && capturedEmail.includes('@')) {
-      this.clientData.email = capturedEmail;
-      this.clientData.yopmailLocalPart = capturedEmail.split('@')[0];
-    } else {
+    await expect(this.composeToInput).toBeVisible({ timeout: 30000 });
+    const capturedEmail = (await this.composeToInput.inputValue()).trim();
+    if (!capturedEmail.includes('@')) {
       throw new Error(`Failed to safely extract email from "To" input. Found value: "${capturedEmail}"`);
     }
+    this.clientData = {
+      ...(this.clientData || {}),
+      email: capturedEmail,
+      yopmailLocalPart: capturedEmail.split('@')[0],
+    };
 
+    // Settled immediately so a page closed mid-step cannot surface as an unhandled rejection.
+    const sendResponse = this.page
+      .waitForResponse(isSendProposalRequest, { timeout: this.defaultTimeout })
+      .then(
+        (response) => ({ response }),
+        (error) => ({ error })
+      );
     await this.proposalPage.confirmComposeSendEmail();
-    await this.page.waitForTimeout(1500);
+
+    const { response, error } = await sendResponse;
+    if (error) throw error;
+    const payload = await response.json();
+    expect(payload?.code, `Send proposal API returned ${JSON.stringify(payload?.code)}`).toBe('PROPOSAL_SENT_SUCCESSFULLY');
+    this.sentProposal = {
+      leadProposalId: payload?.body?.leadProposalId,
+      proposalRevision: payload?.body?.proposalRevision,
+    };
+    expect(this.sentProposal.leadProposalId, 'Send proposal API returned no leadProposalId').toBeTruthy();
+    console.log(`[Proposal] Sent to ${capturedEmail}: ${JSON.stringify(this.sentProposal)}`);
+
+    await this.proposalPage.verifyProposalSent();
+  }
+
+  requireSentProposal() {
+    if (!this.sentProposal?.leadProposalId) {
+      throw new Error('[Proposal] No sent proposal recorded. Send the proposal via email first.');
+    }
+    return this.sentProposal;
+  }
+
+  getYopmailHumanCheck() {
+    const page = this.yopmailPage;
+    return page
+      .getByText(/confirm you.re human|verify you are human/i)
+      .or(page.locator('iframe[src*="challenges.cloudflare.com"]'))
+      .or(page.locator('#r_parent.r_popup'))
+      .filter({ visible: true })
+      .first();
+  }
+
+  /** Yopmail can show a Cloudflare human check; it must be completed by a person in the headed browser. */
+  async waitForYopmailHumanCheckToClear() {
+    const humanCheck = this.getYopmailHumanCheck();
+    if (!(await humanCheck.isVisible({ timeout: 3000 }).catch(() => false))) {
+      return;
+    }
+    console.log(
+      `[Proposal] Yopmail is showing a Cloudflare human check. Waiting up to ${Math.round(
+        this.humanCheckTimeoutMs / 1000
+      )}s for it to be completed in the browser window.`
+    );
+    try {
+      await expect(humanCheck).toBeHidden({ timeout: this.humanCheckTimeoutMs });
+    } catch {
+      throw new Error(
+        '[Proposal] Mailbox blocked: yopmail kept showing the Cloudflare human check, so the proposal email could not be read.'
+      );
+    }
   }
 
   async openYopmailForProposal() {
-    this.yopmailPage = await this.page.context().newPage();
-    const login = this.clientData.yopmailLocalPart;
-    await this.yopmailPage.goto(`https://yopmail.com?${encodeURIComponent(login)}`, {
+    const login = this.clientData?.yopmailLocalPart;
+    if (!login || !/@yopmail\.com$/i.test(this.clientData.email || '')) {
+      throw new Error(`[Proposal] Client email "${this.clientData?.email}" is not a yopmail address, so its mailbox cannot be read.`);
+    }
+    if (!this.yopmailPage || this.yopmailPage.isClosed()) {
+      this.yopmailPage = await this.page.context().newPage();
+    }
+    await this.yopmailPage.bringToFront();
+    await this.yopmailPage.goto(`https://yopmail.com/en/?login=${encodeURIComponent(login)}`, {
       waitUntil: 'domcontentloaded',
       timeout: 90000,
     });
+    await this.yopmailPage.waitForSelector('iframe[name="ifinbox"]', { timeout: 60000 });
+  }
 
-    if (await this.yopmailLoginInput.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await this.yopmailLoginInput.fill(login);
-      await this.yopmailLoginInput.press('Enter');
+  async refreshYopmailInbox() {
+    const refreshButton = this.yopmailPage.locator('#refresh').first();
+    if (await refreshButton.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await refreshButton.click();
+    } else {
+      await this.yopmailPage.reload({ waitUntil: 'domcontentloaded' });
     }
+  }
 
-    await this.yopmailPage.waitForSelector('iframe[name="ifinbox"]', { timeout: 45000 });
+  async readOpenMailLinks() {
+    const mailFrame = this.yopmailPage.frameLocator('iframe[name="ifmail"]');
+    await expect
+      .poll(() => mailFrame.locator('a[href]').count(), { timeout: 20000, intervals: [500, 1000] })
+      .toBeGreaterThan(0);
+    return mailFrame
+      .locator('a[href]')
+      .evaluateAll((anchors) =>
+        anchors
+          .map((anchor, index) => ({ index, href: anchor.href }))
+          .filter(({ href }) => /^https?:/i.test(href) && !/yopmail\./i.test(href))
+      );
+  }
+
+  /** Links can be wrapped by click tracking, so non-direct links are resolved to their final URL. */
+  async findProposalLink(links, leadProposalId) {
+    const direct = links.find(({ href }) => href.includes(leadProposalId));
+    if (direct) return direct;
+    for (const link of links.slice(0, 8)) {
+      const response = await this.yopmailPage.request.get(link.href, { maxRedirects: 10 }).catch(() => null);
+      if (response && response.url().includes(leadProposalId)) {
+        return { ...link, href: response.url() };
+      }
+    }
+    return null;
+  }
+
+  /** Polls the inbox until a mail (other than `excludeMailIds`) links to the sent proposal; leaves that mail open. */
+  async waitForMailLinkingToProposal({ excludeMailIds = [], description = 'proposal email' } = {}) {
+    const { leadProposalId } = this.requireSentProposal();
+    const inboxRows = this.yopmailPage.frameLocator('iframe[name="ifinbox"]').locator('div.m');
+    const skipped = new Set(excludeMailIds);
+    console.log(`[Proposal] Waiting for the ${description} for proposal ${leadProposalId} in ${this.clientData.email}`);
+
+    const deadline = Date.now() + this.mailTimeoutMs;
+    while (Date.now() < deadline) {
+      await this.waitForYopmailHumanCheckToClear();
+      const rowCount = Math.min(await inboxRows.count(), 6);
+      for (let index = 0; index < rowCount; index += 1) {
+        const row = inboxRows.nth(index);
+        const mailId = (await row.getAttribute('id').catch(() => null)) || `row-${index}`;
+        if (skipped.has(mailId) || this.checkedMailIds.has(mailId)) continue;
+
+        await row.click();
+        const links = await this.readOpenMailLinks().catch(() => []);
+        const link = await this.findProposalLink(links, leadProposalId);
+        if (link) {
+          console.log(`[Proposal] Found the ${description}: ${link.href}`);
+          return { mailId, link };
+        }
+        this.checkedMailIds.add(mailId);
+      }
+      await this.yopmailPage.waitForTimeout(5000);
+      await this.waitForYopmailHumanCheckToClear();
+      await this.refreshYopmailInbox();
+    }
+    throw new Error(
+      `[Proposal] The ${description} for proposal ${leadProposalId} did not arrive in ${this.clientData.email} within ${Math.round(
+        this.mailTimeoutMs / 1000
+      )}s.`
+    );
+  }
+
+  /** Clicks the matched link in the open mail; the proposal opens in a new tab. */
+  async openProposalLinkFromOpenMail(link) {
+    const { leadProposalId } = this.requireSentProposal();
+    const mailLink = this.yopmailPage.frameLocator('iframe[name="ifmail"]').locator('a[href]').nth(link.index);
+    const popupPromise = this.yopmailPage.context().waitForEvent('page', { timeout: 15000 }).catch(() => null);
+    await mailLink.click();
+    let previewPage = await popupPromise;
+    if (!previewPage) {
+      previewPage = await this.yopmailPage.context().newPage();
+      await previewPage.goto(link.href, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    }
+    await previewPage.waitForLoadState('domcontentloaded').catch(() => { });
+    await expect(previewPage).toHaveURL(new RegExp(escapeRegExp(leadProposalId)), { timeout: 60000 });
+    await previewPage.bringToFront();
+    return previewPage;
   }
 
   async waitForProposalMailAndOpenPreview() {
-    const page = this.yopmailPage;
-    const inbox = page.frameLocator('iframe[name="ifinbox"]');
-    const mail = page.frameLocator('iframe[name="ifmail"]');
+    const { mailId, link } = await this.waitForMailLinkingToProposal({ description: 'proposal email' });
+    this.proposalMailId = mailId;
+    this.proposalPreviewPage = await this.openProposalLinkFromOpenMail(link);
+  }
 
-    // Wait a solid 40 seconds to guarantee the new email arrives safely
-    await page.waitForTimeout(40000);
-
-    const refresh = page.locator('#refresh, [title*="Refresh" i]').first();
-    if (await refresh.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await refresh.click().catch(() => { });
-    }
-    await page.waitForTimeout(2000);
-
-    // Open the absolute newest email sitting at the top of the pile
-    const firstEmail = inbox.locator('div.m, .lm, tr, .l').first();
-    await firstEmail.click({ force: true });
-    await page.waitForTimeout(2000);
-
-    const previewLink = mail
-      .getByRole('link', { name: /preview|view proposal|open proposal/i })
-      .or(mail.getByRole('button', { name: /preview|view proposal|open proposal/i }))
-      .or(mail.locator('a').filter({ hasText: /preview|view proposal|open proposal/i }))
-      .first();
-
-    if (await previewLink.isVisible({ timeout: 5000 }).catch(() => false)) {
-      const popupPromise = page.context().waitForEvent('page', { timeout: 10000 }).catch(() => null);
-      await previewLink.click({ force: true });
-      this.proposalPreviewPage = await popupPromise;
-
-      if (!this.proposalPreviewPage) {
-        this.proposalPreviewPage = page;
+  /** Closes the Yopmail and client preview tabs so later scenarios start with only the app tab. */
+  async closeExternalTabs() {
+    for (const tab of [this.proposalPreviewPage, this.yopmailPage]) {
+      if (tab && tab !== this.page && !tab.isClosed()) {
+        await tab.close().catch(() => { });
       }
-      await this.proposalPreviewPage.waitForLoadState('domcontentloaded').catch(() => { });
-      return;
     }
-
-    throw new Error('Failed to locate the preview link inside the successfully opened Yopmail email.');
+    this.proposalPreviewPage = null;
+    this.yopmailPage = null;
   }
 
   async acceptProposalWithDigitalSignature() {
@@ -405,7 +542,7 @@ class AcceptedProposalPage extends BasePage {
       await drawSignatureRadio.check({ force: true }).catch(async () => {
         await drawSignatureRadio.click({ force: true });
       });
-      await page.waitForTimeout(500);
+      await expect(drawSignatureRadio).toBeChecked({ timeout: 15000 });
 
       const signaturePad = popup.locator('canvas').last().or(page.locator('canvas').last());
       await expect(signaturePad).toBeVisible({ timeout: 15000 });
@@ -422,7 +559,6 @@ class AcceptedProposalPage extends BasePage {
       await page.mouse.move(box.x + 165, box.y + box.height / 2 + 20, { steps: 5 });
       await page.mouse.move(box.x + 240, box.y + box.height / 2 - 10, { steps: 5 });
       await page.mouse.up();
-      await page.waitForTimeout(500);
     };
 
     await openSignaturePopup();
@@ -439,12 +575,14 @@ class AcceptedProposalPage extends BasePage {
       .last()
       .or(page.getByRole('button', { name: /^Sign and Accept$/i }).last());
     await expect(signAndAcceptSubmit).toBeVisible({ timeout: 15000 });
+    await expect(signAndAcceptSubmit).toBeEnabled({ timeout: 15000 });
     await signAndAcceptSubmit.click({ force: true });
-
-    await page.waitForTimeout(2000); // Allow modal closing and UI to refresh
 
     // Some preview pages close or stay on a thank-you state after accepting.
     // App-side status is verified after switching back to the application tab.
+    if (page.isClosed()) return;
+    await expect(signaturePopup()).toBeHidden({ timeout: 30000 }).catch(() => {});
+
     const acceptedHeaderStatus = page.locator('h6, span, div').filter({ hasText: /^Accepted$/i }).first()
       .or(page.getByText(/^Accepted$/i).first());
 
@@ -452,9 +590,6 @@ class AcceptedProposalPage extends BasePage {
       const isStatusVisible = await acceptedHeaderStatus.isVisible({ timeout: 2000 }).catch(() => false);
       expect(isStatusVisible).toBeTruthy();
     }).toPass({ timeout: 5000, intervals: [1000, 1500] }).catch(() => {});
-
-    // Quick wait after successful confirmation so app-side toasts/requests resolve before verifying status
-    await page.waitForTimeout(2000);
   }
 
   async verifyProposalAcceptedStatusInApp() {

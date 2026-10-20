@@ -67,11 +67,12 @@ class MeetingValidationPage extends EventPage {
     console.log('[MeetingValidationPage] Removing all participant chips');
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const removeButton = this.participantRemoveButtons().first();
-      if (!(await removeButton.isVisible({ timeout: 1000 }).catch(() => false))) {
+      if (!(await removeButton.isVisible().catch(() => false))) {
         break;
       }
+      const chipCount = await this.participantChips().count();
       await removeButton.click();
-      await this.page.waitForTimeout(300);
+      await expect(this.participantChips()).toHaveCount(chipCount - 1, { timeout: 15000 });
     }
 
     await expect(this.participantChips()).toHaveCount(0, { timeout: this.defaultTimeout });
@@ -189,8 +190,6 @@ class MeetingValidationPage extends EventPage {
 
     const response = await createResponse;
     this.createSucceeded = response ? response.status() >= 200 && response.status() < 300 : false;
-
-    await this.page.waitForTimeout(1000);
   }
 
   async isValidationTextVisible(pattern) {

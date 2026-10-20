@@ -29,11 +29,16 @@ class BasePage {
   }
 
   async waitForEnterInTerminal(message = 'Press ENTER in the terminal to continue.') {
+    console.log('');
     console.log(`[Manual Step] ${message}`);
+    console.log('[Manual Step] Waiting for ENTER...');
 
     if (!process.stdin.isTTY) {
-      console.log('[Manual Step] No interactive terminal detected; continuing without waiting for ENTER.');
-      return;
+      throw new Error(
+        `[Manual Step] No interactive terminal — cannot wait for ENTER.\n` +
+          `Run this test in a normal terminal (PowerShell/CMD), complete the manual action, then press ENTER.\n` +
+          `Or set NOTE_ATTACHMENT_AUTO=1 for automatic attachment upload.`
+      );
     }
 
     const rl = readline.createInterface({
@@ -42,11 +47,13 @@ class BasePage {
     });
 
     await new Promise((resolve) => {
-      rl.question('', () => {
+      rl.question('Press ENTER when ready > ', () => {
         rl.close();
         resolve();
       });
     });
+
+    console.log('[Manual Step] Continuing...');
   }
 }
 

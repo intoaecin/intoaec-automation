@@ -11,6 +11,15 @@ class EventPage extends BasePage {
     this.selectFeaturesInput = page.getByRole('textbox', { name: /select feature\(s\)/i });
     this.eventsMenuItem = page.getByRole('menuitem', { name: /^events?$/i });
     this.eventsTab = page.getByRole('tab', { name: /^events?$/i });
+    this.clientMenuPanel = page.locator(
+      'nav, aside, .MuiDrawer-root, .MuiTabs-root, [class*="sidebar"], [class*="feature"]'
+    );
+    this.leadFeatureSidebar = page.locator('aside').filter({ visible: true });
+    this.classicUiToggle = page
+      .getByRole('button', { name: /classic ui/i })
+      .or(page.getByRole('switch', { name: /classic ui/i }))
+      .or(page.locator('label').filter({ hasText: /classic ui/i }))
+      .first();
     this.actionButton = page.getByRole('button', { name: /^choose action$/i });
     this.createMeetingMenuItem = page.getByRole('menuitem', { name: /^create meeting$/i });
     this.createMeetingPanel = page
@@ -36,15 +45,15 @@ class EventPage extends BasePage {
       .first();
     this.confirmDialog = page
       .getByRole('dialog')
-      .filter({ hasText: /delete|confirm|remove|meeting/i })
+      .filter({ hasText: /are you sure|cancel the meeting|delete|confirm|remove/i })
       .first();
     this.confirmYesButton = page
       .getByRole('button', { name: /^yes$|^delete$|^confirm$|^ok$/i })
       .or(page.locator('button').filter({ hasText: /^yes$/i }))
       .first();
     this.confirmCancelButton = page
-      .getByRole('button', { name: /^cancel$/i })
-      .or(page.locator('button').filter({ hasText: /^cancel$/i }))
+      .getByRole('button', { name: /^(no|cancel)$/i })
+      .or(page.locator('button').filter({ hasText: /^(no|cancel)$/i }))
       .first();
   }
 
@@ -82,7 +91,8 @@ class EventPage extends BasePage {
 
   eventsMeetingTypeTablist() {
     return this.page
-      .getByRole('tablist', { name: /tabs as buttons/i })
+      .getByRole('tablist', { name: /tabs as buttons|meeting type|upcoming|event/i })
+      .or(this.page.getByRole('tab', { name: /^(online|offline|upcoming|past)$/i }).locator('xpath=ancestor::*[@role="tablist"][1]'))
       .or(this.page.locator('[role="tablist"]').filter({ visible: true }).first());
   }
 
@@ -162,24 +172,32 @@ class EventPage extends BasePage {
     return this.panel().locator('#to-time-picker');
   }
 
-  timePickerTrigger(pickerId) {
+  scheduleTimeCombobox(scope, captionLabel) {
+    return scope
+      .locator('span.MuiTypography-caption')
+      .filter({ hasText: new RegExp(`^\\s*${captionLabel}\\s*$`, 'i') })
+      .locator('xpath=..')
+      .locator('.MuiAutocomplete-root input[role="combobox"]');
+  }
+
+  timePickerTrigger(pickerId, captionLabel) {
     const formControl = this.panel()
       .locator(`#${pickerId}`)
       .locator('xpath=ancestor::div[contains(@class,"MuiFormControl") or contains(@class,"MuiInputBase-root")][1]');
 
-    return formControl
-      .getByRole('combobox')
+    return this.scheduleTimeCombobox(this.panel(), captionLabel)
+      .or(formControl.getByRole('combobox'))
       .or(formControl.locator('.MuiSelect-select'))
       .or(this.panel().locator(`#${pickerId}`))
       .first();
   }
 
   fromTimePickerTrigger() {
-    return this.timePickerTrigger('from-time-picker');
+    return this.timePickerTrigger('from-time-picker', 'From');
   }
 
   toTimePickerTrigger() {
-    return this.timePickerTrigger('to-time-picker');
+    return this.timePickerTrigger('to-time-picker', 'To');
   }
 
   timezoneCombobox() {
@@ -194,13 +212,17 @@ class EventPage extends BasePage {
 
   locationInput() {
     return this.panel()
-      .locator('label')
-      .filter({ hasText: /^location$/i })
-      .first()
-      .locator('..')
-      .locator('input.pac-target-input, input[type="text"]')
-      .first()
-      .or(this.panel().getByPlaceholder(/enter your location/i));
+      .locator('#meeting-location')
+      .or(this.panel().getByPlaceholder(/enter your location/i))
+      .or(this.panel().locator('input.pac-target-input'))
+      .first();
+  }
+
+  companyLocationSwitch() {
+    return this.panel()
+      .getByRole('switch', { name: /company location/i })
+      .or(this.panel().locator('label').filter({ hasText: /company location/i }).getByRole('checkbox'))
+      .first();
   }
 
   notificationTypeCombobox() {
@@ -240,7 +262,7 @@ class EventPage extends BasePage {
 
   submitUpdateMeetingButton() {
     return this.panel()
-      .getByRole('button', { name: /^update meeting$|^save$|^update$/i })
+      .getByRole('button', { name: /^save meeting$|^update meeting$|^save$|^update$/i })
       .filter({ visible: true })
       .last();
   }
@@ -364,9 +386,23 @@ class EventPage extends BasePage {
     return this.page.getByText(/request failed with status code|something went wrong|failed/i);
   }
 
+  async isShownWithin(locator, timeout) {
+    return locator
+      .waitFor({ state: 'visible', timeout })
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  async hideChatWidget() {
+    await this.page.locator('#fc_frame').evaluate((el) => {
+      el.style.setProperty('display', 'none', 'important');
+    }).catch(() => {});
+  }
+
   async dismissOpenMenus() {
+    await this.hideChatWidget();
     await this.page.keyboard.press('Escape').catch(() => {});
-    await this.page.waitForTimeout(200);
+    await this.actionMenu.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
   }
 
   getMeetingCard(title) {
@@ -396,7 +432,7 @@ class EventPage extends BasePage {
     await firstCell.hover();
 
     const menuButton = this.getMeetingRowMenuButton(row);
-    if (!(await menuButton.isVisible({ timeout: 3000 }).catch(() => false))) {
+    if (!(await this.isShownWithin(menuButton, 3000))) {
       await row.hover({ force: true });
       await firstCell.hover({ force: true });
     }
@@ -413,7 +449,7 @@ class EventPage extends BasePage {
     await expect(menuButton).toBeVisible({ timeout: 10000 });
     await menuButton.click({ timeout: 10000 });
 
-    if (!(await this.actionMenu.isVisible({ timeout: 5000 }).catch(() => false))) {
+    if (!(await this.isShownWithin(this.actionMenu, 5000))) {
       throw new Error(`Action menu did not open for meeting "${title}"`);
     }
   }
@@ -465,9 +501,8 @@ class EventPage extends BasePage {
       }
 
       await actionButton.click({ timeout: 15000, force: attempt > 0 });
-      await this.page.waitForTimeout(300);
 
-      if (await this.actionMenu.isVisible({ timeout: 4000 }).catch(() => false)) {
+      if (await this.isShownWithin(this.actionMenu, 4000)) {
         return;
       }
     }
@@ -480,7 +515,7 @@ class EventPage extends BasePage {
     await this.navigateToFirstAvailableLead();
     if (/leadmanager\/profile/i.test(this.page.url())) {
       await this.page.reload({ waitUntil: 'domcontentloaded' });
-      await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+      await this.waitForLeadProfileReady();
       await this.dismissCreateMeetingPanel();
     }
     await this.openEventsModule();
@@ -533,36 +568,135 @@ class EventPage extends BasePage {
     await expect(panel).toBeHidden({ timeout: 10000 }).catch(() => {});
   }
 
+  isOnLeadProfile() {
+    return /leadmanager\/profile/i.test(this.page.url());
+  }
+
+  getEventsSidebarEntry() {
+    return this.page
+      .locator('aside, .MuiListItemButton-root, div.MuiBox-root, div.MuiPaper-root')
+      .locator('div, button, a, label, span, p')
+      .filter({ hasText: /^events?$/i })
+      .first();
+  }
+
+  getProjectSidebarScrollTarget() {
+    return this.page
+      .locator('.MuiListItemButton-root')
+      .filter({ hasText: /^overview$/i })
+      .first()
+      .locator('xpath=ancestor::div[contains(@style,"overflow")][1]');
+  }
+
+  async isEventsPresentInClientMenu() {
+    const menuItemVisible = await this.eventsMenuItem.first().isVisible().catch(() => false);
+    const tabVisible = await this.eventsTab.isVisible().catch(() => false);
+    const sidebarVisible = await this.getEventsSidebarEntry().isVisible().catch(() => false);
+    const sidebarButtonVisible = await this.page
+      .getByRole('button', { name: /^events?$/i })
+      .first()
+      .isVisible()
+      .catch(() => false);
+    const toolbarVisible = await this.actionButton.first().isVisible({ timeout: 1500 }).catch(() => false);
+    return menuItemVisible || tabVisible || sidebarVisible || sidebarButtonVisible || toolbarVisible;
+  }
+
+  async waitForLeadProfileReady() {
+    console.log('[EventPage] Waiting for lead profile to be ready');
+    await this.page.waitForURL(/leadmanager\/profile/i, { timeout: this.defaultTimeout }).catch(() => {});
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+
+    await expect(async () => {
+      const featureInputVisible = await this.selectFeaturesInput.first().isVisible().catch(() => false);
+      const featureLabelVisible = await this.page.getByText(/select feature\(s\)/i).first().isVisible().catch(() => false);
+      const sidebarVisible = await this.leadFeatureSidebar.first().isVisible().catch(() => false);
+      const classicUiVisible = await this.classicUiToggle.isVisible().catch(() => false);
+      const eventsVisible = await this.isEventsPresentInClientMenu();
+      expect(featureInputVisible || featureLabelVisible || sidebarVisible || classicUiVisible || eventsVisible).toBeTruthy();
+    }).toPass({ timeout: 30000, intervals: [500, 1000, 2000] });
+  }
+
   async navigateToFirstAvailableLead() {
     console.log('[EventPage] Navigating to the first available lead');
     await this.dismissCreateMeetingPanel();
 
-    if (/leadmanager\/profile/i.test(this.page.url())) {
-      console.log('[EventPage] Already on lead profile — skipping Lead Manager navigation');
+    if (this.isOnLeadProfile()) {
+      console.log('[EventPage] Lead profile already open');
+      await this.waitForLeadProfileReady().catch(() => {});
       return;
     }
 
-    await this.navigationPage.clickCrmDropdown();
-    await this.navigationPage.clickLeadManager();
-    await expect(this.navigationPage.leadRows.first()).toBeVisible({ timeout: this.defaultTimeout });
-    await this.navigationPage.clickFirstLeadFromTable();
+    console.log('[EventPage] Navigating to lead profile via CRM > Lead Manager');
+    await this.navigationPage.navigateToFirstLead();
+    await this.waitForLeadProfileReady();
   }
 
-  async openEventsModule() {
-    console.log('[EventPage] Opening Events module');
-    await this.dismissCreateMeetingPanel();
+  async scrollClientMenuForEvents() {
+    console.log('[EventPage] Scrolling client menu to find Events');
+    const scrollTargets = [
+      this.getProjectSidebarScrollTarget(),
+      this.leadFeatureSidebar.nth(1),
+      this.leadFeatureSidebar.first(),
+      this.clientMenuPanel.filter({ visible: true }).first(),
+    ];
 
-    if (await this.actionButton.first().isVisible({ timeout: 5000 }).catch(() => false)) {
-      console.log('[EventPage] Events module already open');
+    for (const target of scrollTargets) {
+      if (!(await target.isVisible({ timeout: 2000 }).catch(() => false))) {
+        continue;
+      }
+
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        if (await this.isEventsPresentInClientMenu()) {
+          return true;
+        }
+
+        await target.evaluate((el) => {
+          el.scrollBy(0, 350);
+        }).catch(() => {});
+      }
+    }
+
+    return this.isEventsPresentInClientMenu();
+  }
+
+  async expandOthersSectionIfNeeded() {
+    const othersAccordion = this.page
+      .locator('.MuiAccordion-root')
+      .filter({ hasText: /others/i })
+      .first();
+
+    if (!(await othersAccordion.isVisible({ timeout: 2000 }).catch(() => false))) {
       return;
     }
 
-    if (await this.eventsTab.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await this.eventsTab.click();
-      await expect(this.actionButton.first()).toBeVisible({ timeout: this.defaultTimeout });
-      return;
-    }
+    const isExpanded = await othersAccordion
+      .evaluate((el) => el.classList.contains('Mui-expanded'))
+      .catch(() => true);
 
+    if (!isExpanded) {
+      console.log('[EventPage] Expanding Others section in project sidebar');
+      await othersAccordion.locator('.MuiAccordionSummary-root').click({ timeout: 15000 });
+      await expect(othersAccordion).toHaveClass(/Mui-expanded/, { timeout: 15000 });
+    }
+  }
+
+  async clickEventsInSidebar() {
+    console.log('[EventPage] Opening Events from lead profile sidebar');
+    await this.expandOthersSectionIfNeeded();
+    await this.scrollClientMenuForEvents();
+
+    const eventsEntry = this.getEventsSidebarEntry()
+      .or(this.page.getByRole('button', { name: /^events?$/i }))
+      .or(this.page.locator('.MuiListItemButton-root').filter({ hasText: /^events?$/i }))
+      .first();
+
+    await expect(eventsEntry).toBeVisible({ timeout: this.defaultTimeout });
+    await eventsEntry.scrollIntoViewIfNeeded().catch(() => {});
+    await eventsEntry.click({ timeout: 15000 });
+  }
+
+  async openEventsViaFeatureSelector() {
+    console.log('[EventPage] Opening Events via Select Feature(s) search');
     const featureSelector = this.selectFeaturesInput.first();
     await expect(featureSelector).toBeVisible({ timeout: this.defaultTimeout });
     await featureSelector.click();
@@ -571,16 +705,98 @@ class EventPage extends BasePage {
     await expect(featureSearch).toBeVisible({ timeout: this.defaultTimeout });
     await featureSearch.fill('event');
 
-    await expect(this.eventsMenuItem.first()).toBeVisible({ timeout: this.defaultTimeout });
-    await this.eventsMenuItem.first().click();
-    await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-    await expect(this.actionButton.first()).toBeVisible({ timeout: this.defaultTimeout });
+    const eventsInMenu = this.eventsMenuItem
+      .or(this.page.getByRole('menuitem', { name: /^events?$/i }))
+      .first();
+    await expect(eventsInMenu).toBeVisible({ timeout: this.defaultTimeout });
+    await eventsInMenu.scrollIntoViewIfNeeded().catch(() => {});
+    await eventsInMenu.click({ timeout: 15000 });
+  }
+
+  async openEventsViaUrlFallback() {
+    console.log('[EventPage] Opening Events via tab URL fallback');
+    const url = new URL(this.page.url());
+    url.searchParams.set('tab', 'Events');
+    await this.page.goto(url.toString(), {
+      waitUntil: 'domcontentloaded',
+      timeout: this.defaultTimeout,
+    });
+  }
+
+  async isOnEventsModule() {
+    const onTab = /tab=(Events|Event)/i.test(this.page.url());
+    const actionVisible = await this.actionButton.first().isVisible({ timeout: 1500 }).catch(() => false);
+    return (onTab || this.isOnLeadProfile()) && actionVisible;
+  }
+
+  async waitForEventsModuleReady() {
+    console.log('[EventPage] Waiting for Events module toolbar');
+    await this.page.waitForURL(/tab=(Events|Event)/i, { timeout: this.defaultTimeout }).catch(() => {});
+    await expect(async () => {
+      const actionVisible = await this.actionButton.first().isVisible().catch(() => false);
+      expect(actionVisible).toBeTruthy();
+    }).toPass({ timeout: this.defaultTimeout, intervals: [500, 1000, 2000, 3000] });
+  }
+
+  async openEventsModule() {
+    console.log('[EventPage] Opening Events module');
+    await this.dismissCreateMeetingPanel();
+
+    if (await this.isOnEventsModule()) {
+      await this.waitForEventsModuleReady();
+      return;
+    }
+
+    await this.navigateToFirstAvailableLead();
+
+    if (await this.getEventsSidebarEntry().isVisible({ timeout: 3000 }).catch(() => false)) {
+      try {
+        await this.clickEventsInSidebar();
+        await this.waitForEventsModuleReady();
+        return;
+      } catch (error) {
+        console.warn(`[EventPage] Sidebar path failed: ${error.message}`);
+      }
+    } else {
+      try {
+        await this.clickEventsInSidebar();
+        await this.waitForEventsModuleReady();
+        return;
+      } catch (error) {
+        console.warn(`[EventPage] Sidebar scroll path failed: ${error.message}`);
+      }
+    }
+
+    if (await this.eventsTab.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await this.eventsTab.click();
+      await this.waitForEventsModuleReady();
+      return;
+    }
+
+    if (await this.selectFeaturesInput.first().isVisible({ timeout: 5000 }).catch(() => false)) {
+      try {
+        await this.openEventsViaFeatureSelector();
+        await this.waitForEventsModuleReady();
+        return;
+      } catch (error) {
+        console.warn(`[EventPage] Select Feature(s) path failed: ${error.message}`);
+      }
+    }
+
+    await this.openEventsViaUrlFallback();
+    await this.waitForEventsModuleReady();
+  }
+
+  async clearHoverTooltips() {
+    await this.page.mouse.move(0, 0);
+    await expect(this.page.getByRole('tooltip').filter({ visible: true })).toHaveCount(0, { timeout: 15000 });
   }
 
   async openActionMenu() {
     console.log('[EventPage] Opening Events action menu');
     const actionButton = this.actionButton.first();
     await expect(actionButton).toBeVisible({ timeout: this.defaultTimeout });
+    await this.clearHoverTooltips();
     await actionButton.click();
   }
 
@@ -629,34 +845,22 @@ class EventPage extends BasePage {
 
   async switchCreateMeetingTypeIfNeeded(meetingType) {
     const normalizedType = String(meetingType).toLowerCase();
-
-    if (normalizedType === 'offline') {
-      const agendaVisible = await this.agendaInput().isVisible({ timeout: 2000 }).catch(() => false);
-      if (agendaVisible) {
-        console.log('[EventPage] Offline meeting form already active');
-        return;
-      }
-    }
-
-    if (normalizedType === 'online') {
-      const titleVisible = await this.titleInput().isVisible({ timeout: 2000 }).catch(() => false);
-      const fromTimeVisible = await this.fromTimePickerTrigger().isVisible({ timeout: 2000 }).catch(() => false);
-      if (titleVisible && fromTimeVisible) {
-        console.log('[EventPage] Online meeting form already active');
-        return;
-      }
-    }
-
     const tab = this.meetingTypeTab(normalizedType);
-    if (!(await tab.isVisible({ timeout: 3000 }).catch(() => false))) {
+
+    if (!(await this.isShownWithin(tab, 5000))) {
       console.log(`[EventPage] ${normalizedType} tab not found in Create Meeting drawer — using current form`);
+      return;
+    }
+
+    if ((await tab.getAttribute('aria-selected')) === 'true') {
+      console.log(`[EventPage] ${normalizedType} meeting form already active`);
       return;
     }
 
     console.log(`[EventPage] Clicking ${normalizedType} tab in Create Meeting drawer`);
     await tab.scrollIntoViewIfNeeded().catch(() => {});
     await tab.click({ force: true });
-    await this.page.waitForTimeout(500);
+    await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: 15000 });
   }
 
   async ensureMeetingTabSelected(tabName) {
@@ -681,7 +885,7 @@ class EventPage extends BasePage {
 
     const listbox = this.page.getByRole('listbox').filter({ visible: true }).last();
     const menuOptions = this.page.locator('.MuiMenu-paper [role="option"]').filter({ visible: true });
-    const hasListbox = await listbox.isVisible({ timeout: 5000 }).catch(() => false);
+    const hasListbox = await this.isShownWithin(listbox, 5000);
     const options = hasListbox ? listbox.getByRole('option') : menuOptions;
 
     await expect(options.first()).toBeVisible({ timeout: 15000 });
@@ -694,7 +898,8 @@ class EventPage extends BasePage {
     if ((await option.count()) === 0) {
       option = optionByText;
     }
-    if ((await option.count()) === 0) {
+    const exactMatch = (await option.count()) > 0;
+    if (!exactMatch) {
       option = options.first();
       console.log(`[EventPage] Exact time "${normalizedTime}" not found — selecting first available option`);
     }
@@ -702,6 +907,11 @@ class EventPage extends BasePage {
     await option.scrollIntoViewIfNeeded().catch(() => {});
     await option.click({ force: true });
     await listbox.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+
+    const isTextInput = await pickerTrigger.evaluate((el) => el.tagName === 'INPUT').catch(() => false);
+    if (exactMatch && isTextInput) {
+      await expect(pickerTrigger).toHaveValue(new RegExp(`^\\s*${escapedTime}\\s*$`, 'i'), { timeout: 15000 });
+    }
   }
 
   async selectMuiComboboxOption(combobox, optionText) {
@@ -736,7 +946,22 @@ class EventPage extends BasePage {
     await expect(participantInput).toBeVisible({ timeout: 15000 });
   }
 
+  async ensureCustomLocationEnabled() {
+    const locationSwitch = this.companyLocationSwitch();
+    if (await this.isShownWithin(locationSwitch, 5000)) {
+      if (await locationSwitch.isChecked().catch(() => false)) {
+        console.log('[EventPage] Turning Company Location off so the address can be typed');
+        await locationSwitch.click();
+      }
+    }
+
+    const location = this.locationInput();
+    await expect(location).toBeVisible({ timeout: 15000 });
+    await expect(location).toBeEnabled({ timeout: 15000 });
+  }
+
   async fillLocationWithAutocomplete(locationText) {
+    await this.ensureCustomLocationEnabled();
     const location = this.locationInput();
     await location.fill(locationText);
     const suggestion = this.page.locator('.pac-container .pac-item').first();
@@ -796,9 +1021,11 @@ class EventPage extends BasePage {
     if (await location.isVisible({ timeout: 3000 }).catch(() => false)) {
       if (includeLocation) {
         await this.fillLocationWithAutocomplete(this.meetingData.location);
-      } else {
+      } else if (await location.isEnabled().catch(() => false)) {
         console.log('[EventPage] Leaving location empty');
         await expect(location).toHaveValue('');
+      } else {
+        console.log('[EventPage] Location is filled by Company Location — leaving the switch on');
       }
     }
 
@@ -879,7 +1106,6 @@ class EventPage extends BasePage {
       console.log(`[EventPage] Meeting create API responded with status ${response.status()}`);
     }
 
-    await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
     await expect(this.createMeetingPanel.first()).toBeHidden({ timeout: this.defaultTimeout }).catch(() => {});
   }
 
@@ -901,8 +1127,6 @@ class EventPage extends BasePage {
       await tab.click();
       await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: this.defaultTimeout });
     }
-
-    await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
   }
 
   async verifyMeetingVisibleInEventsTab(tabName) {
