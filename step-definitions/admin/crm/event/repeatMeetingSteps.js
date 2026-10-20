@@ -1,5 +1,5 @@
 const { When, Then } = require('@cucumber/cucumber');
-const RepeatMeetingPage = require('../../../../../pages/admin/crm/lead-profile/event/RepeatMeetingPage');
+const RepeatMeetingPage = require('../../../../pages/admin/crm/event/RepeatMeetingPage');
 
 function getRepeatMeetingPage(world) {
   if (!world.repeatMeetingPage) {

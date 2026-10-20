@@ -1,5 +1,5 @@
 const { When, Then } = require('@cucumber/cucumber');
-const DeclinedProposalPage = require('../../../../pages/admin/common/proposal/DeclinedProposalPage');
+const DeclinedProposalPage = require('../../../../pages/admin/crm/proposal/DeclinedProposalPage');
 const { getProposalFlowPage } = require('./proposalFlow.steps');
 
 When('I decline the proposal choosing a reason', { timeout: 180000 }, async function () {

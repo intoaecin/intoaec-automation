@@ -13,8 +13,8 @@
 const { When, Then } = require('@cucumber/cucumber');
 const { expect } = require('@playwright/test');
 const ProposalPage = require('../../../../pages/admin/common/ProposalPage');
-const ProposalBuilderPage = require('../../../../pages/admin/common/proposal/ProposalBuilderPage');
-const { EMBEDDED_JPEG_DATA_URL } = require('../../../../pages/admin/common/proposal/proposalEmbeddedTestImage');
+const ProposalBuilderPage = require('../../../../pages/admin/crm/proposal/ProposalBuilderPage');
+const { EMBEDDED_JPEG_DATA_URL } = require('../../../../pages/admin/crm/proposal/proposalEmbeddedTestImage');
 
 function getProposalPage(world) {
   if (!world.proposalPage) {

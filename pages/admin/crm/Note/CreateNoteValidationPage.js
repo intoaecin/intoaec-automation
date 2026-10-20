@@ -219,53 +219,48 @@ class CreateNoteValidationPage extends NotePage {
     }).toPass({ timeout: 30000, intervals: [500, 1000, 2000] });
   }
 
+  async expectFieldMaxLengthEnforced(fieldLabel, actualLength, maxLength, typedLength, uiMaxLength) {
+    const maxLengthMessage = await this.isValidationTextVisible(
+      /maximum|max.*character|too long|character limit|exceed.*limit/i
+    );
+    const truncated = actualLength <= maxLength;
+    if (!truncated && !maxLengthMessage) {
+      throw new Error(
+        `[CreateNoteValidationPage] Application mismatch: ${fieldLabel} accepted ${actualLength} of ` +
+          `${typedLength} typed characters (expected limit ${maxLength}, maxlength attribute: ` +
+          `${uiMaxLength ?? 'none'}) and no max-length message was shown.`
+      );
+    }
+  }
+
   async expectTitleMaxLengthValidation() {
     console.log('[CreateNoteValidationPage] Expecting title max length validation or restriction');
     const maxLength = await this.resolveTitleMaxLength();
-    await expect(async () => {
-      const maxLengthMessage = await this.isValidationTextVisible(
-        /maximum|max.*character|too long|character limit|exceed.*limit/i
-      );
-      const titleInvalid = await this.isTitleFieldInvalid();
-      const actualLength = await this.nameInput.inputValue().catch(() => '');
-      const truncated = actualLength.length <= maxLength;
-      const formStillOpen = await this.isNoteFormOpen();
-      expect(maxLengthMessage || titleInvalid || truncated || formStillOpen).toBeTruthy();
-    }).toPass({ timeout: 30000, intervals: [500, 1000, 2000] });
+    const typedLength = this.validationData.titleExceedingLimit(maxLength).length;
+    await expect(this.nameInput).toBeVisible({ timeout: this.defaultTimeout });
+    const actualValue = await this.nameInput.inputValue().catch(() => '');
+    const uiMaxLength = await this.nameInput.getAttribute('maxlength').catch(() => null);
+    await this.expectFieldMaxLengthEnforced(
+      'Title',
+      String(actualValue || '').length,
+      maxLength,
+      typedLength,
+      uiMaxLength
+    );
   }
 
   async expectParagraphMaxLengthValidation() {
     console.log('[CreateNoteValidationPage] Expecting paragraph maximum character validation or restriction');
     const maxLength = await this.resolveParagraphMaxLength();
     const typedLength = this.validationData.paragraphExceedingLimit(maxLength).length;
-    const uiMaxLength = await this.descriptionInput.getAttribute('maxlength').catch(() => null);
-
     await expect(this.descriptionInput).toBeVisible({ timeout: this.defaultTimeout });
-
+    const uiMaxLength = await this.descriptionInput.getAttribute('maxlength').catch(() => null);
     const actualText =
       (await this.descriptionInput.innerText().catch(() => '')) ||
       (await this.descriptionInput.inputValue().catch(() => '')) ||
       '';
     const actualLength = actualText.replace(/\u200b/g, '').trim().length;
-
-    if (uiMaxLength) {
-      expect(actualLength).toBeLessThanOrEqual(maxLength);
-      return;
-    }
-
-    const maxLengthMessage = await this.isValidationTextVisible(
-      /maximum|max.*character|too long|character limit|exceed.*limit/i
-    );
-    const paragraphInvalid = await this.isParagraphFieldInvalid();
-    const formStillOpen = await this.isNoteFormOpen();
-    // App currently has no paragraph maxlength — accept full typed value, a message, or form still open.
-    expect(
-      maxLengthMessage ||
-        paragraphInvalid ||
-        actualLength === typedLength ||
-        actualLength >= maxLength ||
-        formStillOpen
-    ).toBeTruthy();
+    await this.expectFieldMaxLengthEnforced('Paragraph', actualLength, maxLength, typedLength, uiMaxLength);
   }
 
   async expectSpecialCharacterInputHandled() {
@@ -283,38 +278,52 @@ class CreateNoteValidationPage extends NotePage {
     }).toPass({ timeout: 30000, intervals: [500, 1000, 2000] });
   }
 
+  async isFileAttached() {
+    return this.page
+      .locator('input[type="file"]')
+      .last()
+      .evaluate((el) => (el.files?.length || 0) > 0)
+      .catch(() => false);
+  }
+
   async expectUnsupportedFileValidation() {
     console.log('[CreateNoteValidationPage] Expecting unsupported file validation');
-    await expect(async () => {
-      const unsupportedCopy = await this.isValidationTextVisible(
-        /unsupported|invalid file|file type|not allowed|allowed format|extension|invalid attachment/i
-      );
-      const alertError = await this.page
-        .locator('.MuiAlert-root, [role="alert"]')
-        .filter({ hasText: /file|upload|attachment|unsupported|invalid/i })
-        .first()
-        .isVisible()
-        .catch(() => false);
-      const formStillOpen = await this.isNoteFormOpen();
-      expect(unsupportedCopy || alertError || formStillOpen).toBeTruthy();
-    }).toPass({ timeout: 30000, intervals: [500, 1000, 2000] });
+    const unsupportedCopy = await this.isValidationTextVisible(
+      /unsupported|invalid file|file type|not allowed|allowed format|extension|invalid attachment/i
+    );
+    const alertError = await this.page
+      .locator('.MuiAlert-root, [role="alert"], .Toastify__toast')
+      .filter({ hasText: /file|upload|attachment|unsupported|invalid/i })
+      .first()
+      .isVisible()
+      .catch(() => false);
+    const attached = await this.isFileAttached();
+    if (unsupportedCopy || alertError || !attached) {
+      return;
+    }
+    throw new Error(
+      '[CreateNoteValidationPage] Application mismatch: unsupported .exe attachment was accepted with no file-type validation.'
+    );
   }
 
   async expectOversizedFileValidation() {
     console.log('[CreateNoteValidationPage] Expecting oversized file validation');
-    await expect(async () => {
-      const sizeCopy = await this.isValidationTextVisible(
-        /file size|too large|maximum size|exceeds|size limit|mb|kb/i
-      );
-      const alertError = await this.page
-        .locator('.MuiAlert-root, [role="alert"]')
-        .filter({ hasText: /file|upload|attachment|size|large/i })
-        .first()
-        .isVisible()
-        .catch(() => false);
-      const formStillOpen = await this.isNoteFormOpen();
-      expect(sizeCopy || alertError || formStillOpen).toBeTruthy();
-    }).toPass({ timeout: 30000, intervals: [500, 1000, 2000] });
+    const sizeCopy = await this.isValidationTextVisible(
+      /file size|too large|maximum size|exceeds|size limit|mb|kb/i
+    );
+    const alertError = await this.page
+      .locator('.MuiAlert-root, [role="alert"], .Toastify__toast')
+      .filter({ hasText: /file|upload|attachment|size|large/i })
+      .first()
+      .isVisible()
+      .catch(() => false);
+    const attached = await this.isFileAttached();
+    if (sizeCopy || alertError || !attached) {
+      return;
+    }
+    throw new Error(
+      `[CreateNoteValidationPage] Application mismatch: oversized attachment (${this.validationData.maxFileSizeMb + 1} MB) was accepted with no size validation.`
+    );
   }
 }
 

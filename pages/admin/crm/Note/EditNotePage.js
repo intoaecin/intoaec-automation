@@ -76,7 +76,7 @@ class EditNotePage extends NotePage {
       ? response.status() >= 200 && response.status() < 300
       : null;
 
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await this.waitUntilNoteFormClosed().catch(() => {});
     await expect(this.nameInput).toBeHidden({ timeout: 30000 });
     await this.clearNotesSearch();
     await this.waitForEditedNoteInList({ timeout: 45000 });
@@ -161,7 +161,6 @@ class EditNotePage extends NotePage {
 
     await this.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: this.defaultTimeout });
     await notesApiPromise;
-    await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
     await this.waitForNotesModuleReady();
     await this.waitForNotesListLoaded();
     await this.clearNotesSearch();
@@ -232,7 +231,7 @@ class EditNotePage extends NotePage {
     const title = this.originalTitleForValidation;
     if (title) {
       const display = this.toDisplayedNoteTitle(title);
-      await this.page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+      await this.waitForNotesListLoaded().catch(() => {});
       await this.openNotesModule().catch(() => {});
 
       const stillVisible = await expect(async () => {
@@ -258,19 +257,6 @@ class EditNotePage extends NotePage {
         console.log(`[EditNotePage] Note still present after empty ${this.editValidationKind} save — empty update not applied`);
         return;
       }
-    }
-
-    // Update success toast without wiping fields also means empty content was not persisted as blank.
-    const updateSuccessToast = await this.page
-      .locator('.Toastify__toast, .MuiAlert-root, [role="alert"]')
-      .filter({ hasText: /notes updated successfully|updated successfully|note.*updated/i })
-      .first()
-      .isVisible()
-      .catch(() => false);
-    if (updateSuccessToast) {
-      this.editValidationFallbackOk = true;
-      console.log('[EditNotePage] Update succeeded after clear — treating as non-blank persistence');
-      return;
     }
 
     console.warn('[EditNotePage] No toast / form / note presence signal after empty-field Save');

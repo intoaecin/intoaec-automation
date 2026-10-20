@@ -1,5 +1,5 @@
 const { When, Then } = require('@cucumber/cucumber');
-const EditCallLogPage = require('../../../../pages/admin/common/CallLog/EditCallLogPage');
+const EditCallLogPage = require('../../../../pages/admin/crm/CallLog/EditCallLogPage');
 
 function getEditCallLogPage(world) {
   if (!world.editCallLogPage) {

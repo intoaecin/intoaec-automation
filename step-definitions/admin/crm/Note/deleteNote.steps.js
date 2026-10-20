@@ -1,5 +1,5 @@
 const { When, Then } = require('@cucumber/cucumber');
-const DeleteNotePage = require('../../../../pages/admin/common/Note/DeleteNotePage');
+const DeleteNotePage = require('../../../../pages/admin/crm/Note/DeleteNotePage');
 
 function getDeleteNotePage(world) {
   if (!world.deleteNotePage) {

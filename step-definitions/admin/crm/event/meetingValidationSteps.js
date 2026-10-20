@@ -1,5 +1,5 @@
 const { When, Then } = require('@cucumber/cucumber');
-const MeetingValidationPage = require('../../../../../pages/admin/crm/lead-profile/event/MeetingValidationPage');
+const MeetingValidationPage = require('../../../../pages/admin/crm/event/MeetingValidationPage');
 
 function getMeetingValidationPage(world) {
   if (!world.meetingValidationPage) {

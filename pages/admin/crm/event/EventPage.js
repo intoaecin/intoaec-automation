@@ -1,6 +1,6 @@
 const { expect } = require('@playwright/test');
-const BasePage = require('../../../../BasePage');
-const NavigationPage = require('../../../common/NavigationPage');
+const BasePage = require('../../../BasePage');
+const NavigationPage = require('../../common/NavigationPage');
 
 class EventPage extends BasePage {
   constructor(page) {

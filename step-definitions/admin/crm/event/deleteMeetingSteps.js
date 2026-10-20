@@ -1,5 +1,5 @@
 const { When, Then } = require('@cucumber/cucumber');
-const DeleteMeetingPage = require('../../../../../pages/admin/crm/lead-profile/event/DeleteMeetingPage');
+const DeleteMeetingPage = require('../../../../pages/admin/crm/event/DeleteMeetingPage');
 
 function getDeleteMeetingPage(world) {
   if (!world.deleteMeetingPage) {

@@ -1,7 +1,7 @@
 const { expect } = require('@playwright/test');
 const BasePage = require('../../../BasePage');
 const ProposalPage = require('../../../admin/common/ProposalPage');
-const NavigationPage = require('../NavigationPage');
+const NavigationPage = require('../../common/NavigationPage');
 
 function escapeRegExp(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

@@ -1,5 +1,5 @@
 const { After, When, Then } = require('@cucumber/cucumber');
-const EventPage = require('../../../../../pages/admin/crm/lead-profile/event/EventPage');
+const EventPage = require('../../../../pages/admin/crm/event/EventPage');
 
 function getEventPage(world) {
   if (!world.eventPage) {

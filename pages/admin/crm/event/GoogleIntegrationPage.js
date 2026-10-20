@@ -1,6 +1,6 @@
 const { expect } = require('@playwright/test');
 const LeadEventsPage = require('./LeadEventsPage');
-const GoogleIntegrationStorage = require('../../../../../support/googleIntegrationStorage');
+const GoogleIntegrationStorage = require('../../../../support/googleIntegrationStorage');
 
 class GoogleIntegrationPage extends LeadEventsPage {
   configureGoogleAccountHeading() {

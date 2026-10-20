@@ -98,7 +98,7 @@ After({ tags: '@note' }, async function () {
   if (!this.page || this.page.isClosed()) return;
 
   try {
-    const EditNotePage = require('../pages/admin/common/Note/EditNotePage');
+    const EditNotePage = require('../pages/admin/crm/Note/EditNotePage');
     const notePage = this.editNotePage || new EditNotePage(this.page);
     await notePage.dismissOpenMenus();
     await notePage.closeNoteFormIfOpen();

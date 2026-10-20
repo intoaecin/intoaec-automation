@@ -4,11 +4,11 @@
  * The flow page chosen in the first step is cached on the world for the scenario-specific steps.
  */
 const { Given, When, After } = require('@cucumber/cucumber');
-const AcceptedProposalPage = require('../../../../pages/admin/common/proposal/AcceptedProposalPage');
-const DeclinedProposalPage = require('../../../../pages/admin/common/proposal/DeclinedProposalPage');
-const CommentByLeadPage = require('../../../../pages/admin/common/proposal/CommentByLeadPage');
-const CommentByAecPage = require('../../../../pages/admin/common/proposal/CommentByAecPage');
-const EditProposalPage = require('../../../../pages/admin/common/proposal/EditProposalPage');
+const AcceptedProposalPage = require('../../../../pages/admin/crm/proposal/AcceptedProposalPage');
+const DeclinedProposalPage = require('../../../../pages/admin/crm/proposal/DeclinedProposalPage');
+const CommentByLeadPage = require('../../../../pages/admin/crm/proposal/CommentByLeadPage');
+const CommentByAecPage = require('../../../../pages/admin/crm/proposal/CommentByAecPage');
+const EditProposalPage = require('../../../../pages/admin/crm/proposal/EditProposalPage');
 
 const PROPOSAL_FLOWS = {
   send: { worldKey: 'proposalSendFlowPage', PageClass: AcceptedProposalPage },

@@ -1,5 +1,5 @@
 const { When, Then } = require('@cucumber/cucumber');
-const AcceptedProposalPage = require('../../../../pages/admin/common/proposal/AcceptedProposalPage');
+const AcceptedProposalPage = require('../../../../pages/admin/crm/proposal/AcceptedProposalPage');
 const { getProposalFlowPage } = require('./proposalFlow.steps');
 
 function getAcceptedProposalPage(world) {

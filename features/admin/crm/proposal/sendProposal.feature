@@ -8,10 +8,10 @@ Feature: Build Proposal From Client Profile
   # - Proceeds through the send stepper and sends via Email
   #
   # Implementation mapping:
-  # - Shared lead / template / email send steps: `step-definitions/admin/common/proposal/proposalFlow.steps.js`
+  # - Shared lead / template / email send steps: `step-definitions/admin/crm/proposal/proposalFlow.steps.js`
   # - Navigation + send stepper: `pages/admin/common/ProposalPage.js`
-  # - Drag/drop builder blocks: `pages/admin/common/proposal/ProposalBuilderPage.js`
-  # - Builder step glue: `step-definitions/admin/common/proposal/sendProposal.steps.js`
+  # - Drag/drop builder blocks: `pages/admin/crm/proposal/ProposalBuilderPage.js`
+  # - Builder step glue: `step-definitions/admin/crm/proposal/sendProposal.steps.js`
 
   Scenario: Open a client proposal, build it with all blocks, and send by email
     Given I am logged in

@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { expect } = require('@playwright/test');
 const BasePage = require('../../../BasePage');
-const NavigationPage = require('../NavigationPage');
+const NavigationPage = require('../../common/NavigationPage');
 
 class NotePage extends BasePage {
   constructor(page) {
@@ -102,9 +102,20 @@ class NotePage extends BasePage {
       .filter({ hasText: /note|added|created|saved|success/i })
       .first();
 
-    this.searchInput = page
-      .getByRole('textbox', { name: /search/i })
-      .or(page.getByPlaceholder(/search/i))
+    // In-tab Notes search (collapsed button). Never use header "Search Anything in IntoAEC...".
+    this.notesSearch = page
+      .getByRole('search', { name: /^search$/i })
+      .filter({ has: page.locator('button[aria-label="Search"], [data-testid="SearchIcon"]') })
+      .first();
+    this.notesSearchToggle = this.notesSearch
+      .getByRole('button', { name: /^search$/i })
+      .or(this.notesSearch.locator('button[aria-label="Search"]'))
+      .first();
+    this.searchInput = this.notesSearch
+      .getByRole('textbox')
+      .or(this.notesSearch.locator('input:not([type="hidden"])'))
+      .or(this.notesTabPanel.getByPlaceholder(/^search(\.\.\.)?$/i))
+      .or(this.notesTabPanel.getByRole('textbox', { name: /^search$/i }))
       .first();
 
     this.editMenuItem = page
@@ -207,15 +218,28 @@ class NotePage extends BasePage {
     return titleInDialog;
   }
 
+  async waitUntilNoteFormOpen(timeout = this.defaultTimeout) {
+    await expect(async () => {
+      expect(await this.isNoteFormOpen()).toBeTruthy();
+    }).toPass({ timeout, intervals: [250, 500, 1000] });
+  }
+
+  async waitUntilNoteFormClosed(timeout = 30000) {
+    await expect(async () => {
+      expect(await this.isNoteFormOpen()).toBeFalsy();
+    }).toPass({ timeout, intervals: [250, 500, 1000] });
+  }
+
   async isNotesListView() {
     const headingVisible = await this.allNotesHeading.isVisible({ timeout: 1500 }).catch(() => false);
+    const searchToggleVisible = await this.notesSearchToggle.isVisible({ timeout: 1500 }).catch(() => false);
     const searchVisible = await this.searchInput.isVisible({ timeout: 1500 }).catch(() => false);
     const noteCardVisible = await this.page
       .locator('.card-header, .viewNoteContainer, .MuiCard-root')
       .first()
       .isVisible({ timeout: 1500 })
       .catch(() => false);
-    return headingVisible || searchVisible || noteCardVisible;
+    return headingVisible || searchToggleVisible || searchVisible || noteCardVisible;
   }
 
   async isNotesEmptyState() {
@@ -235,8 +259,13 @@ class NotePage extends BasePage {
         console.log('[NotePage] Clicking Create note button');
         await button.scrollIntoViewIfNeeded().catch(() => {});
         await button.click({ force: true, timeout: 15000 });
-        await this.page.waitForTimeout(1000);
-        if (await this.isNoteFormOpen()) {
+        const opened = await expect(async () => {
+          expect(await this.isNoteFormOpen()).toBeTruthy();
+        })
+          .toPass({ timeout: 8000, intervals: [250, 500] })
+          .then(() => true)
+          .catch(() => false);
+        if (opened) {
           return true;
         }
       }
@@ -245,13 +274,28 @@ class NotePage extends BasePage {
     return false;
   }
 
+  async ensureNotesSearchInputReady() {
+    if (await this.searchInput.isVisible({ timeout: 1500 }).catch(() => false)) {
+      return true;
+    }
+
+    if (!(await this.notesSearchToggle.isVisible({ timeout: 3000 }).catch(() => false))) {
+      return false;
+    }
+
+    console.log('[NotePage] Opening Notes tab search');
+    await this.notesSearchToggle.click({ timeout: 15000 });
+    await expect(this.searchInput).toBeVisible({ timeout: 10000 });
+    return true;
+  }
+
   async clearNotesSearch() {
-    if (!(await this.searchInput.isVisible({ timeout: 2000 }).catch(() => false))) {
+    if (!(await this.searchInput.isVisible({ timeout: 1500 }).catch(() => false))) {
       return;
     }
     await this.searchInput.click().catch(() => {});
     await this.searchInput.fill('');
-    await this.page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    await this.waitForNotesListLoaded().catch(() => {});
   }
 
   async closeNoteFormIfOpen() {
@@ -302,7 +346,7 @@ class NotePage extends BasePage {
 
     if (clicked) {
       console.log('[NotePage] Clicked empty-state "click here" link');
-      await this.page.waitForTimeout(1500);
+      await this.waitUntilNoteFormOpen(8000).catch(() => {});
       return;
     }
 
@@ -376,7 +420,7 @@ class NotePage extends BasePage {
       if (attempt > 0) {
         console.log(`[NotePage] Retrying note create form open (attempt ${attempt + 1})`);
         await this.dismissOpenMenus();
-        await this.page.waitForTimeout(1000);
+        await this.waitForNotesModuleReady().catch(() => {});
       }
 
       if (isList && !isEmpty) {
@@ -424,7 +468,6 @@ class NotePage extends BasePage {
 
       await this.actionButton.scrollIntoViewIfNeeded().catch(() => {});
       await this.actionButton.click({ timeout: 15000, force: attempt > 0 });
-      await this.page.waitForTimeout(300);
 
       const menuVisible = await this.actionMenu.isVisible({ timeout: 4000 }).catch(() => false);
       if (!menuVisible) {
@@ -637,7 +680,7 @@ class NotePage extends BasePage {
       '>>> Upload the note attachment in the browser, then press ENTER here to continue <<<'
     );
     console.log('[Note attachment] ENTER received — continuing test.');
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await this.waitForAttachmentUploaded();
   }
 
   async submitCreateNote() {
@@ -676,9 +719,10 @@ class NotePage extends BasePage {
       console.warn('[NotePage] CREATE_NOTE response was not captured');
     }
 
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await this.waitUntilNoteFormClosed().catch(() => {});
     await expect(this.nameInput).toBeHidden({ timeout: 30000 }).catch(() => {});
     await this.successToast.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+    await this.waitForNotesListLoaded().catch(() => {});
   }
 
   getNotesListScope() {
@@ -924,7 +968,9 @@ class NotePage extends BasePage {
   }
 
   async searchForNote(name) {
-    if (!(await this.searchInput.isVisible({ timeout: 3000 }).catch(() => false))) {
+    const ready = await this.ensureNotesSearchInputReady();
+    if (!ready) {
+      console.warn('[NotePage] Notes tab search control was not found; skipping list search');
       return;
     }
     console.log(`[NotePage] Searching notes list for: ${name}`);
@@ -932,7 +978,7 @@ class NotePage extends BasePage {
     await this.searchInput.fill('');
     await this.searchInput.fill(String(name));
     await this.searchInput.press('Enter').catch(() => {});
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await expect(this.searchInput).toHaveValue(String(name), { timeout: this.defaultTimeout }).catch(() => {});
     await this.waitForNotesListLoaded().catch(() => {});
   }
 

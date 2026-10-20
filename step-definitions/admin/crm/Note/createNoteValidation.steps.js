@@ -1,5 +1,5 @@
 const { When, Then } = require('@cucumber/cucumber');
-const CreateNoteValidationPage = require('../../../../pages/admin/common/Note/CreateNoteValidationPage');
+const CreateNoteValidationPage = require('../../../../pages/admin/crm/Note/CreateNoteValidationPage');
 
 function getCreateNoteValidationPage(world) {
   if (!world.createNoteValidationPage) {

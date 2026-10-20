@@ -1,5 +1,5 @@
 const { When, Then } = require('@cucumber/cucumber');
-const EditProposalPage = require('../../../../pages/admin/common/proposal/EditProposalPage');
+const EditProposalPage = require('../../../../pages/admin/crm/proposal/EditProposalPage');
 const { getProposalFlowPage } = require('./proposalFlow.steps');
 
 When('I click the edit proposal icon button', { timeout: 120000 }, async function () {

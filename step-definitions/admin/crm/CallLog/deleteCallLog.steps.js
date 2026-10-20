@@ -1,5 +1,5 @@
 const { When, Then } = require('@cucumber/cucumber');
-const DeleteCallLogPage = require('../../../../pages/admin/common/CallLog/DeleteCallLogPage');
+const DeleteCallLogPage = require('../../../../pages/admin/crm/CallLog/DeleteCallLogPage');
 
 function getDeleteCallLogPage(world) {
   if (!world.deleteCallLogPage) {

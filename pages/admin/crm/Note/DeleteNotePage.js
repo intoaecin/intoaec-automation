@@ -80,8 +80,8 @@ class DeleteNotePage extends NotePage {
     await yesButton.click();
     await deleteResponse;
 
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     await expect(this.confirmDialog).toBeHidden({ timeout: 30000 }).catch(() => {});
+    await this.waitForNotesListLoaded().catch(() => {});
     await this.clearNotesSearch();
   }
 

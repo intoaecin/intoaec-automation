@@ -1,5 +1,5 @@
 const { When, Then } = require('@cucumber/cucumber');
-const CommentByAecPage = require('../../../../pages/admin/common/proposal/CommentByAecPage');
+const CommentByAecPage = require('../../../../pages/admin/crm/proposal/CommentByAecPage');
 const { getProposalFlowPage } = require('./proposalFlow.steps');
 
 When('I trigger the proposal preview viewer in the CRM', { timeout: 120000 }, async function () {

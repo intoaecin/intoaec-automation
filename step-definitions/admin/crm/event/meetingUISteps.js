@@ -1,5 +1,5 @@
 const { When, Then } = require('@cucumber/cucumber');
-const MeetingUIPage = require('../../../../../pages/admin/crm/lead-profile/event/MeetingUIPage');
+const MeetingUIPage = require('../../../../pages/admin/crm/event/MeetingUIPage');
 
 function getMeetingUIPage(world) {
   if (!world.meetingUIPage) {

@@ -1,6 +1,6 @@
 const { Given, When, Then } = require('@cucumber/cucumber');
-const GoogleIntegrationPage = require('../../../../../pages/admin/crm/lead-profile/event/GoogleIntegrationPage');
-const GoogleIntegrationStorage = require('../../../../../support/googleIntegrationStorage');
+const GoogleIntegrationPage = require('../../../../pages/admin/crm/event/GoogleIntegrationPage');
+const GoogleIntegrationStorage = require('../../../../support/googleIntegrationStorage');
 
 function getGoogleIntegrationPage(world) {
   if (!world.googleIntegrationPage) {

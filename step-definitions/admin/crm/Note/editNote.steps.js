@@ -1,5 +1,5 @@
 const { When, Then } = require('@cucumber/cucumber');
-const EditNotePage = require('../../../../pages/admin/common/Note/EditNotePage');
+const EditNotePage = require('../../../../pages/admin/crm/Note/EditNotePage');
 
 function getEditNotePage(world) {
   if (!world.editNotePage) {
