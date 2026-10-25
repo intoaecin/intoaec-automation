@@ -1,0 +1,89 @@
+Module,Feature,Sub-feature,UI File,Test File,Test Name,Status,Priority
+Authentication,Admin authentication,Valid login,src/pages/auth/signIn/index.tsx,features/admin/auth/login.feature,Successful login with valid credentials,Covered,High
+Authentication,Admin authentication,Invalid login validation,src/pages/auth/signIn/index.tsx,features/admin/auth/login.feature,Login with invalid credentials,Covered,High
+Authentication,Account recovery,Forgot/reset password,src/pages/auth/signIn/forgotPassword/index.tsx,,,Not Covered,High
+Authentication,Registration,Signup and registration completion,src/pages/auth/signUp/index.tsx,,,Not Covered,High
+Authentication,Vendor authentication,Vendor login,src/features/signIn/,features/vendor/auth/VendorLogin_TestCases.feature,TC-01 — Vendor portal login with valid credentials,Covered,High
+Account & organization,My Account,Edit profile and save,src/pages/myprofile/index.tsx,features/admin/account/My accounts.feature,TC-01 — Edit My Account profile details and save successfully,Covered,Medium
+Account & organization,My Account,Profile picture upload/delete,src/features/myprofile/,features/admin/account/My accounts.feature,TC-02 — View upload and delete My Account profile picture,Covered,Medium
+Account & organization,My Account,Change password,src/features/myprofile/,features/admin/account/My accounts.feature,TC-03 — Change My Account password from Security,Covered,High
+Account & organization,My Organization,Organization details and address,src/pages/myorganization/index.tsx,features/admin/account/My accounts.feature,TC-04 and TC-10 — Edit organization details,Covered,Medium
+Account & organization,My Organization,Expertise awards certifications publications,src/features/myorganization/,features/admin/account/My accounts.feature,TC-05 through TC-09 — Organization content,Covered,Low
+Account & organization,My Organization,Portfolio social links and signature,src/features/myorganization/,features/admin/account/My accounts.feature,TC-11 through TC-14 — Portfolio social links and signature,Covered,Medium
+CRM & lead management,Lead manager,Create lead,src/pages/leadmanager/create/index.tsx,features/admin/crm/lead-profile/createLead.feature,Create lead scenarios,Covered,High
+CRM & lead management,Lead manager,Lead list/profile navigation,src/pages/leadmanager/master/index.tsx,features/admin/projects/ProjectProfile.feature,Navigate to a project and interact with modules,Partial,High
+CRM & lead management,Lead profile,File upload and attachment,src/features/lead/fileViewer/,features/admin/crm/lead-profile/FileUpload.feature,File upload scenarios,Covered,High
+CRM & lead management,Lead profile,Notes create/edit/delete/validation,src/features/lead/,features/admin/crm/Note/,Create edit delete and validation scenarios,Covered,Medium
+CRM & lead management,Lead profile,Call log create/edit/delete/validation,src/features/lead/,features/admin/crm/CallLog/,Create edit delete UI and validation scenarios,Covered,Medium
+CRM & lead management,Lead profile,Meeting create/edit/delete/repeat,src/features/lead/,features/admin/crm/event/,Meeting lifecycle scenarios,Covered,Medium
+CRM & lead management,Lead profile,Google calendar integration,src/features/globalCalendar/,features/admin/crm/event/googleIntegration.feature,Google integration scenarios,Partial,Medium
+CRM & lead management,Proposal,Send/edit/accept/decline proposal,src/features/proposals/,features/admin/crm/proposal/,Proposal lifecycle scenarios,Covered,High
+CRM & lead management,Proposal,Lead and AEC comments,src/features/proposals/,features/admin/crm/proposal/commentByAec.feature; features/admin/crm/proposal/commentByLead.feature,Comment scenarios,Covered,Medium
+CRM & lead management,Questionnaire,Send/preview/answer/verify questionnaire,src/features/questionnaireCapture/,features/admin/crm/questionnaire/,Questionnaire lifecycle scenarios,Covered,High
+CRM & lead management,Questionnaire,Questionnaire expiry,src/pages/leadQuestionnaireCapture/[questionnaireId].tsx,features/admin/crm/questionnaire/questionnaireExpiry.feature,Questionnaire expiry scenario,Covered,Medium
+CRM & lead management,File viewer,Drawing annotation/comment/share/approval,src/features/lead/fileViewer/,features/admin/crm/lead-profile/FileUpload.feature,File upload only,Partial,High
+Client & project,Clients,Create and manage clients,src/features/client/,features/admin/crm/lead-profile/createLead.feature,Lead creation only,Partial,High
+Client & project,Project profile,Project navigation and module access,src/pages/dashboard/project-management/index.tsx,features/admin/projects/ProjectProfile.feature,Navigate to a project and interact with modules,Covered,High
+Client & project,Project communication,Documents/events/call logs,src/features/projectManagementDashboard/,features/admin/projects/communication/Communication.feature; features/admin/projects/communication/Event.feature; features/admin/projects/communication/ProjectCallLog.feature; features/admin/projects/communication/ProjectDocument.feature,Placeholder feature files,Not Covered,High
+Client & project,Client report,Create report with notes/attachments/weather,src/features/ClientReport/,features/admin/projects/communication/client-report/ClientReport_TestCases.feature,TC-01 through TC-11 — Client report,Covered,High
+Client & project,Client portal,Client project/financial views,src/pages/client/profile/index.tsx,,,Not Covered,High
+Design & estimating,Estimate,Create/send/draft estimate,src/features/boq/,features/admin/projects/design/estimate/01_create_estimate_and_send_email.feature,Create estimate and send email successfully,Covered,High
+Design & estimating,Estimate,Estimate validations and compose email,src/features/boq/,features/admin/projects/design/estimate/02_missing_estimate_title_validation.feature; features/admin/projects/design/estimate/06_compose_email_required_data_validation.feature,Validation scenarios,Covered,High
+Design & estimating,Estimate,Sections/items/library/charge types,src/features/boq/,features/admin/projects/design/estimate/05_second_section_item_and_material_costs.feature; features/admin/projects/design/estimate/09_switch_charge_type.feature; features/admin/projects/design/estimate/10_add_multiple_sections.feature,Estimate variation scenarios,Covered,High
+Design & estimating,Estimate,Template start and back/continue,src/features/boq/,features/admin/projects/design/estimate/11_create_estimate_start_from_template_and_save_draft.feature; features/admin/projects/design/estimate/12_back_without_saving_and_continue.feature,Template and back scenarios,Covered,Medium
+Design & estimating,BOQ,BOQ library/template/my items CRUD,src/features/boq/,, ,Not Covered,High
+Design & estimating,Proposal,Design proposal builder/edit/preview,src/features/proposals/,features/admin/projects/design/Proposal.feature,Empty feature file,Not Covered,High
+Design & estimating,Selections,Create and manage selections,src/features/Selections/,features/admin/projects/design/Selections.feature,Empty feature file,Not Covered,Medium
+Design & estimating,Takeoff,Takeoff create/preview,src/features/takeOff/,features/admin/projects/design/Takeoff.feature,Empty feature file,Not Covered,High
+Design & estimating,Change order,Create/edit change order,src/features/changeOrder/,,,Not Covered,High
+Project management,Schedule,Schedule create/update/delete,src/features/projectSchedule/,features/admin/projects/managements/Schedule/Schedule_TestCases.feature,TC-01 through TC-38 — schedule lifecycle,Covered,High
+Project management,Schedule,Milestone create/update/delete,src/features/projectSchedule/,features/admin/projects/managements/Schedule/Schedule_TestCases.feature,TC-40 through TC-90 — milestone lifecycle,Covered,High
+Project management,Schedule,Working calendar and timeline controls,src/features/projectSchedule/,features/admin/projects/managements/Schedule/Schedule_TestCases.feature,TC-91 through TC-100 — working calendar,Covered,High
+Project management,Task management,Kanban columns/tasks create/update/delete,src/features/TaskManagement/,features/admin/projects/managements/taskmanagement/Task_TestCases.feature,TC-01 through TC-44 — task lifecycle,Covered,High
+Project management,Task management,Task filters/search/templates,src/features/TaskManagement/,features/admin/projects/managements/taskmanagement/Task_TestCases.feature,TC-47 through TC-52 — filters search template,Covered,Medium
+Project management,Budgeting,Manual/estimate/proposal budgets and costs,src/features/projectSchedule/,features/admin/projects/managements/Budgeting/Budgeting_TestCases.feature,TC-01 through TC-20 — budgeting,Covered,High
+Project management,Daily report,Create report notes/weather/attachments,src/features/DailyLog/,features/admin/projects/management/DailyReport/Dailyreport.feature,TC-01 through TC-09 — daily report,Covered,High
+Project management,Time tracking,Timesheet CRUD and expense conversion,src/features/TimeTracking/,features/admin/projects/managements/timetracking/,Create edit delete and convert scenarios,Covered,High
+Project management,Workers,Worker assignment/management,src/features/worker-management/,features/admin/projects/management/Workers.feature,Empty feature file,Not Covered,High
+Project management,Assets,Project asset management,src/features/asset-management/,features/admin/projects/management/Assets.feature,Empty feature file,Not Covered,High
+Project management,Progress claims,Create/send/accept/reject claim,src/features/projectSchedule/progressClaim/,src/pages/progress-claim/create.tsx,,Not Covered,High
+Procurement,Indent,Material/work indent create/edit/convert,src/features/indent/,features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature,TC-01 through TC-06 — indent flows,Covered,High
+Procurement,Inventory,Inventory list and stock actions,src/features/inventory-management/,features/admin/projects/procurement/Inventory.feature,Empty feature file,Not Covered,High
+Procurement,RFQ,Create/preview/send/decline RFQ,src/features/RFQ/,features/admin/projects/procurement/rfq/RFQ_TestCases.feature,TC-01 through TC-19 — RFQ flows,Covered,High
+Procurement,RFQ,Estimate-to-RFQ conversion,src/features/RFQAndPO/,features/admin/projects/procurement/rfq/estimate-to-rfq/start-from-estimate.feature,Start from estimate,Covered,High
+Procurement,Purchase order,Create/edit/preview/send/cancel PO,src/features/PurchaseAndWorkOrder/,features/admin/projects/procurement/purchase-order/PurchaseOrder_TestCases.feature,TC-01 through TC-19 — PO flows,Covered,High
+Procurement,Purchase order,Import PO from PDF,src/pages/leadmanager/profile/purchase-order/create/index.tsx,features/admin/projects/procurement/purchase-order/PurchaseOrder_TestCases.feature,TC-16 — import PDF,Covered,High
+Procurement,Work order,Create/send/preview/update progress WO,src/features/PurchaseAndWorkOrder/,features/admin/projects/procurement/work-order/create-wo/WorkOrder_TestCases.feature,TC-01 through TC-08 — work order flows,Covered,High
+Procurement,Goods receipt,Goods receipt create/receive,src/features/GRN/,features/admin/projects/procurement/GoodsReceipt.feature,Empty feature file,Not Covered,High
+Resources,Manage assets,Asset create/edit/delete/attachment,src/features/assets/,features/admin/resources/Asset/,Create edit delete asset scenarios,Covered,High
+Resources,Asset requests,Approve/decline requests,src/features/asset-management/,features/admin/resources/AssetRequest/,Approve and decline asset request,Covered,High
+Resources,Manage services,Service create/edit/delete,src/features/myVendor/,features/admin/resources/ManageServices/Services_TestCases.feature,TC-06 through TC-08 — services,Covered,Medium
+Resources,Manage warehouse,Product create/edit/delete/filter,src/features/myVendor/,features/admin/resources/ManageWarehouse/Warehouse_TestCases.feature,TC-01 through TC-05 — warehouse,Covered,High
+Resources,Manage inventory,Inventory management,src/features/inventory-management/,features/admin/resources/ManageInventory.feature,Empty feature file,Not Covered,High
+Resources,Manage workers,Worker management,src/features/worker-management/,features/admin/resources/ManageWorkers.feature,Empty feature file,Not Covered,High
+Settings,Preferences,Admin/project/lead preferences,src/features/settings/,features/admin/settings/Preferences.feature,Empty feature file,Not Covered,Medium
+Settings,Localization,Language/tax/timezone/currency,src/features/localization/,features/admin/settings/Localization.feature,Empty feature file,Not Covered,High
+Settings,Integrations,Integration configuration and sign-in,src/features/integrations/,features/admin/settings/Integrations.feature,Empty feature file,Not Covered,High
+Settings,User Hub,Invite/manage users,src/features/userHub/,features/admin/invite/UserHub.feature,Empty feature file,Not Covered,High
+Settings,Vendor invitation,Invite vendor,src/features/myVendor/,features/admin/invite/InviteVendor.feature,Empty feature file,Not Covered,High
+Reports,Reports dashboard,Assets/client/email/expense/income reports,src/features/reports/,features/admin/reports/AssetsReport.feature; features/admin/reports/ClientReport.feature; features/admin/reports/EmailReport.feature; features/admin/reports/ExpenseReport.feature; features/admin/reports/IncomeReport.feature,Empty report feature files,Not Covered,Medium
+Reports,Reports dashboard,Estimate/indent/inventory/lead/proposal reports,src/features/reports/,features/admin/reports/EstimateReport.feature; features/admin/reports/IndentReport.feature; features/admin/reports/InventoryReport.feature; features/admin/reports/LeadReport.feature; features/admin/reports/ProposalReport.feature,Empty report feature files,Not Covered,Medium
+Reports,Reports dashboard,PO/questionnaire/RFQ/schedule/task/time/work-order/worker reports,src/features/reports/,features/admin/reports/PurchaseOrderReport.feature; features/admin/reports/QuestionnaireReport.feature; features/admin/reports/RFQReport.feature; features/admin/reports/ScheduleReport.feature; features/admin/reports/TaskReport.feature; features/admin/reports/TimeTrackingReport.feature; features/admin/reports/WorkOrderReport.feature; features/admin/reports/WorkersReport.feature,Empty report feature files,Not Covered,Medium
+Templates,Template center,BOQ and estimate templates,src/pages/template-center/,features/admin/templates/BOQTemplate.feature; features/admin/templates/EstimateTemplate.feature,Empty feature files,Not Covered,Medium
+Templates,Template center,Notification/proposal/questionnaire templates,src/pages/template-center/,features/admin/templates/NotificationTemplate.feature; features/admin/templates/ProposalTemplate.feature; features/admin/templates/QuestionnaireTemplate.feature,Empty feature files,Not Covered,Medium
+Templates,Template center,Schedule/tasks/terms templates,src/pages/template-center/,features/admin/templates/ScheduleTemplate.feature; features/admin/templates/TasksTemplate.feature; features/admin/templates/TermsConditionsTemplate.feature,Empty feature files,Not Covered,Medium
+Vendor portal,Vendor organization,Profile/organization/signature,src/features/myVendor/,features/vendor/auth/VendorLogin_TestCases.feature,TC-02 through TC-08 — vendor profile and organization,Covered,Medium
+Vendor portal,Vendor catalog,Products and services,src/features/myVendor/,features/vendor/auth/VendorLogin_TestCases.feature,TC-09 and TC-10 — vendor product/service,Covered,High
+Finance & payments,Invoices,Create/edit/invoice payment flow,src/features/invoicePayments/,src/pages/invoicePayments/, ,Not Covered,High
+Finance & payments,Receipts/credit notes,Generate receipt and credit note,src/features/creditNotes/,src/pages/generateCreditNote/index.tsx,,Not Covered,High
+Finance & payments,Bills and expenses,Bills/expenses and money matters,src/features/billsAndExpenses/,features/admin/projects/financial/BillsExpenses.feature; features/admin/projects/financial/MoneyMatters.feature,Empty feature files,Not Covered,High
+Finance & payments,Subscriptions,Plan/checkout/payment status,src/features/subscription/,src/pages/subscription/index.tsx,,Not Covered,High
+Communication,Global calendar,Calendar events and availability,src/features/globalCalendar/,features/admin/crm/event/googleIntegration.feature,Google integration only,Partial,Medium
+Communication,Global mail,Mail inbox/compose,src/features/globalMail/,src/pages/mail/index.tsx,,Not Covered,High
+Communication,Chat,Chat and messaging,src/features/chat/,src/pages/chat/index.tsx,,Not Covered,Medium
+Communication,Chatbot,Chat history and bot training,src/features/chatbotAI/,src/pages/chatbotAI/chatHistory/index.tsx,,Not Covered,Low
+Lead capture,Lead capture,Public lead capture forms,src/features/leadCapture/,src/pages/leadCapture/index.tsx,,Not Covered,High
+Lead capture,Lead capture V2,Public lead capture V2,src/features/leadCaptureV2/,src/pages/lead-capture-v2/index.tsx,,Not Covered,High
+Lead capture,Customer portal,Customer portal lead view,src/pages/leadCapture/customer-portal/[leadId].tsx,,,Not Covered,High
+Factory,Factory management,Manufacturing orders,src/features/factoryManagement/,src/pages/factory-management/index.tsx,,Not Covered,High
+Factory,Factory workshop,Workshop operations,src/features/factoryWorkshop/,src/pages/factory-management/manufacturing-order/edit/index.tsx,,Not Covered,Medium
