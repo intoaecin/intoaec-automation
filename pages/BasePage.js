@@ -55,6 +55,31 @@ class BasePage {
 
     console.log('[Manual Step] Continuing...');
   }
+
+  async promptForTextInTerminal(message, defaultValue = '') {
+    console.log(`[Manual Step] ${message}`);
+
+    if (!process.stdin.isTTY) {
+      const value = String(defaultValue || '').trim();
+      console.log(`[Manual Step] No interactive terminal — using "${value || '(empty)'}"`);
+      return value;
+    }
+
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    const suffix = defaultValue ? ` [${defaultValue}]` : '';
+    const answer = await new Promise((resolve) => {
+      rl.question(`${message}${suffix}: `, (value) => {
+        rl.close();
+        resolve(value);
+      });
+    });
+
+    return String(answer || defaultValue || '').trim();
+  }
 }
 
 module.exports = BasePage;

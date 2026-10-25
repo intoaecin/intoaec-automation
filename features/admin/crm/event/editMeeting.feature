@@ -1,4 +1,4 @@
-@crm @lead-profile @events @meeting @edit @positive @regression
+@crm @lead-profile @events @meeting @edit @positive @regression @ashraf-modules
 Feature: Edit Meeting
 
   Background:

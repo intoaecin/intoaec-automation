@@ -64,6 +64,7 @@ module.exports = {
     require: SUPPORT_AND_ALL_STEPS,
     format: REPORT_FORMAT,
     publishQuiet: true,
+    retry: 0,
   },
   /** Work Order TC-01 — compose send */
   'wo-tc01': {
@@ -241,11 +242,59 @@ module.exports = {
       return [`rfq-tc${id}`, rfqProfile(`@TS01 and @TC${id}`)];
     })
   ),
-  /** Vendor portal — all TCs (unique tag; does not include PO @vendor tests) */
+  /** Vendor portal — all TCs including TC-11 (unique tag; does not include PO @vendor tests) */
   'vendor-portal': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
     format: ['progress', 'html:reports/cucumber-report.html'],
     publishQuiet: true,
     tags: '@vendor-portal',
+  },
+  'vendor-all': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    tags: '@vendor-all',
+  },
+  'vendor-tc01-tc11': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    tags: '@vendor-tc01-tc11',
+  },
+  'customer-portal': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    tags: '@customer-portal',
+  },
+  'customer-tc01-tc06': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    tags: '@customer-tc01-tc06',
+  },
+  'customer-tc01': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    tags: '@customer-portal and @TC01',
+  },
+  'customer-tc01-tc02': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    tags: '@customer-tc01-tc02',
+  },
+  'customer-tc01-tc03': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    tags: '@customer-tc01-tc03',
+  },
+  'customer-tc03': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    tags: '@customer-portal and @TC03',
   },
 };

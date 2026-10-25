@@ -1,4 +1,4 @@
-@crm @lead-profile @events @meeting @positive @regression
+@crm @lead-profile @events @meeting @positive @regression @ashraf-modules
 Feature: Navigate to Create Meeting
 
   Background:

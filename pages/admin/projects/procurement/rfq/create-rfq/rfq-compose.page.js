@@ -12,51 +12,75 @@ class RFQComposePage extends RFQPage {
   }
 
   /**
-   * Reads the first *@yopmail.com address from the visible RFQ compose dialog (text, chips, or inputs).
-   * Polls while APIs populate the To field (same budget as RFQ_COMPOSE_MODAL_TIMEOUT_MS).
+   * Collect *@yopmail.com / *@mailinator.com addresses from the visible RFQ compose dialog.
+   * Prefers `preferEmail` when present; never returns the Admin login email.
    */
-  async readYopmailAddressFromComposeDialog() {
-    const yopRe = /[\w.+-]+@yopmail\.com/i;
-    const deadline = Date.now() + this.composeModalTimeout;
+  async readVendorInboxFromComposeDialog(opts = {}) {
+    const preferEmail = String(opts.preferEmail || '').trim().toLowerCase();
+    const excludeEmails = new Set(
+      (opts.excludeEmails || [])
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const inboxRe = /[\w.+-]+@(?:yopmail|mailinator)\.com/gi;
+    const deadline = Date.now() + Math.min(this.composeModalTimeout, 45000);
 
-    const tryExtract = async (emailDialog) => {
-      const blob = (await emailDialog.textContent()) || '';
-      let m = blob.match(yopRe);
-      if (m) return m[0].toLowerCase();
+    const collectFromDialog = async (emailDialog) => {
+      const found = new Set();
+      const blob = ((await emailDialog.textContent().catch(() => '')) || '').toLowerCase();
+      for (const m of blob.match(inboxRe) || []) found.add(m.toLowerCase());
 
       const inputs = emailDialog.locator('input');
-      const n = await inputs.count();
+      const n = await inputs.count().catch(() => 0);
       for (let i = 0; i < n; i += 1) {
         // eslint-disable-next-line no-await-in-loop
-        const v = await inputs.nth(i).inputValue().catch(() => '');
-        m = v.match(yopRe);
-        if (m) return m[0].toLowerCase();
+        const v = ((await inputs.nth(i).inputValue().catch(() => '')) || '').toLowerCase();
+        for (const m of v.match(inboxRe) || []) found.add(m.toLowerCase());
       }
 
-      const combobox = emailDialog.getByRole('combobox').first();
-      if (await combobox.isVisible({ timeout: 400 }).catch(() => false)) {
-        const v = await combobox.inputValue().catch(() => '');
-        m = v.match(yopRe);
-        if (m) return m[0].toLowerCase();
+      const chips = emailDialog.locator('[class*="Chip"], [class*="chip"], [role="button"]');
+      const chipCount = await chips.count().catch(() => 0);
+      for (let i = 0; i < Math.min(chipCount, 20); i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        const t = ((await chips.nth(i).innerText().catch(() => '')) || '').toLowerCase();
+        for (const m of t.match(inboxRe) || []) found.add(m.toLowerCase());
       }
-
-      return null;
+      return [...found];
     };
 
     while (Date.now() < deadline) {
       const anyVisible = this.page.getByRole('dialog').filter({ visible: true });
       const count = await anyVisible.count().catch(() => 0);
+      const all = [];
       for (let i = 0; i < count; i += 1) {
         // eslint-disable-next-line no-await-in-loop
-        const dlg = anyVisible.nth(i);
-        // eslint-disable-next-line no-await-in-loop
-        const found = await tryExtract(dlg);
-        if (found) return found;
+        all.push(...(await collectFromDialog(anyVisible.nth(i))));
       }
+      const unique = [...new Set(all)].filter((e) => e && !excludeEmails.has(e));
+      if (preferEmail && unique.includes(preferEmail)) return preferEmail;
+      if (preferEmail && !excludeEmails.has(preferEmail)) {
+        // Prefer email already known from Add Vendor even if compose UI also shows admin CC.
+        if (unique.length === 0 || unique.some((e) => e.includes(preferEmail.split('@')[0]))) {
+          return preferEmail;
+        }
+      }
+      const vendorOnly = unique.filter((e) => e !== preferEmail);
+      if (unique.length) return unique.find((e) => e !== preferEmail) || unique[0];
       // eslint-disable-next-line no-await-in-loop
       await this.page.waitForTimeout(450);
     }
 
+    if (preferEmail && !excludeEmails.has(preferEmail)) return preferEmail;
+    return null;
+  }
+
+  /**
+   * Reads the first *@yopmail.com address from the visible RFQ compose dialog (text, chips, or inputs).
+   * Polls while APIs populate the To field (same budget as RFQ_COMPOSE_MODAL_TIMEOUT_MS).
+   */
+  async readYopmailAddressFromComposeDialog() {
+    const found = await this.readVendorInboxFromComposeDialog();
+    if (found) return found;
     throw new Error(
       'Could not find a *@yopmail.com address in the RFQ compose email To field after waiting. Ensure the first vendor uses Yopmail.'
     );
@@ -228,13 +252,60 @@ class RFQComposePage extends RFQPage {
     }
 
     await this.page.waitForLoadState('domcontentloaded');
+    await this.hideFreshchatWidget();
     await this.waitForComposeEmailModalReady();
   }
 
-  async sendEmailFromRfqComposeModal() {
+  async sendEmailFromRfqComposeModal(opts = {}) {
+    await this.hideFreshchatWidget();
+
+    const testData = require('../../../../../../utils/testData');
+    const preferEmail = String(
+      opts.preferEmail || this.lastAddedVendorEmail || testData.vendor?.rfqUser?.email || ''
+    )
+      .trim()
+      .toLowerCase();
+    const adminEmail = String(testData.admin?.validUser?.email || 'kumar@diy.in')
+      .trim()
+      .toLowerCase();
+
+    // Keep the Add-Vendor email for portal login. Compose dialog often also shows admin CC
+    // (kumar@diy.in) — never replace the selected vendor with that.
+    const toEmail = await this.readVendorInboxFromComposeDialog({
+      preferEmail,
+      excludeEmails: [adminEmail],
+    }).catch(() => null);
+
+    if (preferEmail) {
+      this.lastAddedVendorEmail = preferEmail;
+      console.log(
+        `[RFQ] Vendor portal login email locked to added vendor: ${preferEmail}` +
+          (toEmail && toEmail !== preferEmail ? ` (compose also showed ${toEmail})` : '')
+      );
+    } else if (toEmail && toEmail !== adminEmail) {
+      this.lastAddedVendorEmail = toEmail;
+      console.log(`[RFQ] Compose To vendor for portal login: ${toEmail}`);
+    } else {
+      console.warn(
+        `[RFQ] Could not resolve vendor inbox from compose (got ${toEmail || 'none'}); keep lastAddedVendorEmail=${this.lastAddedVendorEmail || 'unset'}`
+      );
+    }
+
     const emailDialog = this.locatorComposeEmailDialogForClose();
     const send = this.locatorVisibleComposeSendEmailButton();
-    await send.click({ timeout: this.composeModalTimeout });
+    await expect(send).toBeVisible({ timeout: this.composeModalTimeout });
+    await send.scrollIntoViewIfNeeded().catch(() => {});
+    await this.hideFreshchatWidget();
+
+    try {
+      await send.click({ timeout: 20000 });
+    } catch (err) {
+      console.warn(
+        `[RFQ] Send email click blocked (${String(err?.message || err).slice(0, 120)}); retrying with force after hiding chat widget`
+      );
+      await this.hideFreshchatWidget();
+      await send.click({ timeout: this.composeModalTimeout, force: true });
+    }
 
     const emailSentToast = this.locatorEmailSentSuccessToast();
     const rfqSentToast = this.locatorRfqCreatedAndSentToast();
@@ -248,6 +319,7 @@ class RFQComposePage extends RFQPage {
     ]);
 
     await this.dismissOpenMenusAndPopovers();
+    await this.hideFreshchatWidget();
 
     const stillOpen = await this.visibleComposeEmailDialog()
       .first()
@@ -261,6 +333,9 @@ class RFQComposePage extends RFQPage {
           await this.page.waitForTimeout(300);
         });
     }
+    console.log(
+      `[RFQ] Compose email sent — Vendor Portal login must use added vendor: ${this.lastAddedVendorEmail || '(unknown)'}`
+    );
   }
 
   locatorRfqComposeFlowSuccessToast() {

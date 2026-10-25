@@ -10,59 +10,32 @@ function isHeadlessRun() {
   );
 }
 
-/** Headed runs keep the browser open after tests unless KEEP_BROWSER=false. */
+/** Keep browser open after the run only when KEEP_BROWSER=true (explicit). Default: close and exit — no ENTER wait. */
 function shouldKeepBrowserOpen() {
-  if (process.env.KEEP_BROWSER === 'false') return false;
-  if (process.env.KEEP_BROWSER === 'true') return true;
-  return !isHeadlessRun();
+  return process.env.KEEP_BROWSER === 'true';
 }
 
 let sharedSession = null;
+let signalHandlersRegistered = false;
 
-async function ensureSharedSession() {
-  if (sharedSession) {
-    const { browser, context, page } = sharedSession;
-    const browserAlive = browser && browser.isConnected();
-    // Recover if a prior run closed the page/context unexpectedly.
-    if (browserAlive && page && !page.isClosed()) return sharedSession;
-    if (browserAlive && context) {
-      const newPage = await context.newPage().catch(() => null);
-      if (newPage) {
-        sharedSession = { browser, context, page: newPage };
-        return sharedSession;
-      }
-    }
-    // If we can't recover cleanly, drop the session and recreate.
-    await browser?.close().catch(() => {});
-    sharedSession = null;
+function isSessionAlive(session) {
+  if (!session) return false;
+  const { browser, context, page } = session;
+  if (!browser?.isConnected()) return false;
+  if (page && !page.isClosed()) return true;
+  if (!context) return false;
+  try {
+    return context.pages().some((p) => p && !p.isClosed());
+  } catch {
+    return false;
   }
+}
 
-  const headless = isHeadlessRun();
-  const keepOpen = shouldKeepBrowserOpen();
-  const browser = await chromium.launch({
-    headless,
-    args: headless ? [] : ['--start-maximized'],
-    // Keep Chromium alive if the test process is interrupted while inspecting.
-    handleSIGINT: !keepOpen,
-    handleSIGTERM: !keepOpen,
-    handleSIGHUP: !keepOpen,
-  });
-
-  const contextOptions = {
-    viewport: headless ? { width: 1280, height: 720 } : null,
-  };
-
-  const storageStatePath = resolvePathForWorld();
-  if (storageStatePath) {
-    console.log(`[World] Loading browser storage state from ${storageStatePath}`);
-    contextOptions.storageState = storageStatePath;
-  }
-
-  const context = await browser.newContext(contextOptions);
-
-  const page = await context.newPage();
-  sharedSession = { browser, context, page };
-  return sharedSession;
+function pickLivePage(session) {
+  const { browser, context, page } = session;
+  if (page && !page.isClosed()) return page;
+  const live = (context?.pages() || []).find((p) => p && !p.isClosed());
+  return live || null;
 }
 
 async function closeSharedSession() {
@@ -72,8 +45,113 @@ async function closeSharedSession() {
   await browser.close().catch(() => {});
 }
 
+async function resetSharedSession() {
+  await closeSharedSession();
+}
+
+/** Always close automation browser on Ctrl+C / kill — prevents orphaned cucumber+Chrome "loop". */
+function registerShutdownHandlers() {
+  if (signalHandlersRegistered) return;
+  signalHandlersRegistered = true;
+
+  const shutdown = async (signal) => {
+    console.log(`\n[World] ${signal} received — closing automation browser and exiting`);
+    await closeSharedSession().catch(() => {});
+    process.exit(130);
+  };
+
+  process.once('SIGINT', () => {
+    shutdown('SIGINT').catch(() => process.exit(130));
+  });
+  process.once('SIGTERM', () => {
+    shutdown('SIGTERM').catch(() => process.exit(143));
+  });
+  process.once('SIGHUP', () => {
+    shutdown('SIGHUP').catch(() => process.exit(129));
+  });
+}
+
+registerShutdownHandlers();
+
+async function ensureSharedSession() {
+  if (sharedSession && isSessionAlive(sharedSession)) {
+    const livePage = pickLivePage(sharedSession);
+    if (livePage) {
+      sharedSession = { ...sharedSession, page: livePage };
+      return sharedSession;
+    }
+  }
+
+  if (sharedSession) {
+    await sharedSession.browser?.close().catch(() => {});
+    sharedSession = null;
+  }
+
+  const headless = isHeadlessRun();
+  // Always let Node handle Ctrl+C so orphaned Chrome/cucumber cannot keep running.
+  const launchOptions = {
+    headless,
+    args: headless ? [] : ['--start-maximized'],
+    handleSIGINT: true,
+    handleSIGTERM: true,
+    handleSIGHUP: true,
+  };
+  if (!headless && process.platform === 'win32') {
+    launchOptions.channel = 'chrome';
+  }
+
+  const browser = await chromium.launch(launchOptions);
+
+  const contextOptions = {
+    viewport: headless ? { width: 1280, height: 720 } : null,
+  };
+
+  // Do not load PLAYWRIGHT_STORAGE_STATE for normal Admin runs (can revive aadhi session).
+  // Only Google Integration flows should set GOOGLE_INTEGRATION_STORAGE_STATE.
+  if (process.env.GOOGLE_INTEGRATION_STORAGE_STATE) {
+    const storageStatePath = resolvePathForWorld();
+    if (storageStatePath) {
+      console.log(`[World] Loading Google storage state from ${storageStatePath}`);
+      contextOptions.storageState = storageStatePath;
+    }
+  }
+
+  const context = await browser.newContext(contextOptions);
+
+  const page = await context.newPage();
+  sharedSession = { browser, context, page };
+  return sharedSession;
+}
+
 class CustomWorld {
+  async ensureLivePage() {
+    if (this.page && !this.page.isClosed()) return;
+
+    if (sharedSession && isSessionAlive(sharedSession)) {
+      const livePage = pickLivePage(sharedSession);
+      if (livePage) {
+        this.browser = sharedSession.browser;
+        this.context = sharedSession.context;
+        this.page = livePage;
+        sharedSession.page = livePage;
+        return;
+      }
+    }
+
+    await resetSharedSession();
+    await this.init();
+  }
+
   async init() {
+    if (this.page?.isClosed() && sharedSession) {
+      const livePage = pickLivePage(sharedSession);
+      if (livePage) {
+        sharedSession.page = livePage;
+      } else {
+        await resetSharedSession();
+      }
+    }
+
     const session = await ensureSharedSession();
     this.browser = session.browser;
     this.context = session.context;
@@ -119,6 +197,17 @@ class CustomWorld {
     this.vendorOrganizationPage = null;
     this.vendorProductsPage = null;
     this.vendorServicesPage = null;
+    this.inviteVendorPage = null;
+    this.vendorRfqPage = null;
+    this.userHubPage = null;
+    this.userHubAdminPage = null;
+    this.yopmailPage = null;
+    this.userInvitationPage = null;
+    this.userRegistrationPage = null;
+    this.invitedUserEmail = null;
+    this.invitedUserMobile = null;
+    this.invitedUserPage = null;
+    this.invitedUserContext = null;
   }
 
   async cleanup() {
@@ -140,4 +229,4 @@ class CustomWorld {
 
 setWorldConstructor(CustomWorld);
 
-module.exports = { closeSharedSession, shouldKeepBrowserOpen };
+module.exports = { closeSharedSession, resetSharedSession, shouldKeepBrowserOpen };
