@@ -1,4 +1,4 @@
-@crm @lead-profile @events @meeting @google-integration @regression
+@crm @lead-profile @events @meeting @google-integration @regression @ashraf-modules
 Feature: Google Meet Integration for Online Meetings
 
   Background:

@@ -1,4 +1,4 @@
-@crm @lead-profile @events @meeting @repeat @positive @regression
+@crm @lead-profile @events @meeting @repeat @positive @regression @ashraf-modules
 Feature: Repeat Meeting
 
   Background:

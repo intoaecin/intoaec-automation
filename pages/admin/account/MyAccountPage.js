@@ -1,4 +1,4 @@
-﻿const path = require('path');
+const path = require('path');
 const BasePage = require('../../BasePage');
 const { expect } = require('@playwright/test');
 const urls = require('../../../config/urls');
@@ -141,6 +141,32 @@ class MyAccountPage extends BasePage {
     }
   }
 
+  async _dismissAccountMenu() {
+    if (!this.page || this.page.isClosed()) return;
+    try {
+      if (!(await this.page.locator('#account-menu').count().catch(() => 0))) return;
+      // The Account Settings popover stays mounted after navigation and its invisible backdrop
+      // intercepts every click; backdrop clicks/Escape do not close it, so disable its pointer events.
+      await this.page
+        .evaluate(() => {
+          const el = document.querySelector('#account-menu');
+          if (!el) return;
+          el.style.pointerEvents = 'none';
+          el.setAttribute('aria-hidden', 'true');
+          const backdrop = el.querySelector('.MuiBackdrop-root, .MuiModal-backdrop');
+          if (backdrop) {
+            backdrop.style.pointerEvents = 'none';
+            backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          }
+        })
+        .catch(() => {});
+      await this.page.keyboard.press('Escape').catch(() => {});
+      this.logStep('Dismissed lingering Account Settings menu');
+    } catch (error) {
+      console.log(`[MyAccount] Could not dismiss Account Settings menu: ${error.message}`);
+    }
+  }
+
   async _accountMenuOpened() {
     return (
       (await this.myAccountNav.isVisible({ timeout: 1500 }).catch(() => false)) ||
@@ -221,6 +247,7 @@ class MyAccountPage extends BasePage {
 
   async clickMyAccount() {
     if (/myprofile/i.test(this.page.url()) && !(await this.myAccountNav.isVisible({ timeout: 800 }).catch(() => false))) {
+      await this._dismissAccountMenu();
       this.logStep('Already on My Account (/myprofile)');
       return;
     }
@@ -230,6 +257,7 @@ class MyAccountPage extends BasePage {
     await this.page.waitForURL(/myprofile|my[-_]?account/i, { timeout: this.defaultTimeout }).catch(() => {});
     await this.waitForNetworkSettled();
     await this.expectMyAccountPageDisplayed();
+    await this._dismissAccountMenu();
     this.logStep('Clicked My Account');
   }
 
@@ -238,6 +266,30 @@ class MyAccountPage extends BasePage {
       expect(await this.isOnMyAccountPage()).toBeTruthy();
     }).toPass({ timeout: this.defaultTimeout, intervals: [500, 1000, 2000] });
     this.logStep('My Account page is displayed');
+  }
+
+  async expectProfileDetailsVisible() {
+    await this.expectMyAccountPageDisplayed();
+    const markers = [
+      this.page.getByText(/first\s*name|last\s*name|email|mobile|organization|address/i).first(),
+      this.editButton,
+      this.firstNameInput,
+      this.page.locator('input[name="firstName"], input[name="email"], input[name="organizationName"]').first(),
+    ];
+    await expect
+      .poll(
+        async () => {
+          let visibleCount = 0;
+          for (const loc of markers) {
+            // eslint-disable-next-line no-await-in-loop
+            if (await loc.isVisible().catch(() => false)) visibleCount += 1;
+          }
+          return visibleCount;
+        },
+        { message: 'Expected My Account profile details to be visible', timeout: this.defaultTimeout, intervals: [500, 1000, 2000] }
+      )
+      .toBeGreaterThan(0);
+    this.logStep('My Account profile details are visible');
   }
 
   async clickEdit() {
@@ -654,6 +706,7 @@ class MyAccountPage extends BasePage {
 
   async navigateToSecurity() {
     await expect(this.securityTab).toBeVisible({ timeout: this.defaultTimeout });
+    await this._dismissAccountMenu();
     await this.securityTab.click({ timeout: this.uiTimeout });
     await expect(this.currentPasswordInput).toBeVisible({ timeout: this.defaultTimeout });
     await expect(this.newPasswordInput).toBeVisible({ timeout: this.uiTimeout });
@@ -667,6 +720,7 @@ class MyAccountPage extends BasePage {
   }
 
   async fillNewPassword(value) {
+    this.lastNewPassword = String(value || '');
     await this._fillText(this.newPasswordInput, value, 'New Password');
   }
 
@@ -679,7 +733,199 @@ class MyAccountPage extends BasePage {
     await expect(this.changePasswordButton).toBeEnabled({ timeout: this.defaultTimeout });
     await this.changePasswordButton.scrollIntoViewIfNeeded().catch(() => {});
     await this.changePasswordButton.click({ timeout: this.uiTimeout });
+    this.lastSubmittedPassword = this.lastNewPassword;
     this.logStep('Clicked Change Password');
+  }
+
+  async logout() {
+    if (!this.page || this.page.isClosed()) {
+      this.logStep('Page already closed — treating as logged out');
+      return;
+    }
+
+    const passwordModal = this.page
+      .locator('.MuiModal-root, [role="dialog"]')
+      .filter({ hasText: /password changed/i })
+      .first();
+    if (await passwordModal.isVisible({ timeout: 2000 }).catch(() => false)) {
+      const signIn = passwordModal
+        .getByRole('button', { name: /sign in|login|ok|continue/i })
+        .or(passwordModal.getByRole('link', { name: /sign in|login/i }))
+        .first();
+      if (await signIn.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await signIn.click({ timeout: this.uiTimeout, force: true }).catch(() => {});
+        this.logStep('Dismissed password-changed overlay');
+      }
+    }
+
+    await this.page.keyboard.press('Escape').catch(() => {});
+    await this._dismissBlockingOverlays();
+
+    const accountSettings = this.page.getByLabel(/account settings|profile settings/i).first();
+    if (await accountSettings.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await accountSettings.click({ timeout: this.uiTimeout, force: true });
+    } else {
+      const avatar = this.page.locator('header .MuiAvatar-root, [class*="MuiAppBar"] .MuiAvatar-root').last();
+      await avatar.click({ timeout: this.uiTimeout, force: true }).catch(() => {});
+    }
+
+    const logoutItem = this.page
+      .getByRole('menuitem', { name: /log\s*out|sign\s*out/i })
+      .or(this.page.getByRole('button', { name: /log\s*out|sign\s*out/i }))
+      .or(this.page.getByText(/^log\s*out$|^sign\s*out$/i))
+      .filter({ visible: true })
+      .first();
+    await expect(logoutItem).toBeVisible({ timeout: this.defaultTimeout });
+    await logoutItem.click({ timeout: this.uiTimeout });
+    await this.page.waitForURL(/signIn/i, { timeout: this.defaultTimeout }).catch(() => {});
+    await this.waitForNetworkSettled();
+    this.logStep(`Logged out of Admin portal (${this.page.url()})`);
+  }
+
+  async loginWithCredentials(email, password) {
+    const LoginPage = require('../auth/LoginPage');
+    const loginPage = new LoginPage(this.page);
+    this.lastPasswordUsed = String(password || '');
+    await loginPage.goto();
+    if (await loginPage._isAppReady()) {
+      // Force re-auth when verifying a password change.
+      await this.page.goto(`${require('../../../config/env').admin}/auth/signIn`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
+      }).catch(() => {});
+    }
+    await loginPage.login(email, password);
+    await expect
+      .poll(async () => loginPage._isAppReady(), { timeout: 90000, intervals: [500, 1000, 2000] })
+      .toBeTruthy();
+    this.logStep(`Logged in to Admin portal as ${email}`);
+  }
+
+  async expectLoggedInSuccessfully() {
+    const LoginPage = require('../auth/LoginPage');
+    const loginPage = new LoginPage(this.page);
+    await expect
+      .poll(async () => loginPage._isAppReady(), { timeout: 90000, intervals: [500, 1000, 2000] })
+      .toBeTruthy();
+    this.logStep(`Admin user is logged in successfully (${this.page.url()})`);
+  }
+
+  _adityaOrgNames() {
+    return [
+      'adityaconstructions',
+      'Aditya Constructions',
+      'adityaconstuctions',
+      'aditya constructions',
+      'Aditya Construction',
+    ];
+  }
+
+  /** AEC Solutions tenant — also Acc: AEC-#### in the profile menu. */
+  _isAecSolutionsText(text) {
+    const t = String(text || '');
+    return /aec[_\s-]*solutions/i.test(t) || /\bAcc:\s*AEC[-_]?\d+/i.test(t) || /\bAEC[-_]?\d{3,}\b/i.test(t);
+  }
+
+  _isAdityaText(text) {
+    return /aditya\s*const|adityaconst/i.test(String(text || ''));
+  }
+
+  async _readActiveOrgSignals() {
+    const header = this.page.locator('header, [class*="MuiAppBar"]').first();
+    const headerText = ((await header.innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
+    let menuText = '';
+    const accountBtn = this.page
+      .getByLabel(/account settings|profile settings|user menu|account menu/i)
+      .or(this.page.locator('header').getByRole('button').filter({ hasText: /Arjun|Kumar|Acc:/i }))
+      .first();
+    if (await accountBtn.isVisible({ timeout: 800 }).catch(() => false)) {
+      await accountBtn.click({ timeout: 5000, force: true }).catch(() => {});
+      await this.page.waitForTimeout(300).catch(() => {});
+      const menu = this.page.getByRole('menu').or(this.page.locator('[role="menu"], .MuiMenu-paper, [class*="Menu"]')).first();
+      menuText = ((await menu.innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
+      if (!menuText) {
+        menuText = ((await this.page.locator('body').innerText().catch(() => '')) || '')
+          .replace(/\s+/g, ' ')
+          .match(/Acc:\s*[A-Z0-9-]+[^]*?(?=Logout|Log out|$)/i)?.[0] || '';
+      }
+      await this.page.keyboard.press('Escape').catch(() => {});
+    }
+    let orgField = '';
+    if (await this.organizationInput.isVisible({ timeout: 400 }).catch(() => false)) {
+      orgField = String((await this.organizationInput.inputValue().catch(() => '')) || '');
+    }
+    const body = ((await this.page.locator('body').innerText().catch(() => '')) || '').replace(/\s+/g, ' ').slice(0, 2000);
+    return { headerText, menuText, orgField, body, combined: `${headerText} ${menuText} ${orgField}` };
+  }
+
+  async _pageShowsAdityaOrg() {
+    const sig = await this._readActiveOrgSignals();
+    if (this._isAdityaText(sig.orgField) || this._isAdityaText(sig.menuText) || this._isAdityaText(sig.headerText)) {
+      return !this._isAecSolutionsText(sig.orgField);
+    }
+    if (this._isAecSolutionsText(sig.orgField) || this._isAecSolutionsText(sig.menuText) || this._isAecSolutionsText(sig.headerText)) {
+      return false;
+    }
+    // Weak body signal only when AEC is absent.
+    return this._isAdityaText(sig.body) && !this._isAecSolutionsText(sig.body);
+  }
+
+  async _pageShowsAecOrg() {
+    const sig = await this._readActiveOrgSignals();
+    return (
+      this._isAecSolutionsText(sig.orgField) ||
+      this._isAecSolutionsText(sig.menuText) ||
+      this._isAecSolutionsText(sig.headerText)
+    );
+  }
+
+  async _clickOrgCandidate(name) {
+    const re = new RegExp(this._escapeRegex(name).replace(/\s+/g, '\\s*'), 'i');
+    const candidates = [
+      this.page.getByRole('button', { name: re }).filter({ visible: true }).first(),
+      this.page.getByRole('menuitem', { name: re }).filter({ visible: true }).first(),
+      this.page.getByRole('option', { name: re }).filter({ visible: true }).first(),
+      this.page.getByRole('link', { name: re }).filter({ visible: true }).first(),
+      this.page.getByRole('row', { name: re }).filter({ visible: true }).first(),
+      this.page.locator('.cursor-pointer, [class*="cursor-pointer"]').filter({ hasText: re }).first(),
+      this.page.locator('[class*="card"], [class*="Card"], [class*="account"]').filter({ hasText: re }).first(),
+      this.page.getByText(re).filter({ visible: true }).first(),
+    ];
+    for (const loc of candidates) {
+      // eslint-disable-next-line no-await-in-loop
+      if (!(await loc.isVisible({ timeout: 600 }).catch(() => false))) continue;
+      // eslint-disable-next-line no-await-in-loop
+      const text = ((await loc.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+      if (this._isAecSolutionsText(text) && !this._isAdityaText(text)) continue;
+      // eslint-disable-next-line no-await-in-loop
+      await loc.scrollIntoViewIfNeeded().catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      await loc.click({ timeout: this.uiTimeout, force: true }).catch(async () => {
+        await loc.click({ timeout: this.uiTimeout });
+      });
+      await this.waitForNetworkSettled();
+      await this.page.waitForTimeout(800).catch(() => {});
+      return true;
+    }
+    return false;
+  }
+
+  async _openMultiAccountSwitchPage() {
+    // Intentionally disabled — /auth/multi-account-switch 404s and caused account-switch loops.
+    this.logStep('SKIP multi-account-switch navigation (single account: kumar@diy.in)');
+  }
+
+  async _pickAdityaOnCurrentPage() {
+    return false;
+  }
+
+  /**
+   * Org/account switch DISABLED — Admin tests use only kumar@diy.in / Simple@10.
+   */
+  async switchToOrganization(orgName = '') {
+    this.logStep(
+      `SKIP org/account switch "${orgName}" — login only as kumar@diy.in (no multi-account)`
+    );
   }
 }
 

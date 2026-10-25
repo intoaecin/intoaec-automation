@@ -1,4 +1,4 @@
-@crm @lead-profile @events @meeting @negative @validation @regression
+@crm @lead-profile @events @meeting @negative @validation @regression @ashraf-modules
 Feature: Create Meeting Validation
 
   Background:

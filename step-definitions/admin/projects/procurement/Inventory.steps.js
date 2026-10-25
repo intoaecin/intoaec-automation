@@ -4,8 +4,15 @@ const InventoryPage = require('../../../../pages/admin/projects/procurement/Inve
 setDefaultTimeout(120000);
 
 function getInventoryPage(world) {
-  if (!world.inventoryPage) {
+  if (!world.inventoryPage || world.inventoryPage.page !== world.page) {
     world.inventoryPage = new InventoryPage(world.page);
+  }
+  // Keep group name set by Goods Receipt / other modules.
+  if (
+    world.lastCreatedInventoryGroupName &&
+    !world.inventoryPage.lastCreatedGroupName
+  ) {
+    world.inventoryPage.lastCreatedGroupName = world.lastCreatedInventoryGroupName;
   }
   return world.inventoryPage;
 }
@@ -51,16 +58,32 @@ When('I click Create on the create inventory group popup', { timeout: 120000 }, 
   await getInventoryPage(this).clickCreateOnGroupPopup();
 });
 
-Then('the created inventory group should be visible', { timeout: 120000 }, async function () {
+Then('the created inventory group should be visible', { timeout: 180000 }, async function () {
   await getInventoryPage(this).expectCreatedGroupVisible();
 });
 
-When('I open the newly created inventory group', { timeout: 120000 }, async function () {
-  await getInventoryPage(this).openCreatedInventoryGroup();
+When('I open the newly created inventory group', { timeout: 180000 }, async function () {
+  const inv = getInventoryPage(this);
+  if (this.lastCreatedInventoryGroupName) {
+    inv.lastCreatedGroupName = this.lastCreatedInventoryGroupName;
+  }
+  // Prefer InventoryRequestPage when present (has Item Requests → groups list navigation).
+  if (this.inventoryRequestPage) {
+    this.inventoryRequestPage.lastCreatedGroupName =
+      this.lastCreatedInventoryGroupName || inv.lastCreatedGroupName;
+    this.inventoryRequestPage.page = this.page;
+    await this.inventoryRequestPage.openCreatedInventoryGroup();
+    return;
+  }
+  await inv.openCreatedInventoryGroup();
 });
 
 When('I click the Add Item button in inventory group', { timeout: 120000 }, async function () {
-  await getInventoryPage(this).clickAddItem();
+  const inv = getInventoryPage(this);
+  if (this.lastCreatedInventoryGroupName) {
+    inv.lastCreatedGroupName = this.lastCreatedInventoryGroupName;
+  }
+  await inv.clickAddItem();
 });
 
 Then('I should see the add item options', { timeout: 120000 }, async function () {

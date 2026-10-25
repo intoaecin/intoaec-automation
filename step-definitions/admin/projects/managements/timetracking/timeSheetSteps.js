@@ -95,3 +95,10 @@ Then('I verify the timesheet is updated successfully', { timeout: 120000 }, asyn
   ensureTimeTrackingPage(this);
   await timeTrackingPage.verifyTimesheetUpdatedSuccessfully();
 });
+
+Then('I should see the created timesheet in the time sheet list', { timeout: 150000 }, async function () {
+  if (!this.timeTrackingPage) {
+    this.timeTrackingPage = new TimeTrackingPage(this.page);
+  }
+  await this.timeTrackingPage.expectCreatedTimesheetInList();
+});
