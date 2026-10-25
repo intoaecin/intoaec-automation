@@ -61,6 +61,7 @@ When adding new `When/Then` steps for the estimate module, prefer these method n
 
 - Don’t duplicate locators in step definitions.
 - Don’t hardcode long `waitForTimeout()` sequences unless a UI animation requires it (and keep them minimal).
+- Don’t hardcode environment URLs (hosts or full page URLs such as admin dashboard, sign-in, or Clients/Projects). Use `config/env.js` and `config/urls.js`.
 - Don’t create new step-definition files for existing modules; extend the existing module steps/page objects unless the repo already has that pattern.
 
 ---
@@ -68,6 +69,13 @@ When adding new `When/Then` steps for the estimate module, prefer these method n
 ## General automation standards (all modules)
 
 Apply these conventions when adding or refactoring tests. **If a rule is already satisfied in the repo, do not duplicate work;** only add or align what is missing.
+
+### Environment URLs
+
+- **Never hardcode** app hosts or full page URLs in page objects, steps, or scripts.
+- **Hosts** live in **`config/env.js`** (`admin`, `vendor`, `client`), selected by **`TEST_ENV`** (`testing` | `production`). Override when needed with **`ADMIN_BASE_URL`**, **`VENDOR_URL`**, **`CLIENT_URL`**.
+- **Page URLs** live in **`config/urls.js`** (`adminBase`, `adminSignIn`, `adminDashboard`, `clientsProjectsList`, `leadManagerMaster`, `vendorSignIn`, …). All `page.goto(...)` calls and URL fallbacks must use these constants.
+- Detect screens by **path helpers** on that module (`urls.isAdminDashboard(url)`, `urls.isClientsProjectsList(url)`), not by a hardcoded host.
 
 ### Timeouts
 
@@ -197,7 +205,7 @@ Mirror the **Warehouse** / **Services** pattern (`VendorLogin_TestCases.feature`
 
 **Tags:** `@vendor-portal` is the unique tag to run this file alone (`@vendor` also matches purchase-order vendor features). Feature also has `@vendor` `@vendor-login`; scenarios use `@TS01` / `@TC01` … per test sheet.
 
-**URL:** `https://vendor.aecplayhouse.com/auth/signIn` (`config/env.js` → `vendor`).
+**URL:** `config/urls.js` → `vendorSignIn` (from `config/env.js` → `vendor`; override with `VENDOR_URL`).
 
 **TC-01** is the vendor sign-in flow (`praveen@yopmail.com` / `Simple@10`). **TC-02** uses `Given I am logged in to the vendor portal` then Account Settings → **My Profile** → Edit → Save. **TC-03** uses My Profile → **Security** → change password (`Simple@10` → `Courage@10`) → logout → login with the new password. After TC-03 the original password (`Simple@10`) is restored so TC-01 / TC-02 keep working. **TC-04** uses Account Settings → **My Organization** → **Company Info** → Edit → registration number + category → Update. **TC-05** uses My Organization → **Business Info** → Edit → address line 1/2, city, state, country, ZIP → Update. **TC-06** uses My Organization → **Social Media** → Edit → Facebook/Twitter/LinkedIn/Instagram/Public Profile/Website URLs → Save → refresh → verify. **TC-07** uses My Organization → **E-Signature** → Draw a signature → Update → refresh → verify Existing Digital Signature. **TC-08** uses My Organization → **E-Signature** → Upload `sample_signature.png` → Update → verify Existing Digital Signature. **TC-09** uses **Products** → **Add Product** → **Start From Scratch** → Product Information (name/category/subcategory/qty/brand/description) → Save → Product List. **TC-10** uses **Services** → **Create New** → Service Name/Category/Type/Description → Fixed Price / 2500 / Taxable → Save → Service List. **TC-11** uses Admin (`kumar@diy.in` / `Simple@10`) → Invite Vendor (`praveen@yopmail.com`, registers with `Simple@10`) → Yopmail → register → Accepted.
 

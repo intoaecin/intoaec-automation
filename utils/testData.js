@@ -1,11 +1,24 @@
 // utils/testData.js
+require('../config/loadEnv');
+
+function fromEnv(name, fallback) {
+  const value = process.env[name];
+  return value && String(value).trim() ? String(value).trim() : fallback;
+}
+
 const testData = {
   admin: {
-    validUser:   { email: 'kumar@diy.in', password: 'Simple@10' },
-    // invalidUser: { email: 'wrong@gmail.com',       password: 'wrongpass' }
+    validUser: {
+      email: fromEnv('ADMIN_EMAIL', 'kumar@diy.in'),
+      password: fromEnv('ADMIN_PASSWORD', 'Simple@10'),
+    },
+    invalidUser: { email: 'wrong@gmail.com', password: 'wrongpass' },
   },
   vendor: {
-    validUser:   { email: 'praveen@yopmail.com', password: 'Simple@10' },
+    validUser: {
+      email: fromEnv('VENDOR_EMAIL', 'praveen@yopmail.com'),
+      password: fromEnv('VENDOR_PASSWORD', 'Simple@10'),
+    },
     rfqUser: {
       email: process.env.VENDOR_RFQ_EMAIL || 'praveen@yopmail.com',
       password: process.env.VENDOR_RFQ_PASSWORD || 'Simple@10',
@@ -54,7 +67,10 @@ const testData = {
     },
   },
   client: {
-    validUser:   { email: 'client@gmail.com',      password: 'Client@10' },
+    validUser: {
+      email: fromEnv('CLIENT_EMAIL', 'client@gmail.com'),
+      password: fromEnv('CLIENT_PASSWORD', 'Client@10'),
+    },
     portalUser: {
       email: 'bhavani123@yopmail.com',
       originalName: 'john',
@@ -81,7 +97,7 @@ const testData = {
       projectId: process.env.ADMIN_MVB_PROJECT_ID || '1808c568-ab81-47de-9559-9cbd6d9c56b7',
       clientId: process.env.ADMIN_MVB_CLIENT_ID || '810fe142-aae5-4596-91af-8710a241c5e3',
     },
-  }
+  },
 };
 
 module.exports = testData;

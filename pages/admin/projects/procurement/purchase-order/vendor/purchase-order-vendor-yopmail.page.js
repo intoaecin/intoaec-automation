@@ -18,38 +18,30 @@ function getMailHintRegex() {
   return /purchase order|\bPO\b|p\.?\s*o\.?\s*(no\.?|#)?/i;
 }
 
-function escapeRegExp(s) {
-  return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * Strip relative times so the same mail does not look "new" on every refresh
- * ("5 min ago" → "6 min ago" was causing old PO mails to be opened).
- */
-function normalizeInboxFingerprint(text) {
-  return String(text || '')
-    .replace(/\u00a0/g, ' ')
-    .replace(
-      /\b\d+\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?|months?|years?)\b/gi,
-      ''
-    )
-    .replace(/\b\d+\s*[smhd]\b/gi, '')
-    .replace(/\b(ago|just now|today|yesterday|now)\b/gi, '')
-    .replace(/\b\d{1,2}:\d{2}(:\d{2})?\s*(am|pm)?\b/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
-    .slice(0, 140);
+function compileSubjectFilter(pattern) {
+  const s = String(pattern || '').trim();
+  if (!s) return null;
+  return new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
 }
 
 /** Yopmail inbox + reading PO mail + opening vendor portal from “View PO”. */
 class PurchaseOrderVendorYopmailPage extends BasePage {
   constructor(page) {
     super(page);
+    this.inboxLogin = '';
     this.inboxTimeoutMs = parseInt(
       process.env.PO_YOPMAIL_INBOX_TIMEOUT_MS || '180000',
       10
     );
+    this.initialRefreshBurstCount = parseInt(
+      process.env.PO_YOPMAIL_INITIAL_REFRESH_COUNT || '4',
+      10
+    );
+    this.refreshBurstDelayMs = parseInt(
+      process.env.PO_YOPMAIL_REFRESH_BURST_MS || '500',
+      10
+    );
+    this._refreshCounter = 0;
   }
 
   inboxFrame() {
@@ -60,285 +52,399 @@ class PurchaseOrderVendorYopmailPage extends BasePage {
     return this.page.frameLocator('iframe[name="ifmail"]');
   }
 
+  inboxUrl(login) {
+    return `https://yopmail.com/en/?login=${encodeURIComponent(login)}`;
+  }
+
+  async ensureInboxIframe(timeoutMs = 30000) {
+    await this.page.waitForSelector('iframe[name="ifinbox"]', {
+      timeout: timeoutMs,
+    });
+  }
+
   async gotoInboxForLocalPart(localPart) {
     const login = String(localPart || '').trim();
     if (!login) {
       throw new Error('Yopmail inbox name is empty.');
     }
-    await this.page.goto(`https://yopmail.com?${encodeURIComponent(login)}`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 90000,
-    });
-    await this.page
-      .waitForSelector('iframe[name="ifinbox"]', { timeout: 45000 })
-      .catch(async () => {
-        const box = this.page.locator('#login, input#login, input[name="login"]').first();
-        if (await box.isVisible({ timeout: 8000 }).catch(() => false)) {
-          await box.fill(login);
-          await box.press('Enter');
-          await this.page.waitForSelector('iframe[name="ifinbox"]', {
-            timeout: 45000,
-          });
-        }
+    this.inboxLogin = login;
+
+    const urls = [
+      this.inboxUrl(login),
+      `https://yopmail.com?${encodeURIComponent(login)}`,
+    ];
+
+    let loaded = false;
+    for (const url of urls) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await this.page.goto(url, {
+          waitUntil: 'domcontentloaded',
+          timeout: 60000,
+        });
+        // eslint-disable-next-line no-await-in-loop
+        await this.ensureInboxIframe(30000);
+        loaded = true;
+        break;
+      } catch {
+        /* try next URL */
+      }
+    }
+
+    if (!loaded) {
+      const box = this.page.locator('#login, input#login, input[name="login"]').first();
+      if (await box.isVisible({ timeout: 8000 }).catch(() => false)) {
+        await box.fill(login);
+        await box.press('Enter');
+        await this.ensureInboxIframe(30000);
+        loaded = true;
+      }
+    }
+
+    if (!loaded) {
+      throw new Error(`Yopmail inbox did not load for "${login}".`);
+    }
+
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+  }
+
+  async reloadInbox() {
+    if (this.inboxLogin) {
+      await this.page.goto(this.inboxUrl(this.inboxLogin), {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
       });
-    // Let inbox paint before snapshotting baseline.
-    await this.page.waitForTimeout(1200);
+    } else {
+      await this.page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+    }
+    await this.ensureInboxIframe(30000).catch(() => {});
   }
 
   async refreshInbox() {
-    const refresh = this.page.locator('#refresh').first();
-    if (await refresh.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await refresh.click();
-      return;
+    await this.page.bringToFront().catch(() => {});
+    this._refreshCounter += 1;
+
+    const inbox = this.inboxFrame();
+    const refreshControls = [
+      this.page.locator('#refresh').first(),
+      this.page.locator('#frefresh').first(),
+      inbox.locator('#refresh').first(),
+      inbox.locator('#frefresh').first(),
+      this.page.getByRole('button', { name: /refresh/i }).first(),
+    ];
+
+    for (const control of refreshControls) {
+      try {
+        if (await control.isVisible({ timeout: 600 }).catch(() => false)) {
+          await control.click({ timeout: 5000, force: true }).catch(() => {});
+          // eslint-disable-next-line no-console
+          console.log('[PO Yopmail] Clicked inbox refresh.');
+          return true;
+        }
+      } catch {
+        /* next */
+      }
     }
-    const byTitle = this.page.locator('[title*="efresh" i], [title*="Refresh" i]').first();
-    if (await byTitle.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await byTitle.click();
+
+    if (this._refreshCounter % 6 !== 0) {
+      await this.page.keyboard.press('F5').catch(() => {});
+      // eslint-disable-next-line no-console
+      console.log('[PO Yopmail] Triggered inbox refresh (F5).');
+      return true;
     }
+
+    // eslint-disable-next-line no-console
+    console.log('[PO Yopmail] Reloading inbox page to fetch new mail…');
+    await this.reloadInbox();
+    return true;
   }
 
-  inboxRowLocator() {
-    return this.inboxFrame().locator(
-      'div.m[id], div.m, button.lm, a.lm, div.lm'
-    );
-  }
-
-  /**
-   * Snapshot inbox state before Send so we can detect a newly arrived mail.
-   * Uses DOM ids when present + time-normalized text fingerprints.
-   * @returns {Promise<{ count: number, ids: string[], fingerprints: string[] }>}
-   */
-  async snapshotInboxState() {
-    await this.refreshInbox().catch(() => {});
-    await this.page.waitForTimeout(800);
-    const rows = this.inboxRowLocator();
-    const count = await rows.count().catch(() => 0);
-    const ids = [];
-    const fingerprints = [];
-    for (let i = 0; i < Math.min(count, 30); i++) {
-      const row = rows.nth(i);
-      const id = String((await row.getAttribute('id').catch(() => '')) || '').trim();
-      const text = (await row.innerText().catch(() => '')) || '';
-      const fp = normalizeInboxFingerprint(text);
-      if (id) ids.push(id);
-      if (fp) fingerprints.push(fp);
+  poInboxRowLocator(inbox, hint, subjectRe) {
+    let rows = inbox.locator('div.m, .lm, tr, .l').filter({ hasNotText: /^view\s*po$/i });
+    if (subjectRe) {
+      rows = rows.filter({ hasText: subjectRe });
+    } else {
+      rows = rows.filter({ hasText: hint });
     }
-    return { count, ids, fingerprints };
+    return rows;
   }
 
-  /** @deprecated use snapshotInboxState().fingerprints */
-  async snapshotInboxFingerprints() {
-    const state = await this.snapshotInboxState();
-    return state.fingerprints;
-  }
-
-  async readOpenMailBodyText() {
+  async mailBodyContainsText(reOrText) {
     const ifmail = this.mailFrame();
-    const body = ifmail.locator('body');
-    if (await body.isVisible({ timeout: 5000 }).catch(() => false)) {
-      return ((await body.innerText().catch(() => '')) || '').trim();
-    }
-    return ((await ifmail.locator(':root').innerText().catch(() => '')) || '').trim();
+    const q =
+      reOrText instanceof RegExp
+        ? ifmail.getByText(reOrText, { exact: false }).first()
+        : ifmail.getByText(String(reOrText), { exact: false }).first();
+    return q.isVisible({ timeout: 1000 }).catch(() => false);
   }
 
-  async openMailBodyMatchesExpected(expectedTitle) {
-    const title = String(expectedTitle || '').trim();
-    if (!title) return true;
-    const body = await this.readOpenMailBodyText();
-    if (!body) return false;
-    const titleRe = new RegExp(escapeRegExp(title), 'i');
-    if (titleRe.test(body)) return true;
-    // Some templates only show PO number / generic "Purchase Order" — allow if body is clearly a PO
-    // but caller should prefer title match. Return false so we keep waiting for the right mail.
+  async snapshotInboxRowSignatures(inbox, maxRows = 15) {
+    const rows = inbox.locator('div.m, .lm, tr, .l');
+    const total = Math.min(await rows.count().catch(() => 0), maxRows);
+    /** @type {Set<string>} */
+    const seen = new Set();
+    for (let i = 0; i < total; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const t = await rows.nth(i).textContent({ timeout: 2000 }).catch(() => '');
+      const sig = String(t || '').replace(/\s+/g, ' ').trim();
+      if (sig) seen.add(sig);
+    }
+    return seen;
+  }
+
+  async rowSignature(row) {
+    const t = await row.textContent().catch(() => '');
+    return String(t || '').replace(/\s+/g, ' ').trim();
+  }
+
+  async openNewestMatchingPoMailRow(inbox, hint, subjectRe, previouslySeenSignatures) {
+    const rows = this.poInboxRowLocator(inbox, hint, subjectRe);
+    const total = await rows.count().catch(() => 0);
+    const limit = Math.min(20, total);
+
+    for (let i = 0; i < limit; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const row = rows.nth(i);
+      // eslint-disable-next-line no-await-in-loop
+      if (!(await row.isVisible({ timeout: 1200 }).catch(() => false))) continue;
+      // eslint-disable-next-line no-await-in-loop
+      const sig = await this.rowSignature(row);
+      if (previouslySeenSignatures && sig && previouslySeenSignatures.has(sig)) {
+        continue;
+      }
+      if (previouslySeenSignatures && sig) previouslySeenSignatures.add(sig);
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await row.click(attempt === 0 ? {} : { force: true });
+        } catch {
+          // eslint-disable-next-line no-await-in-loop
+          await row.click({ force: true }).catch(() => {});
+        }
+        // eslint-disable-next-line no-await-in-loop
+        await this.page.waitForTimeout(350);
+
+        const viewish = await this.mailFrame()
+          .locator('a,button')
+          .filter({ hasText: /view\s*po|view|open/i })
+          .first()
+          .isVisible({ timeout: 800 })
+          .catch(() => false);
+        if (viewish) break;
+
+        // eslint-disable-next-line no-await-in-loop
+        await row.dblclick({ timeout: 3000 }).catch(() => {});
+        // eslint-disable-next-line no-await-in-loop
+        await this.page.waitForTimeout(300);
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  buildSubjectBodyMatchers(subjectText) {
+    const full = String(subjectText || '').trim();
+    /** @type {RegExp[]} */
+    const matchers = [];
+    if (!full) return matchers;
+
+    const escaped = compileSubjectFilter(full);
+    if (escaped) matchers.push(escaped);
+
+    const paren = full.match(/\(([^)]+)\)/);
+    if (paren?.[1]) {
+      const parenRe = compileSubjectFilter(paren[1]);
+      if (parenRe) matchers.push(parenRe);
+    }
+
+    const dashTail = full.split('—').pop()?.trim();
+    if (dashTail && dashTail !== full) {
+      const tailRe = compileSubjectFilter(dashTail);
+      if (tailRe) matchers.push(tailRe);
+    }
+
+    return matchers;
+  }
+
+  async mailBodyMatchesSubject(subjectText) {
+    const matchers = this.buildSubjectBodyMatchers(subjectText);
+    if (matchers.length === 0) return true;
+
+    for (const re of matchers) {
+      // eslint-disable-next-line no-await-in-loop
+      if (await this.mailBodyContainsText(re)) return true;
+    }
     return false;
   }
 
   /**
-   * Poll inbox after Send: refresh until the **top** mail changes vs pre-send baseline
-   * (or a new DOM id appears), open that newest mail, click View PO.
+   * Refresh Yopmail until a new PO email appears, open it, click View PO.
+   * @param {{ subjectContains?: string }} [options]
+   * @returns {import('playwright').Page} Vendor portal page (new tab or same tab).
    */
-  async waitOpenPoMessageAndClickViewPo(opts = {}) {
-    const hint = getMailHintRegex();
-    const deadline = Date.now() + this.inboxTimeoutMs;
-    const expectedPoTitle = String(opts.expectedPoTitle || '').trim();
-    const baseline = opts.baseline || {};
-    const baselineIds = new Set(
-      (baseline.ids || []).map((id) => String(id || '').trim()).filter(Boolean)
-    );
-    const baselineTopId = String((baseline.ids || [])[0] || '').trim();
-    const baselineTopFp = normalizeInboxFingerprint(
-      (baseline.fingerprints || [])[0] || ''
-    );
-    const baselineCount = Number(baseline.count || 0);
-
+  async waitOpenPoMessageAndClickViewPo(options = {}) {
     // eslint-disable-next-line no-console
-    console.log(
-      `[Yopmail] Waiting for newest mail after send` +
-        `${expectedPoTitle ? ` (expect title "${expectedPoTitle}")` : ''}` +
-        ` baselineTopId=${baselineTopId || '(none)'} count=${baselineCount}`
-    );
+    console.log('[PO Yopmail] Refreshing inbox until new PO email arrives…');
 
-    const readTop = async () => {
-      const rows = this.inboxRowLocator();
-      const count = await rows.count().catch(() => 0);
-      if (count < 1) return null;
-      const top = rows.first();
-      if (!(await top.isVisible({ timeout: 1500 }).catch(() => false))) return null;
-      const id = String((await top.getAttribute('id').catch(() => '')) || '').trim();
-      const text = ((await top.innerText().catch(() => '')) || '').trim();
-      return {
-        row: top,
-        id,
-        text,
-        fp: normalizeInboxFingerprint(text),
-        count,
-      };
-    };
+    await this.page.bringToFront().catch(() => {});
+    await this.ensureInboxIframe(20000).catch(() => {});
+
+    const hint = getMailHintRegex();
+    const subjectText = String(options.subjectContains || '').trim();
+    const burstN = Math.max(3, Math.min(this.initialRefreshBurstCount || 4, 6));
+    const deadline = Date.now() + this.inboxTimeoutMs;
+    let refreshCount = 0;
+    /** @type {Set<string>} */
+    let seen = new Set();
 
     while (Date.now() < deadline) {
-      if (this.page.isClosed()) {
-        throw new Error('Yopmail page was closed while waiting for new PO mail');
+      refreshCount += 1;
+      await this.refreshInbox();
+      // eslint-disable-next-line no-await-in-loop
+      await this.page.waitForTimeout(
+        refreshCount <= burstN ? this.refreshBurstDelayMs : 700
+      );
+
+      const inbox = this.inboxFrame();
+      if (refreshCount === 1) {
+        seen = await this.snapshotInboxRowSignatures(inbox, 15).catch(() => new Set());
       }
 
-      await this.refreshInbox().catch(() => {});
-      await this.page.waitForTimeout(1200);
+      if (refreshCount === 1 || refreshCount % 6 === 0) {
+        // eslint-disable-next-line no-console
+        console.log(`[PO Yopmail] Inbox refreshed (#${refreshCount}) — checking for new PO mail…`);
+      }
 
-      const titleRe = expectedPoTitle
-        ? new RegExp(escapeRegExp(expectedPoTitle), 'i')
-        : null;
+      const opened = await this.openNewestMatchingPoMailRow(inbox, hint, null, seen);
+      if (!opened) {
+        continue;
+      }
 
-      // Prefer any inbox row that already shows the expected PO title (newest match first).
-      if (titleRe) {
-        const titledRows = this.inboxRowLocator().filter({ hasText: titleRe });
-        const titledCount = await titledRows.count().catch(() => 0);
-        for (let i = 0; i < Math.min(titledCount, 5); i++) {
-          const row = titledRows.nth(i);
-          if (!(await row.isVisible({ timeout: 600 }).catch(() => false))) continue;
-          const id = String((await row.getAttribute('id').catch(() => '')) || '').trim();
-          const text = ((await row.innerText().catch(() => '')) || '').trim();
-          const fp = normalizeInboxFingerprint(text);
-          const isOldId = id && baselineIds.has(id);
-          // Open if new id, OR top-ish titled mail after send (allow first titled if unique title).
-          if (isOldId && baselineIds.size > 0) {
-            continue;
-          }
+      if (subjectText) {
+        const matchesBody = await this.mailBodyMatchesSubject(subjectText);
+        if (!matchesBody) {
           // eslint-disable-next-line no-console
           console.log(
-            `[Yopmail] Opening titled PO mail #${i + 1} id=${id || '(none)'} fp="${fp.slice(0, 70)}"`
+            '[PO Yopmail] Opened mail but body did not match this run — refreshing again.'
           );
-          await row.click({ force: true });
-          await this.page.waitForTimeout(900);
-          const ifmail = this.mailFrame();
-          const viewPo = ifmail
-            .getByRole('link', { name: /view\s*po/i })
-            .or(ifmail.getByRole('button', { name: /view\s*po/i }))
-            .or(ifmail.locator('a').filter({ hasText: /view\s*po/i }))
-            .first();
-          if (await viewPo.isVisible({ timeout: 8000 }).catch(() => false)) {
-            if (await this.openMailBodyMatchesExpected(expectedPoTitle)) {
-              console.log(`[Yopmail] Mail body matches PO title "${expectedPoTitle}"`);
-            }
-            return this.clickViewPoAndResolveVendorPortalPage();
-          }
-          console.log('[Yopmail] Titled row has no View PO — try next / refresh');
+          continue;
         }
       }
 
-      const top = await readTop();
-      if (!top) continue;
-
-      const titleOnTop = titleRe ? titleRe.test(top.text) : false;
-      const topIsNewId =
-        Boolean(top.id) && (baselineIds.size === 0 || !baselineIds.has(top.id));
-      // Title on top only counts when the row id is new (unique PO title per run).
-      const titledNewOnTop = titleOnTop && topIsNewId;
-      const topChanged =
-        (baselineTopId && top.id && top.id !== baselineTopId) ||
-        (baselineTopFp && top.fp && top.fp !== baselineTopFp) ||
-        topIsNewId ||
-        (baselineCount > 0 && top.count > baselineCount) ||
-        titledNewOnTop;
-
-      const looksLikePo = hint.test(top.text) || /purchase|order|\bpo\b/i.test(top.text);
-      if (!topChanged && baselineIds.size + baselineCount > 0) {
-        console.log(
-          `[Yopmail] Still waiting — top id=${top.id || '(none)'} fp="${top.fp.slice(0, 50)}"`
-        );
-        continue;
-      }
-
-      if (!looksLikePo && !titledNewOnTop && topChanged) {
-        console.log('[Yopmail] Top mail changed but snippet weak — opening anyway');
-      } else if (!looksLikePo && !titledNewOnTop && !topChanged) {
-        continue;
-      }
-
-      console.log(
-        `[Yopmail] Opening newest mail id=${top.id || '(none)'} fp="${top.fp.slice(0, 70)}"`
-      );
-      await top.row.click({ force: true });
-      await this.page.waitForTimeout(1000);
-
-      if (expectedPoTitle) {
-        const matches = await this.openMailBodyMatchesExpected(expectedPoTitle);
-        console.log(
-          matches
-            ? `[Yopmail] Mail body matches PO title "${expectedPoTitle}"`
-            : `[Yopmail] Newest mail body missing title "${expectedPoTitle}" — checking View PO anyway`
-        );
-      }
-
-      const ifmail = this.mailFrame();
-      const viewPo = ifmail
-        .getByRole('link', { name: /view\s*po/i })
-        .or(ifmail.getByRole('button', { name: /view\s*po/i }))
-        .or(ifmail.locator('a').filter({ hasText: /view\s*po/i }))
-        .first();
-
-      if (!(await viewPo.isVisible({ timeout: 8000 }).catch(() => false))) {
-        console.log('[Yopmail] No View PO in opened mail — refresh and retry');
-        continue;
-      }
-
+      // eslint-disable-next-line no-console
+      console.log('[PO Yopmail] Opened PO email — clicking View PO.');
       return this.clickViewPoAndResolveVendorPortalPage();
     }
 
+    const extra = subjectText ? ` with subject containing "${subjectText}"` : '';
     throw new Error(
-      `Yopmail: no new PO mail appeared at the top of the inbox within ${this.inboxTimeoutMs}ms` +
-        `${expectedPoTitle ? ` (title "${expectedPoTitle}")` : ''}.`
+      `No purchase-order email matched ${hint}${extra} in Yopmail within ${this.inboxTimeoutMs}ms.`
     );
   }
 
   async clickViewPoAndResolveVendorPortalPage() {
     const ifmail = this.mailFrame();
-    const viewPo = ifmail
-      .getByRole('link', { name: /view\s*po/i })
-      .or(ifmail.getByRole('button', { name: /view\s*po/i }))
-      .or(ifmail.locator('a').filter({ hasText: /view\s*po/i }))
-      .first();
+    const viewLabel = /view\s*po|view\s*purchase\s*order|open\s*po/i;
 
-    await expect(viewPo).toBeVisible({ timeout: 90000 });
+    const candidates = [
+      ifmail.getByRole('link', { name: viewLabel }).first(),
+      ifmail.getByRole('button', { name: viewLabel }).first(),
+      ifmail.locator('a').filter({ hasText: viewLabel }).first(),
+      ifmail.locator('a').filter({ hasText: /^view$/i }).first(),
+      ifmail.locator('a[href]').filter({ hasText: /view|open/i }).first(),
+    ];
+
+    const resolveVisibleView = async () => {
+      for (const c of candidates) {
+        // eslint-disable-next-line no-await-in-loop
+        if (await c.isVisible({ timeout: 800 }).catch(() => false)) {
+          return c;
+        }
+      }
+      return null;
+    };
+
+    const deadline = Date.now() + 60000;
+    /** @type {import('@playwright/test').Locator | null} */
+    let viewPo = null;
+    while (Date.now() < deadline) {
+      // eslint-disable-next-line no-await-in-loop
+      viewPo = await resolveVisibleView();
+      if (viewPo) break;
+      // eslint-disable-next-line no-await-in-loop
+      await this.page.waitForTimeout(300);
+    }
+
+    if (!viewPo) {
+      throw new Error('Yopmail mail opened but "View PO" button/link was not found.');
+    }
+
+    await viewPo.scrollIntoViewIfNeeded().catch(() => {});
 
     const ctx = this.page.context();
-    const popupPromise = ctx.waitForEvent('page', { timeout: 8000 }).catch(() => null);
-    await viewPo.click();
-    const popup = await popupPromise;
+    const popupPromise = ctx.waitForEvent('page', { timeout: 25000 }).catch(() => null);
 
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await viewPo.click(attempt === 0 ? { timeout: 15000 } : { timeout: 15000, force: true });
+        break;
+      } catch {
+        // eslint-disable-next-line no-await-in-loop
+        await this.page.waitForTimeout(450);
+        if (attempt === 2) {
+          await viewPo.click({ timeout: 15000, force: true }).catch(async () => {
+            const clicked = await this.page
+              .frame({ name: 'ifmail' })
+              ?.evaluate(() => {
+                const re = /view\s*po|view\s*purchase\s*order|open\s*po/i;
+                const anchors = Array.from(document.querySelectorAll('a,button'));
+                const el =
+                  anchors.find((a) => re.test((a.textContent || '').trim())) ||
+                  anchors.find((a) => /view|open/i.test((a.textContent || '').trim()));
+                if (el) {
+                  el.click();
+                  return true;
+                }
+                return false;
+              })
+              .catch(() => false);
+            if (!clicked) {
+              throw new Error('Could not click View PO inside Yopmail mail iframe.');
+            }
+          });
+        }
+      }
+    }
+
+    const popup = await popupPromise;
     if (popup) {
       await popup.waitForLoadState('domcontentloaded');
+      await popup.bringToFront().catch(() => {});
+      // eslint-disable-next-line no-console
+      console.log('[PO Yopmail] Vendor portal opened in new browser tab.');
       return popup;
     }
 
-    await this.page.waitForURL(
-      (u) => !String(u).toLowerCase().includes('yopmail.com'),
-      { timeout: 120000 }
-    );
+    await this.page
+      .waitForURL((u) => !String(u).toLowerCase().includes('yopmail.com'), {
+        timeout: 90000,
+      })
+      .catch(async () => {
+        await viewPo.click({ timeout: 15000, force: true }).catch(() => {});
+        await this.page.waitForURL(
+          (u) => !String(u).toLowerCase().includes('yopmail.com'),
+          { timeout: 90000 }
+        );
+      });
+
+    await this.page.bringToFront().catch(() => {});
+    // eslint-disable-next-line no-console
+    console.log('[PO Yopmail] Vendor portal opened in current tab.');
     return this.page;
   }
 }
 
-module.exports = {
-  PurchaseOrderVendorYopmailPage,
-  yopmailLocalPart,
-  normalizeInboxFingerprint,
-};
+module.exports = { PurchaseOrderVendorYopmailPage, yopmailLocalPart };

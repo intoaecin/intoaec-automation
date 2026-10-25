@@ -1,7 +1,7 @@
 const path = require('path');
 const BasePage = require('../../BasePage');
 const { expect } = require('@playwright/test');
-const env = require('../../../config/env');
+const urls = require('../../../config/urls');
 
 /**
  * Header → Profile Settings → My Account (view / edit profile).
@@ -180,7 +180,7 @@ class MyAccountPage extends BasePage {
 
     const header = this.page.locator('header, [class*="MuiAppBar"]').first();
     if (!(await header.isVisible({ timeout: 8000 }).catch(() => false))) {
-      await this.page.goto(env.admin, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+      await this.page.goto(urls.adminBase, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
       await this.waitForNetworkSettled();
       await this._dismissBlockingOverlays();
     }

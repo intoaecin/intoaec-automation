@@ -18,22 +18,35 @@ class PurchaseOrderTermsAndConditionsPoPage extends PurchaseOrderDefaultTermsTem
     ].join(' ');
   }
 
+  termsSectionLocator() {
+    return this.page
+      .locator('section, div')
+      .filter({
+        has: this.page.getByText(/terms\s*(and|&)\s*conditions?/i),
+      })
+      .filter({
+        has: this.page.getByRole('button', { name: /choose from template/i }),
+      })
+      .last();
+  }
+
   termsEditorLocator() {
     const custom = String(process.env.PO_TERMS_SELECTOR || '').trim();
     if (custom) {
       return this.page.locator(custom).first();
     }
 
-    const termsBlock = this.page
-      .locator('div')
-      .filter({
-        has: this.page.getByText(/terms\s*(and|&)\s*conditions?/i),
-      })
-      .first();
+    const heading = this.termsHeading();
+    const section = this.termsSectionLocator();
 
-    return termsBlock
-      .locator('textarea, [contenteditable="true"], .ql-editor')
-      .or(termsBlock.getByRole('textbox'))
+    return heading
+      .locator(
+        'xpath=following::*[self::textarea or @contenteditable="true" or contains(@class,"ql-editor")][1]'
+      )
+      .or(section.locator('.ql-editor'))
+      .or(section.locator('[contenteditable="true"]'))
+      .or(section.locator('textarea'))
+      .or(section.getByRole('textbox'))
       .first();
   }
 
@@ -56,6 +69,7 @@ class PurchaseOrderTermsAndConditionsPoPage extends PurchaseOrderDefaultTermsTem
     if (contentEditable) {
       await field.evaluate((el, text) => {
         el.focus();
+        el.innerHTML = '';
         el.textContent = text;
         el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -78,6 +92,7 @@ class PurchaseOrderTermsAndConditionsPoPage extends PurchaseOrderDefaultTermsTem
     await this.scrollPurchaseOrderPageToRevealTermsSection(heading);
     await expect(heading).toBeVisible({ timeout: 60000 });
     await heading.scrollIntoViewIfNeeded();
+    await heading.click({ timeout: 5000 }).catch(() => {});
 
     const value = String(text || '').trim();
     if (!value) {
@@ -85,7 +100,25 @@ class PurchaseOrderTermsAndConditionsPoPage extends PurchaseOrderDefaultTermsTem
     }
 
     const field = this.termsEditorLocator();
+    await expect(field).toBeVisible({ timeout: 45000 });
     await this.fillTermsEditorField(field, value);
+
+    const snippet = value.slice(0, 40);
+    await expect
+      .poll(
+        async () => {
+          const typed =
+            (await field.inputValue().catch(() => '')) ||
+            (await field.innerText().catch(() => '')) ||
+            '';
+          return typed.replace(/\s+/g, ' ');
+        },
+        { timeout: 15000, intervals: [200, 400, 800] }
+      )
+      .toContain(snippet.slice(0, 24));
+
+    // eslint-disable-next-line no-console
+    console.log(`[PO terms] Entered terms and conditions (${value.length} chars).`);
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
   }
 }
