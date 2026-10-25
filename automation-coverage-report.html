@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IntoAEC Automation Coverage Report</title>
+<style>
+:root {
+  --ink: #152033;
+  --muted: #5f7085;
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+  --bg: #eef2f7;
+  --card: #ffffff;
+  --blue: #1f5fb8;
+  --blue-soft: #e8f1fc;
+  --green: #0f7a55;
+  --green-soft: #e6f6ef;
+  --amber: #9a6700;
+  --amber-soft: #fff4db;
+  --red: #b42336;
+  --red-soft: #fdecee;
+  --shadow: 0 10px 28px rgba(21, 40, 72, 0.08);
+  --radius: 14px;
+  --font: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 420px at 10% -10%, #d7e6fb 0%, transparent 55%),
+    radial-gradient(900px 380px at 100% 0%, #d9efe6 0%, transparent 50%),
+    var(--bg);
+  color: var(--ink);
+  font: 14px/1.5 var(--font);
+}
+
+.hero {
+  background: linear-gradient(125deg, #10233f 0%, #1d4f94 58%, #2a6fbf 100%);
+  color: #fff;
+  padding: 36px 20px 40px;
+}
+
+.hero h1 {
+  max-width: 1120px;
+  margin: 0 auto 8px;
+  font-size: clamp(26px, 3.2vw, 34px);
+  letter-spacing: -0.02em;
+}
+
+.hero p {
+  max-width: 1120px;
+  margin: 0 auto;
+  color: #d7e5fa;
+  font-size: 15px;
+}
+
+.wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 20px 16px 8px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: -28px 0 18px;
+}
+
+.button,
+.file {
+  border: 0;
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--ink);
+  padding: 10px 14px;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.file {
+  background: var(--blue);
+  color: #fff;
+}
+
+.file input { display: none; }
+
+.source,
+.small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.card,
+.panel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.card { padding: 16px 18px; }
+
+.label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.value {
+  font-size: 28px;
+  font-weight: 750;
+  margin-top: 4px;
+  letter-spacing: -0.02em;
+}
+
+.blue { color: var(--blue); }
+.green { color: var(--green); }
+.amber { color: var(--amber); }
+.red { color: var(--red); }
+
+.panel {
+  padding: 18px 18px 16px;
+  margin-bottom: 16px;
+}
+
+.panel h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.grid > .panel { margin-bottom: 0; }
+
+.bar {
+  height: 10px;
+  border-radius: 99px;
+  background: #edf1f6;
+  overflow: hidden;
+  display: flex;
+}
+
+.bar i { display: block; height: 100%; }
+.bar .c { background: var(--green); }
+.bar .p { background: #e7a52d; }
+.bar .n { background: #e0737d; }
+
+.legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 10px;
+}
+
+.dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 5px;
+}
+
+.dot.c { background: var(--green); }
+.dot.p { background: #e7a52d; }
+.dot.n { background: #e0737d; }
+
+.risk {
+  border-left: 4px solid var(--red);
+  padding: 10px 12px;
+  background: var(--red-soft);
+  margin: 8px 0;
+  border-radius: 0 10px 10px 0;
+}
+
+.risk strong {
+  display: block;
+  color: #8f1f2f;
+  margin-bottom: 2px;
+}
+
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+th {
+  text-align: left;
+  background: #f4f7fb;
+  color: #4b5d73;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+th,
+td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+tbody tr:last-child td { border-bottom: 0; }
+
+tbody tr:nth-child(even) { background: #fafbfd; }
+
+tbody tr:hover { background: #f3f8ff; }
+
+.col-module { width: 13%; }
+.col-feature { width: 20%; }
+.col-ui { width: 22%; }
+.col-test { width: 27%; }
+.col-status { width: 10%; }
+.col-priority { width: 8%; }
+
+.col-mod-name { width: 28%; }
+.col-mod-num { width: 12%; }
+
+td code,
+.path {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #4d5f74;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.test-name {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.empty {
+  color: var(--muted);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+.badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.badge.Covered {
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.badge.Partial {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.badge.Not {
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+.badge.Skipped {
+  color: #475569;
+  background: #eef2f6;
+}
+
+.priority {
+  color: var(--ink);
+  font-weight: 650;
+  font-size: 13px;
+}
+
+.filters {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.filters input,
+.filters select {
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  padding: 9px 11px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.filters input {
+  flex: 1 1 260px;
+  min-width: 220px;
+}
+
+.filters select { min-width: 160px; }
+
+.note {
+  background: var(--blue-soft);
+  border-left: 4px solid var(--blue);
+  padding: 12px 14px;
+  border-radius: 0 10px 10px 0;
+  margin-bottom: 10px;
+}
+
+.footer {
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 0 28px;
+}
+
+a { color: var(--blue); }
+ul, ol { padding-left: 18px; }
+li { margin: 4px 0; }
+
+@media (max-width: 900px) {
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid { grid-template-columns: 1fr; }
+  table { table-layout: auto; min-width: 820px; }
+  .col-module,
+  .col-feature,
+  .col-ui,
+  .col-test,
+  .col-status,
+  .col-priority,
+  .col-mod-name,
+  .col-mod-num { width: auto; }
+}
+</style>
+</head>
+<body>
+<header class="hero">
+  <h1>IntoAEC Playwright Automation Coverage</h1>
+  <p>UI-to-automation traceability assessment · 25 October 2026</p>
+</header>
+<main class="wrap">
+  <div class="toolbar">
+    <label class="file">Load updated CSV <input id="upload" type="file" accept=".csv,text/csv"></label>
+    <button class="button" type="button" onclick="location.reload()">Reset current data</button>
+    <span class="source">Update <code>automation-coverage-matrix.csv</code>, then load it here to recalculate.</span>
+  </div>
+
+  <section class="cards" id="cards"></section>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Executive summary</h2>
+      <div id="summary"></div>
+    </section>
+    <section class="panel">
+      <h2>Top risk areas</h2>
+      <div class="risk"><strong>Finance and payments</strong>Invoices, bills, credit notes and subscriptions have no meaningful automation.</div>
+      <div class="risk"><strong>Authentication and customer flows</strong>Recovery, signup, lead capture and portals are not covered.</div>
+      <div class="risk"><strong>Settings, reports and templates</strong>These areas are represented by empty feature placeholders.</div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Coverage by module</h2>
+    <div id="modules"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Feature traceability</h2>
+    <div class="filters">
+      <input id="search" placeholder="Search module, feature, UI file or test...">
+      <select id="filter">
+        <option value="">All statuses</option>
+        <option>Covered</option>
+        <option>Partial</option>
+        <option>Not Covered</option>
+        <option>Skipped/Broken</option>
+      </select>
+    </div>
+    <div id="matrix"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Framework observations</h2>
+    <div class="note"><strong>Framework:</strong> Cucumber.js + Playwright with Gherkin features, step definitions and page objects. The project contains 138 feature files, 156 page-object files and 145 step-definition files.</div>
+    <ul>
+      <li>376 scenario declarations were parsed; 375 are meaningful after excluding the explicit placeholder.</li>
+      <li>58 feature files have no scenario declaration.</li>
+      <li>Approximately 1,910 <code>getByRole</code>, 156 <code>getByLabel</code> and 339 <code>waitForTimeout</code> references were found.</li>
+      <li><code>playwright.config.js</code> defines 60-second test, 15-second action and 30-second navigation timeouts with zero retries; browser projects are not declared.</li>
+    </ul>
+    <p class="small">Runtime pass/fail is not represented because local automation dependencies were not installed during the static assessment.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Recommendations</h2>
+    <ol>
+      <li>Install locked dependencies and run a local Cucumber dry-run baseline.</li>
+      <li>Automate recovery, signup and customer/client portals.</li>
+      <li>Prioritize invoices, bills/expenses, credit notes and subscription payments.</li>
+      <li>Complete inventory, goods receipt, worker, asset, BOQ and progress-claim workflows.</li>
+      <li>Replace hard waits with condition-based waits and add explicit browser projects and CI artifacts.</li>
+    </ol>
+    <p class="small">Detailed evidence and methodology: <a href="automation-coverage-report.md">automation-coverage-report.md</a></p>
+  </section>
+
+  <div class="footer">Generated for IntoAEC QA review · Source matrix: automation-coverage-matrix.csv</div>
+</main>
+<script src="automation-coverage-report.js"></script>
+</body>
+</html>
