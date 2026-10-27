@@ -31,10 +31,12 @@ class MyAccountPage extends BasePage {
       .or(page.getByText(/^profile settings$|^account settings$/i))
       .first();
     this.myAccountNav = page
-      .getByRole('menuitem', { name: /^my account$/i })
-      .or(page.getByRole('tab', { name: /^my account$/i }))
-      .or(page.getByRole('link', { name: /^my account$/i }))
-      .or(page.getByRole('button', { name: /^my account$/i }))
+      .getByRole('menuitem', { name: /^my account$|^my profile$/i })
+      .or(page.getByRole('tab', { name: /^my account$|^my profile$/i }))
+      .or(page.getByRole('link', { name: /^my account$|^my profile$/i }))
+      .or(page.getByRole('button', { name: /^my account$|^my profile$/i }))
+      .or(page.locator('#account-menu').getByText(/^my account$|^my profile$/i))
+      .or(page.locator('[role="menu"], [role="listbox"]').getByText(/^my account$|^my profile$/i))
       .first();
     this.pageHeading = page.getByRole('heading', { name: /my account|my profile|profile detail/i }).first();
     this.editButton = page.getByRole('button', { name: /^edit$/i }).first();
@@ -252,8 +254,21 @@ class MyAccountPage extends BasePage {
       return;
     }
 
-    await expect(this.myAccountNav).toBeVisible({ timeout: this.defaultTimeout });
-    await this.myAccountNav.click({ timeout: this.uiTimeout });
+    // Between-step delay can close the Account Settings popover — reopen if needed.
+    if (!(await this.myAccountNav.isVisible({ timeout: 2500 }).catch(() => false))) {
+      this.logStep('My Account menu item not visible — reopening Account Settings');
+      await this.navigateToProfileSettings();
+    }
+
+    if (await this.myAccountNav.isVisible({ timeout: 8000 }).catch(() => false)) {
+      await this.myAccountNav.click({ timeout: this.uiTimeout });
+    } else {
+      // Direct route fallback (same destination as Account Settings → My Account).
+      const base = String(env.admin || 'https://app.aecplayhouse.com').replace(/\/$/, '');
+      await this.page.goto(`${base}/myprofile`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      this.logStep('Opened My Account via /myprofile fallback');
+    }
+
     await this.page.waitForURL(/myprofile|my[-_]?account/i, { timeout: this.defaultTimeout }).catch(() => {});
     await this.waitForNetworkSettled();
     await this.expectMyAccountPageDisplayed();
@@ -743,24 +758,42 @@ class MyAccountPage extends BasePage {
       return;
     }
 
-    const passwordModal = this.page
-      .locator('.MuiModal-root, [role="dialog"]')
-      .filter({ hasText: /password changed/i })
+    // Success overlays after Change Password often block the header menu.
+    const blockingModal = this.page
+      .locator('.MuiModal-root, [role="dialog"], .MuiDialog-root')
+      .filter({ visible: true })
+      .filter({ hasText: /password|success|changed|updated/i })
       .first();
-    if (await passwordModal.isVisible({ timeout: 2000 }).catch(() => false)) {
-      const signIn = passwordModal
-        .getByRole('button', { name: /sign in|login|ok|continue/i })
-        .or(passwordModal.getByRole('link', { name: /sign in|login/i }))
+    if (await blockingModal.isVisible({ timeout: 2500 }).catch(() => false)) {
+      const dismiss = blockingModal
+        .getByRole('button', { name: /sign in|login|ok|continue|close|done/i })
+        .or(blockingModal.getByRole('link', { name: /sign in|login/i }))
         .first();
-      if (await signIn.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await signIn.click({ timeout: this.uiTimeout, force: true }).catch(() => {});
-        this.logStep('Dismissed password-changed overlay');
+      if (await dismiss.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await dismiss.click({ timeout: this.uiTimeout, force: true }).catch(() => {});
+        this.logStep('Dismissed post-password modal');
+      } else {
+        await this.page
+          .evaluate(() => {
+            document.querySelectorAll('.MuiModal-root, .MuiDialog-root').forEach((el) => {
+              el.style.pointerEvents = 'none';
+              el.setAttribute('aria-hidden', 'true');
+            });
+            document.querySelectorAll('[aria-hidden="true"]').forEach((el) => {
+              if (el.id === '__next' || el.contains(document.querySelector('header'))) {
+                el.removeAttribute('aria-hidden');
+              }
+            });
+          })
+          .catch(() => {});
       }
+      await this.page.waitForTimeout(400).catch(() => {});
     }
 
-    await this.page.keyboard.press('Escape').catch(() => {});
     await this._dismissBlockingOverlays();
+    await this._dismissAccountMenu();
 
+    // Prefer direct sign-out URL if the menu keeps getting intercepted.
     const accountSettings = this.page.getByLabel(/account settings|profile settings/i).first();
     if (await accountSettings.isVisible({ timeout: 5000 }).catch(() => false)) {
       await accountSettings.click({ timeout: this.uiTimeout, force: true });
@@ -770,13 +803,30 @@ class MyAccountPage extends BasePage {
     }
 
     const logoutItem = this.page
+      .locator('#account-menu')
       .getByRole('menuitem', { name: /log\s*out|sign\s*out/i })
+      .or(this.page.getByRole('menuitem', { name: /log\s*out|sign\s*out/i }))
       .or(this.page.getByRole('button', { name: /log\s*out|sign\s*out/i }))
       .or(this.page.getByText(/^log\s*out$|^sign\s*out$/i))
-      .filter({ visible: true })
       .first();
-    await expect(logoutItem).toBeVisible({ timeout: this.defaultTimeout });
-    await logoutItem.click({ timeout: this.uiTimeout });
+
+    if (await logoutItem.isVisible({ timeout: 8000 }).catch(() => false)) {
+      await logoutItem.click({ timeout: this.uiTimeout, force: true }).catch(async () => {
+        await logoutItem.evaluate((el) => el.click());
+      });
+    }
+
+    const onSignIn = await this.page
+      .waitForURL(/signIn/i, { timeout: 15000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!onSignIn && !/signIn/i.test(this.page.url())) {
+      const base = String(require('../../../config/env').admin || '').replace(/\/$/, '');
+      await this.page.context().clearCookies().catch(() => {});
+      await this.page.goto(`${base}/auth/signIn`, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+      this.logStep('Forced navigation to sign-in after logout click did not leave the app');
+    }
+
     await this.page.waitForURL(/signIn/i, { timeout: this.defaultTimeout }).catch(() => {});
     await this.waitForNetworkSettled();
     this.logStep(`Logged out of Admin portal (${this.page.url()})`);

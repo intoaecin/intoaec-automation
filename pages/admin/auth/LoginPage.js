@@ -72,6 +72,33 @@ class LoginPage extends BasePage {
         return true;
       }
     }
+
+    // Any other blocking modal (demo tour, leftover popup) aria-hides the app shell,
+    // so readiness checks fail and login tries to fill the header Search box instead.
+    // Never click a Domain-setup Continue here — only close/cancel-style controls.
+    const anyDialog = this.page
+      .locator('.MuiDialog-root, [role="dialog"]')
+      .filter({ visible: true })
+      .first();
+    if (await anyDialog.isVisible({ timeout: 800 }).catch(() => false)) {
+      const closeBtn = anyDialog
+        .getByRole('button', { name: /^close$|^cancel$|dismiss|skip|later|got it/i })
+        .or(anyDialog.locator('button[aria-label*="close" i]'))
+        .filter({ visible: true })
+        .first();
+      if (await closeBtn.isVisible({ timeout: 800 }).catch(() => false)) {
+        await closeBtn.click({ force: true }).catch(() => {});
+        await this.page.waitForTimeout(400).catch(() => {});
+        console.log('[Login] Dismissed blocking dialog');
+        return true;
+      }
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.waitForTimeout(400).catch(() => {});
+      if (!(await anyDialog.isVisible({ timeout: 800 }).catch(() => false))) {
+        console.log('[Login] Dismissed blocking dialog via Escape');
+        return true;
+      }
+    }
     return false;
   }
 
@@ -125,9 +152,12 @@ class LoginPage extends BasePage {
   }
 
   async _isSignInVisible() {
-    const emailVisible = await this.emailInput.isVisible({ timeout: 1500 }).catch(() => false);
+    // The password field is the reliable sign-in marker. The email locator's
+    // text-input fallback also matches the app header Search box when logged in.
     const passwordVisible = await this.passwordInput.isVisible({ timeout: 1500 }).catch(() => false);
-    return Boolean(emailVisible || passwordVisible);
+    if (passwordVisible) return true;
+    if (!/signIn/i.test(String(this.page.url() || ''))) return false;
+    return this.emailInput.isVisible({ timeout: 1500 }).catch(() => false);
   }
 
   async _waitForSplashToClear(timeoutMs = 45000) {
@@ -200,6 +230,19 @@ class LoginPage extends BasePage {
     this.lastLoginEmail = String(email || '').trim();
     if (await this._isAppReady()) {
       return;
+    }
+    // Already inside the app (batch run reusing the session): do not try to fill
+    // the sign-in form — its email locator matches the header Search box.
+    if (
+      this._isAdminHost() &&
+      !/signIn/i.test(String(this.page.url() || '')) &&
+      !(await this._isSignInVisible())
+    ) {
+      await this._dismissPostLoginOverlay().catch(() => {});
+      if ((await this._isAppReady()) || !(await this._isSignInVisible())) {
+        console.log('[Login] Already inside the app — skipping sign-in form');
+        return;
+      }
     }
     await this.emailInput
       .or(this.passwordInput)

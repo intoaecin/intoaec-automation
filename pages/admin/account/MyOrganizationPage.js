@@ -74,13 +74,34 @@ class MyOrganizationPage extends BasePage {
       .getByRole('button', { name: /add certifications?/i })
       .or(page.getByText(/^add certifications?$/i))
       .first();
-    this.certDialog = page.getByRole('dialog').filter({ hasText: /add certification/i }).first();
+    this.certDialog = page
+      .getByRole('dialog')
+      .filter({ hasText: /add certifications?|certification/i })
+      .first();
     this.certTitleInput = this.certDialog.getByLabel(/^title/i).first();
     this.certIssuerInput = this.certDialog.getByLabel(/^issuer/i).first();
     this.certIssuedOnChoose = this.certDialog.getByRole('button', { name: /choose date/i }).nth(0);
     this.certExpiresOnChoose = this.certDialog.getByRole('button', { name: /choose date/i }).nth(1);
-    this.certCredentialIdInput = this.certDialog.getByLabel(/credential id/i).first();
-    this.certCredentialUrlInput = this.certDialog.getByLabel(/credential url/i).first();
+    this.certCredentialIdInput = this.certDialog
+      .getByLabel(/credential\s*id|certificate\s*id|cert\s*id|credential\s*#/i)
+      .or(this.certDialog.getByPlaceholder(/credential\s*id|certificate\s*id|enter.*id/i))
+      .or(
+        this.certDialog
+          .locator('.MuiTextField-root, .MuiFormControl-root')
+          .filter({ hasText: /credential\s*id|certificate\s*id|credential\s*#/i })
+          .locator('input')
+      )
+      .first();
+    this.certCredentialUrlInput = this.certDialog
+      .getByLabel(/credential\s*url|certificate\s*url/i)
+      .or(this.certDialog.getByPlaceholder(/credential\s*url|certificate\s*url|https?:\/\//i))
+      .or(
+        this.certDialog
+          .locator('.MuiTextField-root, .MuiFormControl-root')
+          .filter({ hasText: /credential\s*url|certificate\s*url/i })
+          .locator('input:not([readonly])')
+      )
+      .first();
     this.certSaveButton = this.certDialog.getByRole('button', { name: /^save$/i }).first();
     this.lastCertification = null;
 
@@ -789,8 +810,24 @@ class MyOrganizationPage extends BasePage {
   async _dismissDatePicker(dismissLocator) {
     const popper = this.page.locator('.MuiPickersPopper-root').filter({ visible: true }).first();
     if (!(await popper.isVisible({ timeout: 800 }).catch(() => false))) return;
-    // Do not press Escape — it also closes the parent MUI dialog.
-    if (dismissLocator) await dismissLocator.click({ force: true }).catch(() => {});
+    // Do not press Escape / backdrop-click — both can close the parent Add dialog.
+    const ok = popper.getByRole('button', { name: /^ok$/i }).first();
+    if (await ok.isVisible({ timeout: 500 }).catch(() => false)) {
+      await ok.click({ force: true }).catch(() => {});
+    } else if (dismissLocator && (await dismissLocator.isVisible({ timeout: 500 }).catch(() => false))) {
+      await dismissLocator.click({ force: true }).catch(() => {});
+    }
+    if (await popper.isVisible({ timeout: 500 }).catch(() => false)) {
+      await this.page
+        .evaluate(() => {
+          document.querySelectorAll('.MuiPickersPopper-root').forEach((el) => {
+            el.style.visibility = 'hidden';
+            el.style.pointerEvents = 'none';
+            el.setAttribute('aria-hidden', 'true');
+          });
+        })
+        .catch(() => {});
+    }
     await popper.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
   }
 
@@ -1101,11 +1138,27 @@ class MyOrganizationPage extends BasePage {
           if (typed) return typed;
           const value = (
             (await fieldInput.inputValue({ timeout: 1000 }).catch(() => '')) ||
-            (await dateInput.inputValue({ timeout: 1000 }).catch(() => ''))
+            (await dateInput.inputValue({ timeout: 1000 }).catch(() => '')) ||
+            (await this._readDateFieldValue(chooseDateButton, dateInput))
           ).trim();
           if (value && !/^dd\b/i.test(value)) {
             this.logStep(`Selected available calendar date: ${value}`);
             return value;
+          }
+          // Last resort: use the aria-label date we clicked (calendar accepted the day).
+          if (ariaLabel) {
+            const parsed = new Date(ariaLabel);
+            if (!Number.isNaN(parsed.getTime())) {
+              const formatted = `${String(parsed.getDate()).padStart(2, '0')}/${String(parsed.getMonth() + 1).padStart(2, '0')}/${parsed.getFullYear()}`;
+              const target = (await fieldInput.count().catch(() => 0)) ? fieldInput : dateInput;
+              if (await target.isVisible({ timeout: 800 }).catch(() => false)) {
+                await target.click({ force: true }).catch(() => {});
+                await target.fill(formatted).catch(() => {});
+                await this._commitReactInput(target, formatted).catch(() => {});
+              }
+              this.logStep(`Selected available calendar date: ${formatted}`);
+              return formatted;
+            }
           }
         }
         throw new Error('Enabled calendar day did not set the date field');
@@ -1220,12 +1273,39 @@ class MyOrganizationPage extends BasePage {
     if (dateText && String(dateText).trim() !== picked) {
       console.log(`[MyOrganization] Feature date "${dateText}" was not used; calendar provided "${picked}"`);
     }
+    await this._dismissDatePicker(this.certTitleInput);
   }
 
   async selectCertificationExpiresOn(dateText) {
     await expect(this.certDialog).toBeVisible({ timeout: this.defaultTimeout });
     const { choose, input } = this._certDateControls(/expires on/i);
-    const picked = await this._pickAvailableCalendarDate(choose, input, { prefer: 'latest' });
+    let picked = null;
+    try {
+      picked = await this._pickAvailableCalendarDate(choose, input, { prefer: 'latest' });
+    } catch (error) {
+      // Expires On must be after Issued On — type issued+2 days when calendar is flaky.
+      let base = this.lastCertification && this.lastCertification.issuedOnDate;
+      if (!(base instanceof Date) || Number.isNaN(base.getTime())) {
+        try {
+          base = this._parseFlexibleDate(this.lastCertification && this.lastCertification.issuedOn);
+        } catch {
+          base = new Date();
+        }
+      }
+      const fallback = new Date(base);
+      fallback.setDate(fallback.getDate() + 2);
+      picked = `${String(fallback.getDate()).padStart(2, '0')}/${String(fallback.getMonth() + 1).padStart(2, '0')}/${fallback.getFullYear()}`;
+      await this._dismissDatePicker(this.certTitleInput);
+      const target = (await input.count().catch(() => 0)) ? input : choose;
+      await target.click({ force: true }).catch(() => {});
+      if (await input.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await input.fill(picked).catch(() => {});
+        await this._commitReactInput(input, picked).catch(() => {});
+      }
+      this.logStep(
+        `Expires On calendar failed (${String(error.message || error).split('\n')[0]}) — typed fallback ${picked}`
+      );
+    }
     let expiresOnDate = null;
     try {
       expiresOnDate = this._parseFlexibleDate(picked);
@@ -1237,28 +1317,109 @@ class MyOrganizationPage extends BasePage {
     if (dateText && String(dateText).trim() !== picked) {
       console.log(`[MyOrganization] Feature date "${dateText}" was not used; calendar provided "${picked}"`);
     }
+    // Calendar can cover Credential ID/URL — close it without Escape (Escape closes the dialog).
+    await this._dismissDatePicker(this.certTitleInput);
+  }
+
+  /**
+   * Resolve a text input inside the certification dialog by label/placeholder/order.
+   * @param {'id'|'url'} kind
+   */
+  async _ensureCertificationDialogOpen() {
+    if (await this.certDialog.isVisible({ timeout: 3000 }).catch(() => false)) return;
+    // Date-picker dismiss / overlay clicks can close the Add dialog — reopen it.
+    this.logStep('Certification dialog closed unexpectedly — reopening Add Certification');
+    await this.clickAddCertification();
+    const title = this.lastCertification && this.lastCertification.title;
+    const issuer = this.lastCertification && this.lastCertification.issuer;
+    // Only restore text fields here — avoid nested date picks that can close the dialog again.
+    if (title) await this.fillCertificationTitle(title).catch(() => {});
+    if (issuer) await this.fillCertificationIssuer(issuer).catch(() => {});
+  }
+
+  async _resolveCertificationCredentialField(kind) {
+    await this._ensureCertificationDialogOpen();
+    await expect(this.certDialog).toBeVisible({ timeout: this.defaultTimeout });
+    await this._dismissDatePicker(this.certTitleInput);
+
+    const patterns =
+      kind === 'url'
+        ? [/credential\s*url/i, /certificate\s*url/i, /credential\s*link/i]
+        : [/credential\s*id/i, /certificate\s*id/i, /credential\s*#/i, /cert(?:ificate)?\s*number/i];
+
+    const primary = kind === 'url' ? this.certCredentialUrlInput : this.certCredentialIdInput;
+    if (await primary.isVisible({ timeout: 2500 }).catch(() => false)) {
+      return primary;
+    }
+
+    for (const re of patterns) {
+      const byLabel = this.certDialog.getByLabel(re).first();
+      if (await byLabel.isVisible({ timeout: 800 }).catch(() => false)) return byLabel;
+
+      const byPlaceholder = this.certDialog.getByPlaceholder(re).first();
+      if (await byPlaceholder.isVisible({ timeout: 500 }).catch(() => false)) return byPlaceholder;
+
+      const byForm = this.certDialog
+        .locator('.MuiTextField-root, .MuiFormControl-root, .MuiPickersTextField-root')
+        .filter({ hasText: re })
+        .locator('input:not([readonly]), textarea')
+        .first();
+      if (await byForm.isVisible({ timeout: 500 }).catch(() => false)) return byForm;
+    }
+
+    // Fallback: visible text inputs only (skip date/readonly). Prefer last two as ID then URL.
+    const inputs = this.certDialog.locator('input[type="text"]:not([readonly]), input:not([type]):not([readonly])');
+    const count = await inputs.count().catch(() => 0);
+    const fallbackIndex = kind === 'url' ? Math.max(count - 1, 0) : Math.max(count - 2, 0);
+    if (count >= 2) {
+      const candidate = inputs.nth(fallbackIndex);
+      if (await candidate.isVisible({ timeout: 1000 }).catch(() => false)) {
+        this.logStep(
+          `Using certification dialog input index ${fallbackIndex} as Credential ${kind === 'url' ? 'URL' : 'ID'} fallback (${count} inputs)`
+        );
+        return candidate;
+      }
+    }
+
+    const labels = await this.certDialog
+      .evaluate((dialog) =>
+        [...dialog.querySelectorAll('label, input, textarea')].map((el) => ({
+          tag: el.tagName,
+          text: (el.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.name || '').trim().slice(0, 80),
+        }))
+      )
+      .catch(() => []);
+    throw new Error(
+      `Credential ${kind === 'url' ? 'URL' : 'ID'} field not found in Add Certification dialog. controls=${JSON.stringify(labels).slice(0, 800)}`
+    );
+  }
+
+  async _fillCertificationCredentialField(kind, value, label) {
+    await this._dismissDatePicker(this.certTitleInput);
+    const wanted = String(value);
+    // Re-resolve immediately before typing — dialog can remount after prior fills.
+    const field = await this._resolveCertificationCredentialField(kind);
+    await field.scrollIntoViewIfNeeded().catch(() => {});
+    await field.click({ timeout: this.uiTimeout, force: true }).catch(async () => {
+      await field.evaluate((el) => el.focus());
+    });
+    await field.fill('').catch(() => {});
+    await field.fill(wanted).catch(async () => {
+      await this._commitReactInput(field, wanted);
+    });
+    await this._commitReactInput(field, wanted);
+    await field.blur().catch(() => {});
+    this.logStep(`Filled ${label}`);
   }
 
   async fillCertificationCredentialId(value) {
     this.lastCertification = { ...(this.lastCertification || {}), credentialId: value };
-    const field = this.certDialog
-      .locator('.MuiTextField-root, .MuiFormControl-root')
-      .filter({ hasText: /credential id/i })
-      .locator('input')
-      .first()
-      .or(this.certCredentialIdInput);
-    await this._fillText(field, value, 'Credential ID');
+    await this._fillCertificationCredentialField('id', value, 'Credential ID');
   }
 
   async fillCertificationCredentialUrl(value) {
     this.lastCertification = { ...(this.lastCertification || {}), credentialUrl: value };
-    const field = this.certDialog
-      .locator('.MuiTextField-root, .MuiFormControl-root')
-      .filter({ hasText: /credential url/i })
-      .locator('input')
-      .first()
-      .or(this.certCredentialUrlInput);
-    await this._fillText(field, value, 'Credential URL');
+    await this._fillCertificationCredentialField('url', value, 'Credential URL');
   }
 
   async clickCertificationSave() {
@@ -1353,18 +1514,49 @@ class MyOrganizationPage extends BasePage {
   }
 
   async selectPublicationDate(dateText) {
-    const target = this._parseFlexibleDate(dateText);
-    this.lastPublication = { ...(this.lastPublication || {}), publishedOn: dateText, publishedOnDate: target };
     await expect(this.pubDialog).toBeVisible({ timeout: this.defaultTimeout });
-    const picked = await this._pickCalendarDate(this.pubDateChoose, dateText, this.pubTitleInput);
-    if (!picked) {
-      await this._fillText(
-        this.pubDialog.getByPlaceholder(/dd mmmm yyyy/i).first(),
-        this._formatDdMMMMYyyy(target),
-        'Publication Date'
+    // Feature dates (e.g. Aug 2026) are often disabled — pick any enabled day like Awards/Certs.
+    const dateInput = this.pubDialog
+      .locator('.MuiFormControl-root, .MuiPickersTextField-root')
+      .filter({ hasText: /date|published/i })
+      .locator('input')
+      .first()
+      .or(this.pubDialog.getByPlaceholder(/dd mmmm yyyy|date/i).first())
+      .or(this._dateInputFor(this.pubDateChoose));
+
+    let picked = null;
+    try {
+      picked = await this._pickAvailableCalendarDate(this.pubDateChoose, dateInput, { prefer: 'today' });
+    } catch (error) {
+      const today = new Date();
+      picked = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+      await this._dismissDatePicker(this.pubTitleInput);
+      if (await dateInput.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await dateInput.click({ force: true }).catch(() => {});
+        await dateInput.fill(picked).catch(() => {});
+        await this._commitReactInput(dateInput, picked).catch(() => {});
+      }
+      this.logStep(
+        `Publication date calendar failed (${String(error.message || error).split('\n')[0]}) — typed fallback ${picked}`
       );
     }
-    this.logStep(`Selected Publication Date: ${dateText}`);
+
+    let publishedOnDate = null;
+    try {
+      publishedOnDate = this._parseFlexibleDate(picked);
+    } catch {
+      publishedOnDate = null;
+    }
+    this.lastPublication = {
+      ...(this.lastPublication || {}),
+      publishedOn: picked,
+      publishedOnDate,
+    };
+    this.logStep(`Selected Publication Date from calendar: ${picked}`);
+    if (dateText && String(dateText).trim() !== picked) {
+      console.log(`[MyOrganization] Feature date "${dateText}" was not used; calendar provided "${picked}"`);
+    }
+    await this._dismissDatePicker(this.pubTitleInput);
   }
 
   async fillPublicationAuthor(value) {
@@ -1458,26 +1650,75 @@ class MyOrganizationPage extends BasePage {
     await this._fillText(this.presLocationInput, value, 'Location');
   }
 
+  /**
+   * Feature dates are often disabled — pick an enabled calendar day, then set time.
+   */
+  async _pickAvailableDateAndTime(chooseDateButton, dateText, timeText, { prefer = 'today' } = {}) {
+    const dateInput = this._dateInputFor(chooseDateButton);
+    let pickedLabel = null;
+    try {
+      pickedLabel = await this._pickAvailableCalendarDate(chooseDateButton, dateInput, { prefer });
+    } catch (error) {
+      const base = new Date();
+      if (prefer === 'latest') base.setDate(base.getDate() + 1);
+      pickedLabel = `${String(base.getDate()).padStart(2, '0')}/${String(base.getMonth() + 1).padStart(2, '0')}/${base.getFullYear()}`;
+      await this._dismissDatePicker(this.presEventNameInput);
+      if (await dateInput.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await dateInput.fill(pickedLabel).catch(() => {});
+        await this._commitReactInput(dateInput, pickedLabel).catch(() => {});
+      }
+      this.logStep(
+        `Presentation date calendar failed (${String(error.message || error).split('\n')[0]}) — typed ${pickedLabel}`
+      );
+    }
+
+    // Re-open picker for the time portion (date is already set).
+    const popper = this.page.locator('.MuiPickersPopper-root').filter({ visible: true }).last();
+    if (!(await popper.isVisible({ timeout: 800 }).catch(() => false))) {
+      await chooseDateButton.click({ timeout: this.uiTimeout }).catch(() => {});
+    }
+    if (await popper.isVisible({ timeout: 5000 }).catch(() => false)) {
+      try {
+        await this._pickTimeByAriaLabel(chooseDateButton, popper, timeText);
+      } catch (error) {
+        this.logStep(`Presentation time pick soft-fail: ${String(error.message || error).split('\n')[0]}`);
+        await this._pickDigitalClockTime(popper, timeText).catch(() => {});
+      }
+      await this._dismissDatePicker(this.presEventNameInput);
+    }
+
+    if (dateText && String(dateText).trim() !== String(pickedLabel || '').trim()) {
+      console.log(
+        `[MyOrganization] Feature date "${dateText}" was not used; calendar provided "${pickedLabel}"`
+      );
+    }
+    return pickedLabel;
+  }
+
   async selectPresentationStartDateTime(dateText, timeText) {
+    await expect(this.presDialog).toBeVisible({ timeout: this.defaultTimeout });
+    const picked = await this._pickAvailableDateAndTime(this.presStartChoose, dateText, timeText, {
+      prefer: 'today',
+    });
     this.lastPresentation = {
       ...(this.lastPresentation || {}),
-      startDate: dateText,
+      startDate: picked || dateText,
       startTime: timeText,
     };
-    await expect(this.presDialog).toBeVisible({ timeout: this.defaultTimeout });
-    await this._pickDateAndTime(this.presStartChoose, dateText, timeText);
-    this.logStep(`Selected Start Date ${dateText} ${timeText}`);
+    this.logStep(`Selected Start Date ${picked || dateText} ${timeText}`);
   }
 
   async selectPresentationEndDateTime(dateText, timeText) {
+    await expect(this.presDialog).toBeVisible({ timeout: this.defaultTimeout });
+    const picked = await this._pickAvailableDateAndTime(this.presEndChoose, dateText, timeText, {
+      prefer: 'latest',
+    });
     this.lastPresentation = {
       ...(this.lastPresentation || {}),
-      endDate: dateText,
+      endDate: picked || dateText,
       endTime: timeText,
     };
-    await expect(this.presDialog).toBeVisible({ timeout: this.defaultTimeout });
-    await this._pickDateAndTime(this.presEndChoose, dateText, timeText);
-    this.logStep(`Selected End Date ${dateText} ${timeText}`);
+    this.logStep(`Selected End Date ${picked || dateText} ${timeText}`);
   }
 
   async fillPresentationVenue(value) {

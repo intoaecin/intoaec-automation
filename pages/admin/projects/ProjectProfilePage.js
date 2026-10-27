@@ -19,6 +19,7 @@ class ProjectProfilePage extends BasePage {
       .getByRole('tab', { name: exact })
       .or(this.page.getByRole('button', { name: exact }))
       .or(this.page.locator('.MuiTab-root, [role="tab"]').filter({ hasText: exact }))
+      .or(this.page.getByText(exact))
       .filter({ visible: true })
       .first();
   }

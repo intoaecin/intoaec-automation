@@ -35,12 +35,16 @@
 # TS-14 E-Signature Upload — @TS14 @TC14
 #   TC-14 — E-Signature → Upload sample_signature.png → Update
 #
-# Run (PowerShell: use npx.cmd — npx.ps1 may be blocked):
+# Run ALL My Account TCs in this file (PowerShell: use npx.cmd — npx.ps1 may be blocked):
+#   npx.cmd cucumber-js --tags "@my-account-all"
 #   npx.cmd cucumber-js --tags "@my-account-tc"
-#   npx.cmd cucumber-js --tags "@my-account-tc and @TC00"
+#   npx.cmd cucumber-js "features/admin/account/My accounts.feature"
+#
+# Run one case:
+#   npx.cmd cucumber-js --tags "@my-account-all and @TC00"
 #   npx.cmd cucumber-js --tags "@my-account-tc and @TC01"
 #   ...
-#   npx.cmd cucumber-js --tags "@my-account-tc and @TC14"
+#   npx.cmd cucumber-js --tags "@my-account-all and @TC14"
 #
 # npm:
 #   npm.cmd run test:admin:account:myaccount
@@ -56,7 +60,7 @@
 #            pages/admin/account/MyOrganizationPage.js
 # -----------------------------------------------------------------------------
 
-@my-account-tc @account @my-account @ashraf-modules
+@my-account-all @my-account-tc @account @my-account @ashraf-modules
 Feature: My Account — incremental test cases
 
   Background:

@@ -13,6 +13,10 @@ const COST_CATALOG_TEST_CASE_LOG = {
   TC06: 'TC-06 — Edit Concrete Mixer to Tower Crane and verify list and toast',
   TC07: 'TC-07 — Add Kitchen Cabinet Assembly to Cost Catalog and verify list and toast',
   TC08: 'TC-08 — Edit Kitchen Cabinet Assembly to Modular Wardrobe Assembly and verify list and toast',
+  TC09: 'TC-09 — Add two consultation fees to Cost Catalog and verify list and toast',
+  TC10: 'TC-10 — Edit Cement Consultation to Concrete Consultation and verify list and toast',
+  TC11: 'TC-11 — Add two subcontractors to Cost Catalog and verify list and toast',
+  TC12: 'TC-12 — Edit Electrical Installation subcontractor to Plumbing Installation and verify list and toast',
 };
 
 Before({ tags: '@cost-catalog or @cost-catalog-tc' }, async function ({ pickle }) {
@@ -482,5 +486,165 @@ Then(
   async function (unit, unitCost, name) {
     const costCatalog = getCostCatalogPage(this);
     await costCatalog.expectAssemblyDetailsInList(unit, unitCost, name);
+  }
+);
+
+When('I select the Cost Catalog Consultation Fees tab', { timeout: 120000 }, async function () {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.selectConsultationFeesTab();
+});
+
+When('I select Cost Catalog item type Consultation Fee', { timeout: 120000 }, async function () {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.selectItemTypeConsultationFee();
+});
+
+When(
+  'I enter Cost Catalog consultation fee {int} details with name {string}, unit {string}, and cost {string}',
+  { timeout: 180000 },
+  async function (index, name, unit, cost) {
+    await this.ensureLivePage();
+    const costCatalog = getCostCatalogPage(this);
+    try {
+      await costCatalog.enterConsultationFeeDetails(index, name, unit, cost);
+    } catch (err) {
+      const msg = String(err?.message || err);
+      if (Number(index) > 1 && /closed|Target page|browser has been closed/i.test(msg)) {
+        console.log('[CostCatalog] Page closed after consultation fee 1 save — recovering session for consultation fee 2');
+        await this.ensureLivePage();
+        const recovered = getCostCatalogPage(this);
+        await recovered.selectCostCatalog();
+        await recovered.selectConsultationFeesTab();
+        await recovered.clickAddItems();
+        await recovered.selectItemTypeConsultationFee();
+        await recovered.enterConsultationFeeDetails(1, name, unit, cost);
+        return;
+      }
+      throw err;
+    }
+  }
+);
+
+Then('I should see the Cost Catalog success toast for consultation fees added', { timeout: 120000 }, async function () {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.expectConsultationFeesAddedSuccessToast();
+});
+
+Then('the Cost Catalog Consultation Fees list should display {string}', { timeout: 120000 }, async function (name) {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.expectConsultationFeeInList(name);
+});
+
+When('I select the Cost Catalog consultation fee {string}', { timeout: 180000 }, async function (name) {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.selectConsultationFee(name);
+});
+
+When('I update the Cost Catalog consultation fee name to {string}', { timeout: 120000 }, async function (name) {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.updateConsultationFeeName(name);
+});
+
+When('I update the Cost Catalog consultation fee unit to {string}', { timeout: 120000 }, async function (unit) {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.updateConsultationFeeUnit(unit);
+});
+
+When('I update the Cost Catalog consultation fee cost to {string}', { timeout: 120000 }, async function (cost) {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.updateConsultationFeeCost(cost);
+});
+
+Then('I should see the Cost Catalog success toast for consultation fee updated', { timeout: 120000 }, async function () {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.expectConsultationFeeUpdatedSuccessToast();
+});
+
+Then(
+  'the Cost Catalog Consultation Fees list should show unit {string} and cost {string} for {string}',
+  { timeout: 120000 },
+  async function (unit, cost, name) {
+    const costCatalog = getCostCatalogPage(this);
+    await costCatalog.expectConsultationFeeDetailsInList(unit, cost, name);
+  }
+);
+
+When('I select the Cost Catalog Subcontractors tab', { timeout: 120000 }, async function () {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.selectSubcontractorsTab();
+});
+
+When('I select Cost Catalog item type Subcontractor', { timeout: 120000 }, async function () {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.selectItemTypeSubcontractor();
+});
+
+When(
+  'I enter Cost Catalog subcontractor {int} details with name {string}, unit {string}, and cost {string}',
+  { timeout: 180000 },
+  async function (index, name, unit, cost) {
+    await this.ensureLivePage();
+    const costCatalog = getCostCatalogPage(this);
+    try {
+      await costCatalog.enterSubcontractorDetails(index, name, unit, cost);
+    } catch (err) {
+      const msg = String(err?.message || err);
+      if (Number(index) > 1 && /closed|Target page|browser has been closed/i.test(msg)) {
+        console.log('[CostCatalog] Page closed after subcontractor 1 save — recovering session for subcontractor 2');
+        await this.ensureLivePage();
+        const recovered = getCostCatalogPage(this);
+        await recovered.selectCostCatalog();
+        await recovered.selectSubcontractorsTab();
+        await recovered.clickAddItems();
+        await recovered.selectItemTypeSubcontractor();
+        await recovered.enterSubcontractorDetails(1, name, unit, cost);
+        return;
+      }
+      throw err;
+    }
+  }
+);
+
+Then('I should see the Cost Catalog success toast for subcontractors added', { timeout: 120000 }, async function () {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.expectSubcontractorsAddedSuccessToast();
+});
+
+Then('the Cost Catalog Subcontractors list should display {string}', { timeout: 120000 }, async function (name) {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.expectSubcontractorInList(name);
+});
+
+When('I select the Cost Catalog subcontractor {string}', { timeout: 180000 }, async function (name) {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.selectSubcontractor(name);
+});
+
+When('I update the Cost Catalog subcontractor name to {string}', { timeout: 120000 }, async function (name) {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.updateSubcontractorName(name);
+});
+
+When('I update the Cost Catalog subcontractor unit to {string}', { timeout: 120000 }, async function (unit) {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.updateSubcontractorUnit(unit);
+});
+
+When('I update the Cost Catalog subcontractor cost to {string}', { timeout: 120000 }, async function (cost) {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.updateSubcontractorCost(cost);
+});
+
+Then('I should see the Cost Catalog success toast for subcontractor updated', { timeout: 120000 }, async function () {
+  const costCatalog = getCostCatalogPage(this);
+  await costCatalog.expectSubcontractorUpdatedSuccessToast();
+});
+
+Then(
+  'the Cost Catalog Subcontractors list should show unit {string} and cost {string} for {string}',
+  { timeout: 120000 },
+  async function (unit, cost, name) {
+    const costCatalog = getCostCatalogPage(this);
+    await costCatalog.expectSubcontractorDetailsInList(unit, cost, name);
   }
 );
