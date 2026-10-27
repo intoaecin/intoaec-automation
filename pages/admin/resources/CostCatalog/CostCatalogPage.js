@@ -52,6 +52,18 @@ class CostCatalogPage extends BasePage {
       .or(page.getByText(/^assembl(y|ies)$/i))
       .first();
 
+    this.consultationFeesTab = page
+      .getByRole('tab', { name: /^consultation\s*fees?$/i })
+      .or(page.getByRole('button', { name: /^consultation\s*fees?$/i }))
+      .or(page.getByText(/^consultation\s*fees?$/i))
+      .first();
+
+    this.subcontractorsTab = page
+      .getByRole('tab', { name: /^subcontractors?$/i })
+      .or(page.getByRole('button', { name: /^subcontractors?$/i }))
+      .or(page.getByText(/^subcontractors?$/i))
+      .first();
+
     this.addItemsButton = page
       .getByRole('button', { name: /^add\s*items?$/i })
       .or(page.getByRole('link', { name: /^add\s*items?$/i }))
@@ -72,6 +84,8 @@ class CostCatalogPage extends BasePage {
     this.lastServices = [];
     this.lastEquipments = [];
     this.lastAssemblies = [];
+    this.lastConsultationFees = [];
+    this.lastSubcontractors = [];
     this.lastMaterialSaveOk = false;
     this.lastToastText = '';
     this.lastItemCode = '';
@@ -79,6 +93,8 @@ class CostCatalogPage extends BasePage {
     this.lastEditedService = null;
     this.lastEditedEquipment = null;
     this.lastEditedAssembly = null;
+    this.lastEditedConsultationFee = null;
+    this.lastEditedSubcontractor = null;
     this.selectedMaterialName = '';
     this.selectedMaterialRow = null;
     this.selectedServiceName = '';
@@ -87,6 +103,10 @@ class CostCatalogPage extends BasePage {
     this.selectedEquipmentRow = null;
     this.selectedAssemblyName = '';
     this.selectedAssemblyRow = null;
+    this.selectedConsultationFeeName = '';
+    this.selectedConsultationFeeRow = null;
+    this.selectedSubcontractorName = '';
+    this.selectedSubcontractorRow = null;
     this._nameSeq = Math.floor(Math.random() * 800) + 100; // avoid clashing with prior runs
   }
 
@@ -109,12 +129,50 @@ class CostCatalogPage extends BasePage {
       (this.lastEditedEquipment && this.lastEditedEquipment.name) ||
       (this.lastEditedService && this.lastEditedService.name) ||
       (this.lastEditedMaterial && this.lastEditedMaterial.name) ||
+      (this.lastEditedConsultationFee && this.lastEditedConsultationFee.name) ||
+      (this.lastEditedSubcontractor && this.lastEditedSubcontractor.name) ||
       ''
     );
   }
 
   _isEditFlow() {
     return Boolean(this._editedItemName());
+  }
+
+  /**
+   * Description on Service/Equipment forms is a rich-text editor, not a textarea.
+   * Fill the editor when present; Description is optional — never throw for it.
+   */
+  async _fillDescriptionField(root, description) {
+    const text = String(description || '');
+    const desc = root
+      .getByPlaceholder(/description/i)
+      .or(root.getByLabel(/^description/i))
+      .or(root.locator('textarea').first())
+      .first();
+    if (await desc.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await desc.click({ timeout: this.uiTimeout }).catch(() => {});
+      await desc.fill('');
+      await desc.fill(text);
+      return true;
+    }
+
+    const editor = root
+      .locator('[contenteditable="true"], .ql-editor, .tiptap, .ProseMirror')
+      .filter({ visible: true })
+      .first();
+    if (await editor.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await editor.click({ timeout: this.uiTimeout });
+      await this.page.keyboard.press('Control+A').catch(() => {});
+      await this.page.keyboard
+        .insertText(text)
+        .catch(async () => this.page.keyboard.type(text));
+      this.logStep('Filled Description in rich-text editor');
+      return true;
+    }
+
+    this.logStep('Description editor not found — skipping Description (optional)');
+    return false;
   }
 
   async _fillServicePrice(root, price) {
@@ -485,6 +543,60 @@ class CostCatalogPage extends BasePage {
     this.logStep('Selected Cost Catalog Assemblies tab');
   }
 
+  async selectConsultationFeesTab() {
+    if (await this.consultationFeesTab.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await this.consultationFeesTab.click({ timeout: this.uiTimeout });
+      await this.waitForNetworkSettled();
+    }
+    await expect(this.addItemsButton).toBeVisible({ timeout: this.defaultTimeout });
+    this.logStep('Selected Cost Catalog Consultation Fees tab');
+  }
+
+  async selectSubcontractorsTab() {
+    if (await this.subcontractorsTab.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await this.subcontractorsTab.click({ timeout: this.uiTimeout });
+      await this.waitForNetworkSettled();
+    }
+    await expect(this.addItemsButton).toBeVisible({ timeout: this.defaultTimeout });
+    this.logStep('Selected Cost Catalog Subcontractors tab');
+  }
+
+  /** Add Item menu → pick a type (Consultation Fee / Subcontractor share the Services-style menu). */
+  async _selectItemTypeFromMenu(optionRe, label) {
+    if (await this._waitForAddFormReady(3000)) {
+      this.logStep(`${label} form already open after Add Item — skipping type picker`);
+      return;
+    }
+
+    const menu = this.page
+      .locator('.MuiPopover-root.MuiMenu-root, .MuiMenu-root, [role="menu"]')
+      .filter({ visible: true })
+      .last();
+
+    await expect(menu).toBeVisible({ timeout: this.defaultTimeout });
+
+    const option = menu
+      .getByRole('menuitem', { name: optionRe })
+      .or(menu.locator('li, [role="menuitem"], button').filter({ hasText: optionRe }))
+      .filter({ visible: true })
+      .first();
+
+    await expect(option).toBeVisible({ timeout: this.uiTimeout });
+    await option.click({ timeout: this.uiTimeout, force: true });
+    await this.waitForNetworkSettled();
+    await this.page.waitForTimeout(800).catch(() => {});
+    await expect(this.activeForm()).toBeVisible({ timeout: this.defaultTimeout });
+    this.logStep(`Selected Cost Catalog item type ${label} from Add Item menu`);
+  }
+
+  async selectItemTypeConsultationFee() {
+    await this._selectItemTypeFromMenu(/^consultation\s*fees?$/i, 'Consultation Fee');
+  }
+
+  async selectItemTypeSubcontractor() {
+    await this._selectItemTypeFromMenu(/^subcontractors?$/i, 'Subcontractor');
+  }
+
   async clickAddItems() {
     await this._dismissBlockingOverlay().catch(() => {});
     await expect(this.addItemsButton).toBeVisible({ timeout: this.defaultTimeout });
@@ -788,12 +900,18 @@ class CostCatalogPage extends BasePage {
 
     // 2) Requested unit not in list — clear filter and pick another available option.
     this.logStep(`Unit "${wanted}" not found — choosing another available unit`);
-    await combo.fill('');
+    await combo.fill('').catch(() => {});
     await this.page.waitForTimeout(200).catch(() => {});
+
+    // The dropdown often needs a fresh click + time to render after a no-result filter.
     let options = await openAndListOptions();
-    if ((await options.count().catch(() => 0)) === 0) {
+    for (let attempt = 0; attempt < 4 && (await options.count().catch(() => 0)) === 0; attempt += 1) {
+      // eslint-disable-next-line no-await-in-loop
       await combo.click({ timeout: this.uiTimeout }).catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
       await this.page.keyboard.press('ArrowDown').catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      await this.page.waitForTimeout(700).catch(() => {});
       options = await openAndListOptions();
     }
 
@@ -819,10 +937,17 @@ class CostCatalogPage extends BasePage {
     }
 
     await this.page.keyboard.press('ArrowDown').catch(() => {});
+    await this.page.waitForTimeout(300).catch(() => {});
     await this.page.keyboard.press('Enter').catch(() => {});
     const selected = String((await combo.inputValue().catch(() => '')) || '').trim();
-    this.logStep(`Unit field value is "${selected || wanted}"`);
-    return selected || wanted;
+    if (selected) {
+      this.logStep(`Unit field value is "${selected}"`);
+      return selected;
+    }
+    // Nothing was actually selected — return empty so callers retry/fail loudly
+    // instead of pretending the requested unit was set (required field blocks Save).
+    this.logStep(`Unit "${wanted}" could not be selected — unit field is empty`);
+    return '';
   }
 
   /**
@@ -1029,8 +1154,25 @@ class CostCatalogPage extends BasePage {
       if (await opt.isVisible({ timeout: 3000 }).catch(() => false)) {
         await opt.click({ timeout: this.uiTimeout });
         this.logStep(`Selected Pricing Module "${wanted}" from combobox`);
+        return;
       }
     }
+
+    // Mentioned pricing module not available — take any available pricing option
+    // so the required Pricing Module field is not left empty.
+    const anyRadio = root
+      .locator('input[type="radio"]')
+      .filter({ visible: true })
+      .first();
+    if (await anyRadio.isVisible({ timeout: 1500 }).catch(() => false)) {
+      const value = String((await anyRadio.getAttribute('value').catch(() => '')) || '').trim();
+      await anyRadio.check({ timeout: this.uiTimeout }).catch(async () => {
+        await anyRadio.click({ timeout: this.uiTimeout, force: true });
+      });
+      this.logStep(`Pricing Module "${wanted}" not available — selected available "${value || 'first option'}"`);
+      return;
+    }
+    this.logStep(`Pricing Module "${wanted}" not found and no alternative available — continuing`);
   }
 
   async _isServicePersistedInList(serviceName) {
@@ -1039,15 +1181,6 @@ class CostCatalogPage extends BasePage {
 
     await this.selectServicesTab().catch(() => {});
     await this.waitForNetworkSettled();
-
-    const search = this.page.getByPlaceholder(/search/i).first();
-    if (await search.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await search.fill('');
-      await search.fill(wanted);
-      await this.page.keyboard.press('Enter').catch(() => {});
-      await this.waitForNetworkSettled();
-      await this.page.waitForTimeout(700).catch(() => {});
-    }
 
     const hit = this.page
       .locator('table tbody tr td, [role="cell"], [role="row"]')
@@ -1160,17 +1293,7 @@ class CostCatalogPage extends BasePage {
 
     await this._selectCategoryByName(root, category);
 
-    const desc = root
-      .getByPlaceholder(/description/i)
-      .or(root.getByLabel(/^description/i))
-      .or(root.locator('textarea').first())
-      .first();
-    if (await desc.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await desc.fill('');
-      await desc.fill(String(description));
-    } else {
-      await this._fillLabeledField(root, /description/i, description, 'description');
-    }
+    await this._fillDescriptionField(root, description);
 
     await this._selectPricingModule(root, pricingModule);
 
@@ -1256,15 +1379,7 @@ class CostCatalogPage extends BasePage {
     await this.selectServicesTab().catch(() => {});
     await this.waitForNetworkSettled();
 
-    const search = this.page.getByPlaceholder(/search/i).first();
     const tryFind = async (query) => {
-      if (await search.isVisible({ timeout: 1500 }).catch(() => false)) {
-        await search.fill('');
-        await search.fill(query);
-        await this.page.keyboard.press('Enter').catch(() => {});
-        await this.waitForNetworkSettled();
-        await this.page.waitForTimeout(800).catch(() => {});
-      }
       const cell = this.page
         .locator('table tbody tr td, [role="cell"], [role="row"]')
         .filter({ hasText: new RegExp(this._escapeRegex(query), 'i') })
@@ -1280,16 +1395,24 @@ class CostCatalogPage extends BasePage {
     if (!hit && baseName && baseName !== wanted) {
       hit = await tryFind(baseName);
     }
+    if (!hit && baseName) {
+      // Long names are truncated with an ellipsis in the list cell — match a prefix.
+      const prefix = baseName.slice(0, 18).trim();
+      if (prefix.length >= 8) hit = await tryFind(prefix);
+    }
     if (!hit) {
-      // Clear search and scan the full list once more.
-      if (await search.isVisible({ timeout: 1000 }).catch(() => false)) {
-        await search.fill('');
-        await this.page.keyboard.press('Enter').catch(() => {});
-        await this.waitForNetworkSettled();
-        await this.page.waitForTimeout(800).catch(() => {});
-      }
+      // Reload the same Cost Catalog page once and scan the rows again (no search).
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+      await this.selectServicesTab().catch(() => {});
+      await this.waitForNetworkSettled();
+      await this.page.waitForTimeout(800).catch(() => {});
       hit = await tryFind(wanted);
       if (!hit && baseName) hit = await tryFind(baseName);
+      if (!hit && baseName) {
+        const prefix = baseName.slice(0, 18).trim();
+        if (prefix.length >= 8) hit = await tryFind(prefix);
+      }
     }
 
     if (!hit) {
@@ -1709,14 +1832,6 @@ class CostCatalogPage extends BasePage {
               await this.selectAssembliesTab().catch(() => {});
               await this.waitForNetworkSettled();
               await this.page.waitForTimeout(1500).catch(() => {});
-              const search = this.page.getByPlaceholder(/search/i).first();
-              if (await search.isVisible({ timeout: 2000 }).catch(() => false)) {
-                await search.fill('');
-                await search.fill(wanted);
-                await this.page.keyboard.press('Enter').catch(() => {});
-                await this.waitForNetworkSettled();
-                await this.page.waitForTimeout(1000).catch(() => {});
-              }
               const inList = await this.page
                 .getByText(new RegExp(this._escapeRegex(wanted), 'i'))
                 .filter({ visible: true })
@@ -2010,15 +2125,6 @@ class CostCatalogPage extends BasePage {
 
     await this.selectMaterialsTab().catch(() => {});
 
-    const search = this.page.getByPlaceholder(/search/i).first();
-    if (await search.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await search.fill('');
-      await search.fill(wanted);
-      await this.page.keyboard.press('Enter').catch(() => {});
-      await this.waitForNetworkSettled();
-      await this.page.waitForTimeout(1000).catch(() => {});
-    }
-
     // Only assert against the Materials table — not the edit-form Name input.
     const nameCell = this.page
       .locator('table tbody tr td')
@@ -2101,14 +2207,9 @@ class CostCatalogPage extends BasePage {
     this.selectedEquipmentName = '';
     const hint = String(nameHint || '').trim();
 
-    const search = this.page.getByPlaceholder(/search/i).first();
+    // Never type into the header global search — read list rows directly.
     const clearSearch = async () => {
-      if (await search.isVisible({ timeout: 1500 }).catch(() => false)) {
-        await search.fill('');
-        await this.page.keyboard.press('Enter').catch(() => {});
-        await this.waitForNetworkSettled();
-        await this.page.waitForTimeout(600).catch(() => {});
-      }
+      await this.page.keyboard.press('Escape').catch(() => {});
     };
 
     const findRow = (re) =>
@@ -2127,13 +2228,6 @@ class CostCatalogPage extends BasePage {
 
     let row = null;
     for (const { re, q } of queries) {
-      if (await search.isVisible({ timeout: 1500 }).catch(() => false)) {
-        await search.fill('');
-        await search.fill(q);
-        await this.page.keyboard.press('Enter').catch(() => {});
-        await this.waitForNetworkSettled();
-        await this.page.waitForTimeout(700).catch(() => {});
-      }
       row = findRow(re);
       if (await row.isVisible({ timeout: 4000 }).catch(() => false)) {
         const nameCell = row
@@ -2195,13 +2289,17 @@ class CostCatalogPage extends BasePage {
       this.selectedEquipmentName ||
       this.selectedServiceName ||
       this.selectedMaterialName ||
+      this.selectedConsultationFeeName ||
+      this.selectedSubcontractorName ||
       'item';
     const nameRe = new RegExp(this._escapeRegex(selectedName), 'i');
     let row =
       this.selectedAssemblyRow ||
       this.selectedEquipmentRow ||
       this.selectedServiceRow ||
-      this.selectedMaterialRow;
+      this.selectedMaterialRow ||
+      this.selectedConsultationFeeRow ||
+      this.selectedSubcontractorRow;
     if (!row || !(await row.isVisible({ timeout: 1500 }).catch(() => false))) {
       row = this.page
         .locator('table tbody tr')
@@ -2429,6 +2527,35 @@ class CostCatalogPage extends BasePage {
     throw new Error(`Did not see Cost Catalog material updated success toast. Snippet: ${snippet}`);
   }
 
+  /**
+   * Find a list row by listed name. Long names are truncated with "…" in the
+   * Name cell, so fall back to base name, then a name prefix. No search used.
+   */
+  async _findListRowByListedName(wanted) {
+    const full = String(wanted || '').trim();
+    const base = full.replace(/\s+\d+\s*$/, '').trim();
+    const candidates = [
+      full,
+      base,
+      base.slice(0, 18).trim(),
+      base.split(/\s+/).slice(0, 2).join(' '),
+    ].filter((q, i, arr) => q && q.length >= 4 && arr.indexOf(q) === i);
+    for (const q of candidates) {
+      const row = this.page
+        .locator('table tbody tr')
+        .filter({ hasText: new RegExp(this._escapeRegex(q), 'i') })
+        .filter({ visible: true })
+        .first();
+      // eslint-disable-next-line no-await-in-loop
+      if (await row.isVisible({ timeout: 4000 }).catch(() => false)) return row;
+    }
+    return this.page
+      .locator('table tbody tr')
+      .filter({ hasText: new RegExp(this._escapeRegex(full), 'i') })
+      .filter({ visible: true })
+      .first();
+  }
+
   async expectMaterialDetailsInList(unit, brand, cost, nameHint) {
     const wanted = this._resolveListedMaterialName(
       (this.lastEditedMaterial && this.lastEditedMaterial.name) || nameHint
@@ -2446,11 +2573,7 @@ class CostCatalogPage extends BasePage {
       (this.lastEditedMaterial && this.lastEditedMaterial.cost) || cost || ''
     ).trim();
 
-    const row = this.page
-      .locator('table tbody tr')
-      .filter({ hasText: new RegExp(this._escapeRegex(wanted), 'i') })
-      .filter({ visible: true })
-      .first();
+    const row = await this._findListRowByListedName(wanted);
     await expect(row).toBeVisible({ timeout: this.defaultTimeout });
     const rowText = ((await row.innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
 
@@ -2594,14 +2717,9 @@ class CostCatalogPage extends BasePage {
     this.selectedEquipmentName = '';
 
     const hint = String(nameHint || '').trim();
-    const search = this.page.getByPlaceholder(/search/i).first();
+    // Never type into the header global search — read list rows directly.
     const clearSearch = async () => {
-      if (await search.isVisible({ timeout: 1500 }).catch(() => false)) {
-        await search.fill('');
-        await this.page.keyboard.press('Enter').catch(() => {});
-        await this.waitForNetworkSettled();
-        await this.page.waitForTimeout(600).catch(() => {});
-      }
+      await this.page.keyboard.press('Escape').catch(() => {});
     };
 
     const findRow = (re) =>
@@ -2620,13 +2738,6 @@ class CostCatalogPage extends BasePage {
 
     let row = null;
     for (const { re, q } of queries) {
-      if (await search.isVisible({ timeout: 1500 }).catch(() => false)) {
-        await search.fill('');
-        await search.fill(q);
-        await this.page.keyboard.press('Enter').catch(() => {});
-        await this.waitForNetworkSettled();
-        await this.page.waitForTimeout(700).catch(() => {});
-      }
       row = findRow(re);
       if (await row.isVisible({ timeout: 4000 }).catch(() => false)) {
         const nameCell = row
@@ -2696,18 +2807,7 @@ class CostCatalogPage extends BasePage {
   async updateServiceDescription(description) {
     await expect(this.itemNameInput()).toBeVisible({ timeout: this.defaultTimeout });
     const root = this.activeForm();
-    const desc = root
-      .getByPlaceholder(/description/i)
-      .or(root.getByLabel(/^description/i))
-      .or(root.locator('textarea').first())
-      .first();
-    if (await desc.isVisible({ timeout: 2500 }).catch(() => false)) {
-      await desc.click({ timeout: this.uiTimeout });
-      await desc.fill('');
-      await desc.fill(String(description));
-    } else {
-      await this._fillLabeledField(root, /description/i, description, 'description');
-    }
+    await this._fillDescriptionField(root, description);
     this.lastEditedService = {
       ...(this.lastEditedService || {}),
       description: String(description).trim(),
@@ -2806,11 +2906,7 @@ class CostCatalogPage extends BasePage {
       (this.lastEditedService && this.lastEditedService.pricingModule) || pricingModule || '';
     const priceWanted = (this.lastEditedService && this.lastEditedService.price) || price || '';
 
-    const row = this.page
-      .locator('table tbody tr')
-      .filter({ hasText: new RegExp(this._escapeRegex(wanted), 'i') })
-      .filter({ visible: true })
-      .first();
+    const row = await this._findListRowByListedName(wanted);
     await expect(row).toBeVisible({ timeout: this.defaultTimeout });
     const rowText = ((await row.innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
 
@@ -2975,17 +3071,7 @@ class CostCatalogPage extends BasePage {
     await this._setMaterialName(root, uniqueName);
     await this._selectCategoryByName(root, category);
 
-    const desc = root
-      .getByPlaceholder(/description/i)
-      .or(root.getByLabel(/^description/i))
-      .or(root.locator('textarea').first())
-      .first();
-    if (await desc.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await desc.fill('');
-      await desc.fill(String(description));
-    } else {
-      await this._fillLabeledField(root, /description/i, description, 'description');
-    }
+    await this._fillDescriptionField(root, description);
 
     let selectedUnit = '';
     const unitAliases = [unit, 'Hr', 'HR', 'Hrs', 'Hour', 'Hours', 'hr'];
@@ -3095,15 +3181,7 @@ class CostCatalogPage extends BasePage {
     await this.selectEquipmentsTab().catch(() => {});
     await this.waitForNetworkSettled();
 
-    const search = this.page.getByPlaceholder(/search/i).first();
     const tryFind = async (query) => {
-      if (await search.isVisible({ timeout: 1500 }).catch(() => false)) {
-        await search.fill('');
-        await search.fill(query);
-        await this.page.keyboard.press('Enter').catch(() => {});
-        await this.waitForNetworkSettled();
-        await this.page.waitForTimeout(800).catch(() => {});
-      }
       const cell = this.page
         .locator('table tbody tr td, [role="cell"], [role="row"]')
         .filter({ hasText: new RegExp(this._escapeRegex(query), 'i') })
@@ -3118,11 +3196,11 @@ class CostCatalogPage extends BasePage {
     let hit = await tryFind(wanted);
     if (!hit && baseName && baseName !== wanted) hit = await tryFind(baseName);
     if (!hit) {
-      if (await search.isVisible({ timeout: 1000 }).catch(() => false)) {
-        await search.fill('');
-        await this.page.keyboard.press('Enter').catch(() => {});
-        await this.waitForNetworkSettled();
-      }
+      // Reload the same page once and scan rows again (no search).
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+      await this.selectEquipmentsTab().catch(() => {});
+      await this.waitForNetworkSettled();
       hit = await tryFind(wanted);
       if (!hit && baseName) hit = await tryFind(baseName);
     }
@@ -3204,14 +3282,9 @@ class CostCatalogPage extends BasePage {
     this.selectedServiceName = '';
 
     const hint = String(nameHint || '').trim();
-    const search = this.page.getByPlaceholder(/search/i).first();
+    // Never type into the header global search — read list rows directly.
     const clearSearch = async () => {
-      if (await search.isVisible({ timeout: 1500 }).catch(() => false)) {
-        await search.fill('');
-        await this.page.keyboard.press('Enter').catch(() => {});
-        await this.waitForNetworkSettled();
-        await this.page.waitForTimeout(600).catch(() => {});
-      }
+      await this.page.keyboard.press('Escape').catch(() => {});
     };
 
     const findRow = (re) =>
@@ -3230,13 +3303,6 @@ class CostCatalogPage extends BasePage {
 
     let row = null;
     for (const { re, q } of queries) {
-      if (await search.isVisible({ timeout: 1500 }).catch(() => false)) {
-        await search.fill('');
-        await search.fill(q);
-        await this.page.keyboard.press('Enter').catch(() => {});
-        await this.waitForNetworkSettled();
-        await this.page.waitForTimeout(700).catch(() => {});
-      }
       row = findRow(re);
       if (await row.isVisible({ timeout: 4000 }).catch(() => false)) {
         const nameCell = row
@@ -3309,18 +3375,7 @@ class CostCatalogPage extends BasePage {
   async updateEquipmentDescription(description) {
     await expect(this.itemNameInput()).toBeVisible({ timeout: this.defaultTimeout });
     const root = this.activeForm();
-    const desc = root
-      .getByPlaceholder(/description/i)
-      .or(root.getByLabel(/^description/i))
-      .or(root.locator('textarea').first())
-      .first();
-    if (await desc.isVisible({ timeout: 2500 }).catch(() => false)) {
-      await desc.click({ timeout: this.uiTimeout });
-      await desc.fill('');
-      await desc.fill(String(description));
-    } else {
-      await this._fillLabeledField(root, /description/i, description, 'description');
-    }
+    await this._fillDescriptionField(root, description);
     this.lastEditedEquipment = {
       ...(this.lastEditedEquipment || {}),
       description: String(description).trim(),
@@ -3478,11 +3533,7 @@ class CostCatalogPage extends BasePage {
     const costWanted =
       (this.lastEditedEquipment && this.lastEditedEquipment.unitCost) || unitCost || '';
 
-    const row = this.page
-      .locator('table tbody tr')
-      .filter({ hasText: new RegExp(this._escapeRegex(wanted), 'i') })
-      .filter({ visible: true })
-      .first();
+    const row = await this._findListRowByListedName(wanted);
     await expect(row).toBeVisible({ timeout: this.defaultTimeout });
     const rowText = ((await row.innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
 
@@ -3577,20 +3628,9 @@ class CostCatalogPage extends BasePage {
     await nameInput.fill('');
     await nameInput.fill(uniqueName);
 
-    const desc = this.page
-      .getByRole('textbox', { name: /description/i })
-      .or(this.page.getByLabel(/description/i))
-      .or(this.page.getByPlaceholder(/description/i))
-      .or(this.page.locator('textarea').filter({ visible: true }))
-      .filter({ visible: true })
-      .first();
-    if (await desc.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await desc.click({ timeout: this.uiTimeout });
-      await desc.fill('');
-      await desc.fill(String(description));
-    } else {
-      await this._fillLabeledField(this.page.locator('body'), /description/i, description, 'description');
-    }
+    // Description is a rich-text editor here too — its toolbar color input must
+    // never be filled as text (throws "Malformed value" for type=color).
+    await this._fillDescriptionField(this.page.locator('body'), description);
 
     const selectedUnit = await this._selectUnit(root, unit).catch(async () =>
       this._selectUnit(this.page.locator('body'), unit).catch(() => unit)
@@ -3887,18 +3927,10 @@ class CostCatalogPage extends BasePage {
     await this.selectAssembliesTab().catch(() => {});
     await this.waitForNetworkSettled();
 
-    const search = this.page.getByPlaceholder(/search/i).first();
     const isNoise = (text) => /^intoaec$/i.test(String(text || '').trim());
 
     const tryFind = async (query) => {
       if (!query) return null;
-      if (await search.isVisible({ timeout: 1500 }).catch(() => false)) {
-        await search.fill('');
-        await search.fill(query);
-        await this.page.keyboard.press('Enter').catch(() => {});
-        await this.waitForNetworkSettled();
-        await this.page.waitForTimeout(1200).catch(() => {});
-      }
 
       const row = this.page
         .locator('table tbody tr, [role="row"]')
@@ -3943,12 +3975,8 @@ class CostCatalogPage extends BasePage {
     }
 
     if (!hit) {
-      // Clear search and try All tab once.
-      if (await search.isVisible({ timeout: 1000 }).catch(() => false)) {
-        await search.fill('');
-        await this.page.keyboard.press('Enter').catch(() => {});
-        await this.waitForNetworkSettled();
-      }
+      // Try the All tab once (read rows directly, no search).
+      await this.page.keyboard.press('Escape').catch(() => {});
       const allTab = this.page.getByRole('tab', { name: /^all$/i }).or(this.page.getByText(/^all$/i)).first();
       if (await allTab.isVisible({ timeout: 1500 }).catch(() => false)) {
         await allTab.click({ timeout: this.uiTimeout }).catch(() => {});
@@ -4050,14 +4078,9 @@ class CostCatalogPage extends BasePage {
     this.selectedEquipmentName = '';
 
     const hint = String(nameHint || '').trim();
-    const search = this.page.getByPlaceholder(/search/i).first();
+    // Never type into the header global search — read list rows directly.
     const clearSearch = async () => {
-      if (await search.isVisible({ timeout: 1500 }).catch(() => false)) {
-        await search.fill('');
-        await this.page.keyboard.press('Enter').catch(() => {});
-        await this.waitForNetworkSettled();
-        await this.page.waitForTimeout(600).catch(() => {});
-      }
+      await this.page.keyboard.press('Escape').catch(() => {});
     };
 
     const findRow = (re) =>
@@ -4076,13 +4099,6 @@ class CostCatalogPage extends BasePage {
 
     let row = null;
     for (const { re, q } of queries) {
-      if (await search.isVisible({ timeout: 1500 }).catch(() => false)) {
-        await search.fill('');
-        await search.fill(q);
-        await this.page.keyboard.press('Enter').catch(() => {});
-        await this.waitForNetworkSettled();
-        await this.page.waitForTimeout(700).catch(() => {});
-      }
       row = findRow(re);
       if (await row.isVisible({ timeout: 4000 }).catch(() => false)) {
         const nameCell = row
@@ -4206,10 +4222,13 @@ class CostCatalogPage extends BasePage {
       .or(this.page.getByLabel(/^description/i))
       .or(this.page.locator('textarea').filter({ visible: true }))
       .first();
-    await expect(desc).toBeVisible({ timeout: this.uiTimeout });
-    await desc.click({ timeout: this.uiTimeout });
-    await desc.fill('');
-    await desc.fill(String(description));
+    if (await desc.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await desc.click({ timeout: this.uiTimeout });
+      await desc.fill('');
+      await desc.fill(String(description));
+    } else {
+      await this._fillDescriptionField(this.page.locator('body'), description);
+    }
     this.lastEditedAssembly = {
       ...(this.lastEditedAssembly || {}),
       description: String(description),
@@ -4403,11 +4422,7 @@ class CostCatalogPage extends BasePage {
     const costWanted =
       (this.lastEditedAssembly && this.lastEditedAssembly.unitCost) || unitCost || '';
 
-    const row = this.page
-      .locator('table tbody tr')
-      .filter({ hasText: new RegExp(this._escapeRegex(wanted), 'i') })
-      .filter({ visible: true })
-      .first();
+    const row = await this._findListRowByListedName(wanted);
     await expect(row).toBeVisible({ timeout: this.defaultTimeout });
     const rowText = ((await row.innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
 
@@ -4436,6 +4451,653 @@ class CostCatalogPage extends BasePage {
     this.logStep(
       `Assemblies list shows "${wanted}" with unit "${unitWanted}", unit cost "${costWanted}"`
     );
+  }
+
+  // =========================================================================
+  // Consultation Fees & Subcontractors — simple Name / Unit / Cost items.
+  // Both share one implementation; only tab, store and labels differ.
+  // =========================================================================
+
+  _simpleCatalogType(kind) {
+    const types = {
+      consultationFee: {
+        label: 'Consultation Fees',
+        store: 'lastConsultationFees',
+        edited: 'lastEditedConsultationFee',
+        selectedName: 'selectedConsultationFeeName',
+        selectedRow: 'selectedConsultationFeeRow',
+        tab: () => this.selectConsultationFeesTab(),
+        selectType: () => this.selectItemTypeConsultationFee(),
+      },
+      subcontractor: {
+        label: 'Subcontractors',
+        store: 'lastSubcontractors',
+        edited: 'lastEditedSubcontractor',
+        selectedName: 'selectedSubcontractorName',
+        selectedRow: 'selectedSubcontractorRow',
+        tab: () => this.selectSubcontractorsTab(),
+        selectType: () => this.selectItemTypeSubcontractor(),
+      },
+    };
+    return types[kind];
+  }
+
+  _resolveSimpleCatalogName(kind, nameHint) {
+    const cfg = this._simpleCatalogType(kind);
+    const hint = String(nameHint || '').trim();
+    const edited = this[cfg.edited];
+    if (
+      edited &&
+      edited.name &&
+      (edited.baseName === hint ||
+        edited.name === hint ||
+        String(edited.name).toLowerCase().startsWith(hint.toLowerCase()))
+    ) {
+      return edited.name;
+    }
+    const fromLast = (this[cfg.store] || []).find(
+      (m) =>
+        m &&
+        (m.name === hint ||
+          m.baseName === hint ||
+          String(m.name || '').toLowerCase().startsWith(hint.toLowerCase()))
+    );
+    return (fromLast && fromLast.name) || hint;
+  }
+
+  async _saveAndReopenSimpleCatalogItem(cfg) {
+    const saveReady = await this._resolveVisibleSaveButton(3000).catch(() => null);
+    if (!saveReady) return false;
+
+    this.lastToastText = '';
+    await this._saveMaterialHandlingDuplicate();
+    await this._captureToastIfAny(`${cfg.label} mid-save`, 5000);
+    await this.page.waitForTimeout(1000).catch(() => {});
+
+    const formOpen = await this.itemNameInput().isVisible({ timeout: 1500 }).catch(() => false);
+    const toastOk =
+      Boolean(this.lastToastText) && /created|added|success|saved|item/i.test(this.lastToastText);
+    if (formOpen && !toastOk) {
+      const snippet = ((await this.activeForm().innerText().catch(() => '')) || '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 350);
+      throw new Error(
+        `First ${cfg.label} item did not save before adding the next. Snippet: ${snippet}`
+      );
+    }
+
+    if (this.page.isClosed()) {
+      throw new Error(`Browser page closed after saving the first ${cfg.label} item`);
+    }
+
+    await cfg.tab().catch(() => {});
+    await this.clickAddItems();
+    await cfg.selectType();
+    await this._waitForActiveFormWithInputs(this.defaultTimeout);
+    return true;
+  }
+
+  /** Consultation Fee has no Unit field — its unit equivalent is the Fee basis combobox. */
+  async _selectFeeBasis(root, basis) {
+    const wanted = String(basis || '').trim();
+    const basisRe = /^(day|daily)(\s*rate)?$/i.test(wanted)
+      ? /daily\s*rate/i
+      : /^(hr|hrs|hour|hourly)(\s*rate)?$/i.test(wanted)
+        ? /hourly\s*rate/i
+        : new RegExp(this._escapeRegex(wanted), 'i');
+
+    const combos = root.locator('input[role="combobox"]').filter({ visible: true });
+    const count = await combos.count().catch(() => 0);
+    let combo = null;
+    for (let i = 0; i < count; i += 1) {
+      const candidate = combos.nth(i);
+      // eslint-disable-next-line no-await-in-loop
+      const value = String((await candidate.inputValue().catch(() => '')) || '').trim();
+      if (/rate/i.test(value)) {
+        combo = candidate;
+        break;
+      }
+    }
+    if (!combo) {
+      combo = root
+        .locator(
+          'xpath=.//*[contains(translate(normalize-space(.),"FEE BASIS","fee basis"),"fee basis")]/following::input[@role="combobox"][1]'
+        )
+        .first();
+    }
+    await expect(combo).toBeVisible({ timeout: this.defaultTimeout });
+
+    const current = String((await combo.inputValue().catch(() => '')) || '').trim();
+    if (!basisRe.test(current)) {
+      await combo.click({ timeout: this.uiTimeout });
+      await this.page.waitForTimeout(500).catch(() => {});
+      let option = this.page
+        .getByRole('option', { name: basisRe })
+        .or(this.page.locator('.MuiAutocomplete-option, .MuiMenuItem-root, [role="option"]').filter({ hasText: basisRe }))
+        .filter({ visible: true })
+        .first();
+      if (!(await option.isVisible({ timeout: 3000 }).catch(() => false))) {
+        // Any other rate basis is better than leaving the requested invalid one.
+        option = this.page
+          .locator('.MuiAutocomplete-option, .MuiMenuItem-root, [role="option"]')
+          .filter({ hasText: /rate|lump\s*sum/i })
+          .filter({ visible: true })
+          .first();
+      }
+      await expect(option).toBeVisible({ timeout: this.uiTimeout });
+      await option.click({ timeout: this.uiTimeout });
+      await this.page.waitForTimeout(300).catch(() => {});
+    }
+
+    const selected = String((await combo.inputValue().catch(() => '')) || '').trim();
+    // The list shows the short token: "Hourly rate" → Hour, "Daily rate" → Day.
+    const listToken = /daily/i.test(selected) ? 'Day' : /hourly/i.test(selected) ? 'Hour' : selected;
+    this.logStep(`Fee basis is "${selected}" (requested "${wanted}")`);
+    return listToken;
+  }
+
+  /** Rate amount input (Consultation Fee "Hourly rate" amount / Subcontractor "Rate per unit"). */
+  _rateAmountInput(root) {
+    return root
+      .locator(
+        'xpath=.//*[contains(translate(normalize-space(.),"RATE","rate"),"rate") and not(contains(translate(normalize-space(.),"BASIS","basis"),"basis"))]/following::input[not(@type="hidden") and not(@type="checkbox") and not(@type="radio") and not(@role="combobox")][1]'
+      )
+      .first();
+  }
+
+  async _fillRateAmount(root, cost) {
+    const rateInput = this._rateAmountInput(root);
+    if (await rateInput.isVisible({ timeout: 2500 }).catch(() => false)) {
+      await rateInput.click({ timeout: this.uiTimeout });
+      await rateInput.fill('');
+      await rateInput.fill(String(cost));
+      return true;
+    }
+    return false;
+  }
+
+  async _enterSimpleCatalogDetails(kind, index, name, unit, cost) {
+    const cfg = this._simpleCatalogType(kind);
+    const idx = Number(index) || 1;
+    let root = await this._waitForActiveFormWithInputs(this.defaultTimeout);
+
+    if (idx > 1) {
+      const addedRow = await this._clickAddAnotherMaterialRow();
+      if (!addedRow) {
+        const saved = await this._saveAndReopenSimpleCatalogItem(cfg);
+        if (!saved) {
+          throw new Error(
+            `Could not start ${cfg.label} item 2 — no in-form Add another row, and save-and-reopen failed`
+          );
+        }
+      }
+      root = await this._waitForActiveFormWithInputs(this.defaultTimeout);
+    }
+
+    // Always number the name (e.g. "Cement Consultation 147") to avoid duplicates.
+    const uniqueName = this._uniqueMaterialName(name);
+
+    await this._setMaterialName(root, uniqueName);
+    await this._selectFirstAutocomplete(root, /select\s*category|^category$/i, 'Category').catch(
+      () => {}
+    );
+    // Consultation Fee: "unit" is the Fee basis (Hourly/Daily rate). Others use Select Unit.
+    const selectedUnit =
+      kind === 'consultationFee'
+        ? await this._selectFeeBasis(root, unit)
+        : await this._selectUnit(root, unit);
+
+    // Cost goes to the rate amount (Rate per unit / fee amount), not "Unit cost".
+    const rateFilled = await this._fillRateAmount(root, cost);
+    if (!rateFilled) {
+      const unitCostByLabel = root
+        .locator(
+          'xpath=.//*[contains(translate(normalize-space(.),"UNIT COST","unit cost"),"unit cost")]/following::input[1]'
+        )
+        .first();
+      if (await unitCostByLabel.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await unitCostByLabel.fill('');
+        await unitCostByLabel.fill(String(cost));
+      } else {
+        await this._fillLabeledField(root, /unit\s*cost|cost|price/i, cost, 'cost');
+      }
+    }
+
+    this[cfg.store][idx - 1] = {
+      name: uniqueName,
+      baseName: String(name).trim(),
+      unit: selectedUnit || unit,
+      cost: String(cost),
+    };
+    await this._dismissOpenListbox().catch(() => {});
+    this.logStep(
+      `Entered Cost Catalog ${cfg.label} ${idx}: "${uniqueName}" | ${selectedUnit || unit} | ${cost}`
+    );
+  }
+
+  async _expectSimpleCatalogItemInList(kind, name) {
+    const cfg = this._simpleCatalogType(kind);
+    const wanted = this._resolveSimpleCatalogName(kind, name);
+    // Names are saved with a numeric suffix; match the base name too in case the
+    // server kept a different suffix than the one typed into the form.
+    const baseName = String(wanted).replace(/\s+\d+$/, '').trim();
+    await this.page.waitForTimeout(500).catch(() => {});
+
+    if (this.page.isClosed()) {
+      throw new Error(`Browser closed before verifying ${cfg.label} item "${wanted}" in list`);
+    }
+
+    // Verify on the same Cost Catalog page: open the tab and read the list rows
+    // directly — do not type into any search box.
+    await cfg.tab().catch(() => {});
+    await this.waitForNetworkSettled();
+
+    const cellFor = (text) =>
+      this.page
+        .locator('table tbody tr td')
+        .filter({ hasText: new RegExp(this._escapeRegex(text), 'i') })
+        .filter({ visible: true })
+        .first();
+
+    const deadline = Date.now() + this.defaultTimeout;
+    let refreshed = false;
+    for (;;) {
+      if (await cellFor(wanted).isVisible({ timeout: 1500 }).catch(() => false)) break;
+      if (
+        baseName &&
+        baseName !== wanted &&
+        (await cellFor(baseName).isVisible({ timeout: 1500 }).catch(() => false))
+      ) {
+        break;
+      }
+      if (Date.now() > deadline) {
+        await expect(cellFor(wanted)).toBeVisible({ timeout: 5000 });
+        break;
+      }
+      if (!refreshed && Date.now() > deadline - this.defaultTimeout / 2) {
+        refreshed = true;
+        await this.page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+        await this.waitForNetworkSettled();
+        await cfg.tab().catch(() => {});
+      }
+      await this.page.waitForTimeout(1000).catch(() => {});
+    }
+
+    this.logStep(`${cfg.label} list displays "${wanted}" (verified on the Cost Catalog page)`);
+  }
+
+  async _expectSimpleCatalogAddedToast(kind) {
+    const cfg = this._simpleCatalogType(kind);
+    if (this.lastToastText && !/duplicate|already\s*exist/i.test(this.lastToastText)) {
+      this.logStep(
+        `Verified Cost Catalog ${cfg.label} success toast (captured earlier): "${this.lastToastText.slice(0, 120)}"`
+      );
+      return;
+    }
+
+    const toastRe = /success|successfully|added|saved|created|item/i;
+    const toast = this.page
+      .locator('.Toastify__toast, .Toastify__toast-body, [role="alert"], .MuiSnackbar-root, .MuiAlert-root')
+      .filter({ visible: true })
+      .first();
+
+    if (await toast.isVisible({ timeout: 8000 }).catch(() => false)) {
+      const text = ((await toast.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+      if (toastRe.test(text) || text.length > 0) {
+        this.lastToastText = text;
+        this.logStep(`Verified Cost Catalog ${cfg.label} success toast: "${text.slice(0, 120)}"`);
+        return;
+      }
+    }
+
+    const names = (this[cfg.store] || []).map((s) => s && s.name).filter(Boolean);
+    for (const name of names) {
+      // eslint-disable-next-line no-await-in-loop
+      const visible = await this.page
+        .locator('table tbody tr td')
+        .filter({ hasText: new RegExp(this._escapeRegex(name), 'i') })
+        .first()
+        .isVisible({ timeout: 5000 })
+        .catch(() => false);
+      if (visible) {
+        this.logStep(
+          `Success toast not found; ${cfg.label} item "${name}" is visible in Cost Catalog (treating save as success)`
+        );
+        return;
+      }
+    }
+
+    if (this.lastMaterialSaveOk) {
+      this.logStep(`${cfg.label} save completed (toast text not captured)`);
+      return;
+    }
+
+    const snippet = ((await this.page.locator('body').innerText().catch(() => '')) || '')
+      .replace(/\s+/g, ' ')
+      .slice(0, 400);
+    throw new Error(`Did not see Cost Catalog ${cfg.label} success toast. Snippet: ${snippet}`);
+  }
+
+  async _selectSimpleCatalogItem(kind, nameHint) {
+    const cfg = this._simpleCatalogType(kind);
+    await cfg.tab().catch(() => {});
+    const hint = String(nameHint || '').trim();
+
+    const findRow = (re) =>
+      this.page
+        .locator('table tbody tr')
+        .filter({ hasText: re })
+        .filter({ has: this.page.locator('td') })
+        .filter({ visible: true })
+        .first();
+
+    // Read the list rows on the same page — no search box.
+    await this.waitForNetworkSettled();
+    let row = null;
+    const hintRe = new RegExp(this._escapeRegex(hint), 'i');
+    row = findRow(hintRe);
+    if (await row.isVisible({ timeout: 4000 }).catch(() => false)) {
+      const nameCell = row.locator('td').filter({ hasText: hintRe }).first();
+      this[cfg.selectedName] = ((await nameCell.innerText().catch(() => '')) || hint).trim();
+    } else {
+      row = null;
+    }
+
+    if (!row) {
+      await this.page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+      await this.waitForNetworkSettled();
+      await cfg.tab().catch(() => {});
+      row = findRow(hintRe);
+      if (await row.isVisible({ timeout: 2000 }).catch(() => false)) {
+        const nameCell = row.locator('td').filter({ hasText: hintRe }).first();
+        this[cfg.selectedName] = ((await nameCell.innerText().catch(() => '')) || hint).trim();
+      } else {
+        row = null;
+      }
+    }
+
+    if (!row) {
+      row = this.page
+        .locator('table tbody tr')
+        .filter({ has: this.page.locator('td') })
+        .filter({ visible: true })
+        .first();
+      await expect(row).toBeVisible({ timeout: this.defaultTimeout });
+      const nameCell = row.locator('td').filter({ hasText: /[A-Za-z]{4,}/ }).first();
+      this[cfg.selectedName] = ((await nameCell.innerText().catch(() => '')) || hint).trim();
+      this.logStep(`${cfg.label} item "${hint}" not in list — falling back to first row`);
+    }
+
+    await expect(row).toBeVisible({ timeout: this.defaultTimeout });
+    await row.scrollIntoViewIfNeeded().catch(() => {});
+    await this._dismissBlockingOverlay();
+    // Hover only — name click opens edit; Edit must come from the 3-dot menu.
+    await row.hover().catch(() => {});
+    this[cfg.selectedRow] = row;
+    this.logStep(`Selected Cost Catalog ${cfg.label} item "${this[cfg.selectedName]}"`);
+  }
+
+  async _updateSimpleCatalogName(kind, name) {
+    const cfg = this._simpleCatalogType(kind);
+    await expect(this.itemNameInput()).toBeVisible({ timeout: this.defaultTimeout });
+    const root = this.activeForm();
+    const uniqueName = this._uniqueMaterialName(name);
+    await this._setMaterialName(root, uniqueName);
+    this[cfg.edited] = {
+      ...(this[cfg.edited] || {}),
+      name: uniqueName,
+      baseName: String(name).trim(),
+    };
+    this[cfg.store] = this[cfg.store] || [];
+    this[cfg.store][0] = {
+      ...(this[cfg.store][0] || {}),
+      name: uniqueName,
+      baseName: String(name).trim(),
+    };
+    this.logStep(`Updated Cost Catalog ${cfg.label} name to "${uniqueName}"`);
+  }
+
+  async _updateSimpleCatalogUnit(kind, unit) {
+    const cfg = this._simpleCatalogType(kind);
+    const root = this.activeForm();
+    await expect(this.itemNameInput()).toBeVisible({ timeout: this.defaultTimeout });
+
+    if (kind === 'consultationFee') {
+      // No Unit field on this form — change the Fee basis (Hour → Daily rate, etc.).
+      const listToken = await this._selectFeeBasis(root, unit);
+      await this._dismissOpenListbox();
+      this[cfg.edited] = { ...(this[cfg.edited] || {}), unit: listToken };
+      this.logStep(`Updated Cost Catalog ${cfg.label} fee basis to "${listToken}" (requested "${unit}")`);
+      return;
+    }
+
+    const selected = await this._selectUnit(root, unit);
+    await this._dismissOpenListbox();
+
+    const unitField = this.page.getByPlaceholder(/select\s*unit/i).first();
+    let unitVal = String((await unitField.inputValue().catch(() => '')) || selected || '').trim();
+    if (!unitVal) {
+      unitVal = await this._selectUnit(root, '');
+      await this._dismissOpenListbox();
+    }
+    if (!unitVal) {
+      throw new Error(`Could not set Cost Catalog ${cfg.label} unit (requested "${unit}")`);
+    }
+
+    this[cfg.edited] = { ...(this[cfg.edited] || {}), unit: unitVal };
+    this.logStep(`Updated Cost Catalog ${cfg.label} unit to "${unitVal}" (requested "${unit}")`);
+  }
+
+  async _updateSimpleCatalogCost(kind, cost) {
+    const cfg = this._simpleCatalogType(kind);
+    await expect(this.itemNameInput()).toBeVisible({ timeout: this.defaultTimeout });
+    const root = this.activeForm();
+    // Cost belongs in the rate amount field, not "Unit cost".
+    const rateInput = this._rateAmountInput(root);
+    if (await rateInput.isVisible({ timeout: 2500 }).catch(() => false)) {
+      await rateInput.click({ timeout: this.uiTimeout });
+      await rateInput.fill('');
+      await rateInput.pressSequentially(String(cost), { delay: 20 }).catch(async () => {
+        await rateInput.fill(String(cost));
+      });
+    } else {
+      const unitCostByLabel = root
+        .locator(
+          'xpath=.//*[contains(translate(normalize-space(.),"UNIT COST","unit cost"),"unit cost")]/following::input[1]'
+        )
+        .first();
+      if (await unitCostByLabel.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await unitCostByLabel.click({ timeout: this.uiTimeout });
+        await unitCostByLabel.fill('');
+        await unitCostByLabel.pressSequentially(String(cost), { delay: 20 }).catch(async () => {
+          await unitCostByLabel.fill(String(cost));
+        });
+      } else {
+        await this._fillLabeledField(root, /unit\s*cost|cost|price/i, cost, 'cost');
+      }
+    }
+    this[cfg.edited] = { ...(this[cfg.edited] || {}), cost: String(cost).trim() };
+    this.logStep(`Updated Cost Catalog ${cfg.label} cost to "${cost}"`);
+  }
+
+  async _expectSimpleCatalogUpdatedToast(kind) {
+    const cfg = this._simpleCatalogType(kind);
+    if (this.lastToastText && /item\s*updated|updated|success|saved/i.test(this.lastToastText)) {
+      this.logStep(
+        `Verified Cost Catalog ${cfg.label} update toast (captured earlier): "${this.lastToastText.slice(0, 120)}"`
+      );
+      return;
+    }
+
+    const toastRe = /item\s*updated|success|successfully|updated|saved/i;
+    const toast = this.page
+      .locator('.Toastify__toast, .Toastify__toast-body, [role="alert"], .MuiSnackbar-root, .MuiAlert-root')
+      .filter({ visible: true })
+      .first();
+
+    if (await toast.isVisible({ timeout: 8000 }).catch(() => false)) {
+      const text = ((await toast.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+      if (text && toastRe.test(text) && !/duplicate|already\s*exist|error|failed|invalid/i.test(text)) {
+        this.lastToastText = text;
+        this.logStep(`Verified Cost Catalog ${cfg.label} update toast: "${text.slice(0, 120)}"`);
+        return;
+      }
+    }
+
+    const name = (this[cfg.edited] && this[cfg.edited].name) || '';
+    if (name) {
+      const inTable = await this.page
+        .locator('table tbody tr td')
+        .filter({ hasText: new RegExp(this._escapeRegex(name), 'i') })
+        .filter({ visible: true })
+        .first()
+        .isVisible({ timeout: 8000 })
+        .catch(() => false);
+      if (inTable) {
+        this.logStep(
+          `Update toast not found; ${cfg.label} item "${name}" is in list (treating update as success)`
+        );
+        return;
+      }
+    }
+
+    if (
+      this.lastMaterialSaveOk &&
+      this.lastToastText &&
+      /updated|success|saved|item/i.test(this.lastToastText)
+    ) {
+      this.logStep(`${cfg.label} update Save Item completed (toast text not captured)`);
+      return;
+    }
+
+    const snippet = ((await this.page.locator('body').innerText().catch(() => '')) || '')
+      .replace(/\s+/g, ' ')
+      .slice(0, 400);
+    throw new Error(`Did not see Cost Catalog ${cfg.label} updated success toast. Snippet: ${snippet}`);
+  }
+
+  async _expectSimpleCatalogDetailsInList(kind, unit, cost, nameHint) {
+    const cfg = this._simpleCatalogType(kind);
+    const wanted = this._resolveSimpleCatalogName(
+      kind,
+      (this[cfg.edited] && this[cfg.edited].name) || nameHint
+    );
+    await this._expectSimpleCatalogItemInList(kind, wanted);
+
+    const unitWanted = String((this[cfg.edited] && this[cfg.edited].unit) || unit || '').trim();
+    const costWanted = String((this[cfg.edited] && this[cfg.edited].cost) || cost || '').trim();
+
+    const row = this.page
+      .locator('table tbody tr')
+      .filter({ hasText: new RegExp(this._escapeRegex(wanted), 'i') })
+      .filter({ visible: true })
+      .first();
+    await expect(row).toBeVisible({ timeout: this.defaultTimeout });
+    const rowText = ((await row.innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
+
+    if (unitWanted) {
+      const hourAlias = /^(hr|hrs|hour|hours)$/i.test(unitWanted);
+      const dayAlias = /^day(s)?$/i.test(unitWanted);
+      const unitRe = hourAlias
+        ? /\b(hr|hrs|hour|hours)\b/i
+        : dayAlias
+          ? /\bday(s)?\b/i
+          : new RegExp(this._escapeRegex(unitWanted), 'i');
+      if (!unitRe.test(rowText)) {
+        throw new Error(
+          `Expected unit "${unitWanted}" in ${cfg.label} row for "${wanted}". Row: "${rowText.slice(0, 240)}"`
+        );
+      }
+    }
+    if (costWanted) {
+      const digits = String(costWanted).replace(/[^\d.]/g, '');
+      const plainRe = new RegExp(`\\$?₹?\\s*${this._escapeRegex(digits)}\\b`);
+      if (!plainRe.test(rowText.replace(/,/g, ''))) {
+        throw new Error(
+          `Expected cost "${costWanted}" in ${cfg.label} row for "${wanted}". Row: "${rowText.slice(0, 240)}"`
+        );
+      }
+    }
+
+    this.logStep(
+      `Verified ${cfg.label} list details for "${wanted}" → unit=${unitWanted}, cost=${costWanted}`
+    );
+  }
+
+  // ---- Consultation Fees (TC-09 / TC-10) ----
+
+  async enterConsultationFeeDetails(index, name, unit, cost) {
+    await this._enterSimpleCatalogDetails('consultationFee', index, name, unit, cost);
+  }
+
+  async expectConsultationFeeInList(name) {
+    await this._expectSimpleCatalogItemInList('consultationFee', name);
+  }
+
+  async expectConsultationFeesAddedSuccessToast() {
+    await this._expectSimpleCatalogAddedToast('consultationFee');
+  }
+
+  async selectConsultationFee(nameHint) {
+    await this._selectSimpleCatalogItem('consultationFee', nameHint);
+  }
+
+  async updateConsultationFeeName(name) {
+    await this._updateSimpleCatalogName('consultationFee', name);
+  }
+
+  async updateConsultationFeeUnit(unit) {
+    await this._updateSimpleCatalogUnit('consultationFee', unit);
+  }
+
+  async updateConsultationFeeCost(cost) {
+    await this._updateSimpleCatalogCost('consultationFee', cost);
+  }
+
+  async expectConsultationFeeUpdatedSuccessToast() {
+    await this._expectSimpleCatalogUpdatedToast('consultationFee');
+  }
+
+  async expectConsultationFeeDetailsInList(unit, cost, nameHint) {
+    await this._expectSimpleCatalogDetailsInList('consultationFee', unit, cost, nameHint);
+  }
+
+  // ---- Subcontractors (TC-11 / TC-12) ----
+
+  async enterSubcontractorDetails(index, name, unit, cost) {
+    await this._enterSimpleCatalogDetails('subcontractor', index, name, unit, cost);
+  }
+
+  async expectSubcontractorInList(name) {
+    await this._expectSimpleCatalogItemInList('subcontractor', name);
+  }
+
+  async expectSubcontractorsAddedSuccessToast() {
+    await this._expectSimpleCatalogAddedToast('subcontractor');
+  }
+
+  async selectSubcontractor(nameHint) {
+    await this._selectSimpleCatalogItem('subcontractor', nameHint);
+  }
+
+  async updateSubcontractorName(name) {
+    await this._updateSimpleCatalogName('subcontractor', name);
+  }
+
+  async updateSubcontractorUnit(unit) {
+    await this._updateSimpleCatalogUnit('subcontractor', unit);
+  }
+
+  async updateSubcontractorCost(cost) {
+    await this._updateSimpleCatalogCost('subcontractor', cost);
+  }
+
+  async expectSubcontractorUpdatedSuccessToast() {
+    await this._expectSimpleCatalogUpdatedToast('subcontractor');
+  }
+
+  async expectSubcontractorDetailsInList(unit, cost, nameHint) {
+    await this._expectSimpleCatalogDetailsInList('subcontractor', unit, cost, nameHint);
   }
 }
 

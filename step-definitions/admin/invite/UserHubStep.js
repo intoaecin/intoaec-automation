@@ -29,6 +29,10 @@ Before({ tags: '@userhub' }, async function ({ pickle }) {
   }
 });
 
+Before({ tags: '@userhub', timeout: 120000 }, async function () {
+  await getUserHubPage(this).resetForNextScenario();
+});
+
 function getUserHubPage(world) {
   if (!world.userHubPage || world.userHubPage.page !== world.page) {
     world.userHubPage = new UserHubPage(world.page);

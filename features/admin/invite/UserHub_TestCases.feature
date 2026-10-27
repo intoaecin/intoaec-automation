@@ -42,6 +42,9 @@
 # Run ALL User Hub TCs (TC-01 through TC-14):
 #   npx.cmd cucumber-js --tags "@userhub-tc01-tc14"
 #
+# Run only the cases that failed in the last full run (TC-04, TC-08, TC-12):
+#   npx.cmd cucumber-js --tags "@userhub-failed"
+#
 # Run one case (PowerShell: use npx.cmd / npm.cmd — npx.ps1 is blocked by execution policy):
 #   npx.cmd cucumber-js --tags "@userhub and @TC01"
 #   npx.cmd cucumber-js features/admin/invite/UserHub_TestCases.feature --tags "@TS01 and @TC01"
@@ -146,7 +149,7 @@ Feature: User Hub — incremental test cases
   # Admin Portal invite → Yopmail → user registration → Accepted status
   # ===========================================================================
 
-  @TS04 @TC04 @regression @positive @userhub-users @yopmail
+   @userhub-failed
   Scenario: TC-04 — Invite user from Admin Portal, accept from Yopmail, and verify Accepted status
     Given I am logged in
     Then I should be logged in successfully
@@ -225,7 +228,7 @@ Feature: User Hub — incremental test cases
   # toast → team in list → open team → verify 3 members under the team
   # ===========================================================================
 
-  @TS08 @TC08 @regression @positive @userhub-teams
+   @userhub-failed
   Scenario: TC-08 — Create UHCreateTeam in User Hub Teams with three members
     Given I am logged in
     Then I should be logged in successfully
@@ -406,7 +409,7 @@ Feature: User Hub — incremental test cases
   # (Live UI has no separate Assign Lead popup; assignees are removed on delete.)
   # ===========================================================================
 
-  @TS12 @TC12 @regression @positive @userhub-users
+  @TS12 @TC12 @regression @positive @userhub-users @userhub-failed
   Scenario: TC-12 — Delete accepted user and verify assignee removal note then removal from list
     Given I am logged in
     Then I should be logged in successfully

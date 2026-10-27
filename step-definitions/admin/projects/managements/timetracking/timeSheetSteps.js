@@ -102,3 +102,28 @@ Then('I should see the created timesheet in the time sheet list', { timeout: 150
   }
   await this.timeTrackingPage.expectCreatedTimesheetInList();
 });
+
+When('I capture time sheet filter criteria from the first list row', { timeout: 120000 }, async function () {
+  ensureTimeTrackingPage(this);
+  await timeTrackingPage.captureTimesheetFilterCriteriaFromFirstRow();
+});
+
+When('I click the time sheet Filter option', { timeout: 120000 }, async function () {
+  ensureTimeTrackingPage(this);
+  await timeTrackingPage.clickTimesheetFilterOption();
+});
+
+When('I select the captured time sheet filter criteria', { timeout: 120000 }, async function () {
+  ensureTimeTrackingPage(this);
+  await timeTrackingPage.selectCapturedTimesheetFilterCriteria();
+});
+
+When('I apply the time sheet filter', { timeout: 120000 }, async function () {
+  ensureTimeTrackingPage(this);
+  await timeTrackingPage.applyTimesheetFilter();
+});
+
+Then('I should see only time sheets matching the selected filter criteria', { timeout: 120000 }, async function () {
+  ensureTimeTrackingPage(this);
+  await timeTrackingPage.expectTimesheetListMatchesFilterCriteria();
+});
