@@ -2,7 +2,7 @@ const { Before, When, Then, setDefaultTimeout } = require('@cucumber/cucumber');
 const { expect } = require('@playwright/test');
 const BudgetingPage = require('../../../../../pages/admin/projects/management/Budgeting/BudgetingPage');
 const EstimatePage = require('../../../../../pages/admin/projects/design/estimate/estimate.page');
-const AcceptedProposalPage = require('../../../../../pages/admin/common/proposal/AcceptedProposalPage');
+const AcceptedProposalPage = require('../../../../../pages/admin/crm/proposal/AcceptedProposalPage');
 
 /** Per AGENTS.md: cucumber timeout aligned with heavy module loads; steps stay thin. */
 setDefaultTimeout(120000);

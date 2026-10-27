@@ -1,6 +1,6 @@
 const BasePage = require('../../BasePage');
 const { expect } = require('@playwright/test');
-const env = require('../../../config/env');
+const urls = require('../../../config/urls');
 
 /**
  * Vendor portal sign-in → dashboard.
@@ -63,7 +63,11 @@ class VendorLoginPage extends BasePage {
   }
 
   _isVendorHost() {
-    return /vendor\.(aecplayhouse|intoaec)/i.test(this.page.url());
+    try {
+      return new URL(this.page.url()).hostname === new URL(urls.vendorSignIn).hostname;
+    } catch {
+      return false;
+    }
   }
 
   async _isSignInVisible() {
@@ -135,7 +139,7 @@ class VendorLoginPage extends BasePage {
     if (!this.page || this.page.isClosed()) {
       throw new Error('Vendor page was closed before opening the login page');
     }
-    await this.page.goto(env.vendor, {
+    await this.page.goto(urls.vendorSignIn, {
       waitUntil: 'domcontentloaded',
       timeout: 60000,
     });
@@ -144,7 +148,7 @@ class VendorLoginPage extends BasePage {
 
     if (await this._isVendorAppReady()) {
       await this.page.context().clearCookies();
-      await this.page.goto(env.vendor, {
+      await this.page.goto(urls.vendorSignIn, {
         waitUntil: 'domcontentloaded',
         timeout: 60000,
       });

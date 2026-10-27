@@ -1,12 +1,13 @@
 const { chromium } = require('playwright');
 const testData = require('../utils/testData');
+const urls = require('../config/urls');
 
 async function run() {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
 
   try {
-    await page.goto('https://app.aecplayhouse.com/auth/signIn');
+    await page.goto(urls.adminSignIn);
     await page.locator('input').first().fill(testData.admin.validUser.email);
     await page.locator('input[type="password"]').fill(testData.admin.validUser.password);
     await page.locator('button:has-text("Login")').click();

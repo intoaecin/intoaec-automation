@@ -155,8 +155,39 @@ class CustomWorld {
     const session = await ensureSharedSession();
     this.browser = session.browser;
     this.context = session.context;
+    const sharedPageRecreated = !this.page || this.page !== session.page;
     this.page = session.page;
     // Drop stale page objects if the shared page was recreated.
+    if (sharedPageRecreated) {
+      this.questionnairePage = null;
+      this.previewQuestionnairePage = null;
+      this.answerQuestionnairePage = null;
+      this.proposalPage = null;
+      this.builderPage = null;
+      this.acceptedProposalPage = null;
+      this.declinedProposalPage = null;
+      this.commentByLeadPage = null;
+      this.commentByAecPage = null;
+      this.editProposalPage = null;
+      this.proposalSendFlowPage = null;
+      this.proposalFlowPage = null;
+      this.callLogPage = null;
+      this.editCallLogPage = null;
+      this.deleteCallLogPage = null;
+      this.callLogValidationPage = null;
+      this.eventPage = null;
+      this.editMeetingPage = null;
+      this.deleteMeetingPage = null;
+      this.repeatMeetingPage = null;
+      this.meetingUIPage = null;
+      this.meetingValidationPage = null;
+      this.googleIntegrationPage = null;
+      this.notePage = null;
+      this.editNotePage = null;
+      this.deleteNotePage = null;
+      this.createNoteValidationPage = null;
+      this.fileUploadPage = null;
+    }
     this.myOrganizationPage = null;
     this.myAccountPage = null;
     this.warehousePage = null;
@@ -180,17 +211,18 @@ class CustomWorld {
   }
 
   async cleanup() {
-    if (this.page && !this.page.isClosed()) {
-      try {
-        const SchedulePage = require('../pages/admin/projects/management/Schedule/SchedulePage');
-        const schedulePage = this.schedulePage || new SchedulePage(this.page);
-        if (await schedulePage.isOnScheduleModule()) {
-          await schedulePage.dismissOpenOverlays();
-        }
-      } catch {
-        await this.page.keyboard.press('Escape').catch(() => {});
-        await this.page.keyboard.press('Escape').catch(() => {});
+    if (!this.page || this.page.isClosed()) return;
+    if (!/schedule/i.test(this.page.url())) return;
+
+    try {
+      const SchedulePage = require('../pages/admin/projects/management/Schedule/SchedulePage');
+      const schedulePage = this.schedulePage || new SchedulePage(this.page);
+      if (await schedulePage.isOnScheduleModule()) {
+        await schedulePage.dismissOpenOverlays();
       }
+    } catch {
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.keyboard.press('Escape').catch(() => {});
     }
   }
 }

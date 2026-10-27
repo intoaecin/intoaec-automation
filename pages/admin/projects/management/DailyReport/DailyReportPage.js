@@ -3123,7 +3123,7 @@ class DailyReportPage extends BasePage {
     };
 
     if (!(await visibleDirectly())) {
-      await this.clickDailyReportTaskProgressEditIcon().catch(() => {});
+      await this.clickTaskProgressEditIcon().catch(() => {});
       await this.page.waitForTimeout(800);
     }
 
