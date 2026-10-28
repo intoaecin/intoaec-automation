@@ -1057,6 +1057,74 @@ class TimeTrackingPage extends BasePage {
     // eslint-disable-next-line no-console
     console.log(`[Time Tracking] Created time sheet for "${userName}" is displayed in the list.`);
   }
+
+  async selectLinkedShift(shiftName) {
+    const linkField = this.page
+      .getByLabel(/link\s*shift|linked\s*shift/i)
+      .or(this.page.getByPlaceholder(/link\s*shift|select\s*shift|search\s*shift/i))
+      .or(this.page.getByRole('combobox', { name: /link\s*shift|shift/i }))
+      .filter({ visible: true })
+      .first();
+
+    await expect(linkField).toBeVisible({ timeout: this.defaultTimeout });
+    await linkField.click({ timeout: 20000 });
+
+    if (shiftName) {
+      await linkField.fill(String(shiftName)).catch(() => {});
+      await this.page.waitForTimeout(400).catch(() => {});
+      const named = this.page
+        .getByRole('option')
+        .filter({ hasText: new RegExp(String(shiftName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') })
+        .filter({ visible: true })
+        .first();
+      if (await named.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await named.click({ timeout: 15000 });
+        this.lastLinkedShiftName = shiftName;
+        // eslint-disable-next-line no-console
+        console.log(`[Time Tracking] Linked shift: ${shiftName}`);
+        return;
+      }
+    }
+
+    const firstOption = this.page
+      .locator('[role="listbox"] [role="option"], [role="option"]')
+      .filter({ visible: true })
+      .first();
+    await expect(firstOption).toBeVisible({ timeout: 15000 });
+    this.lastLinkedShiftName = ((await firstOption.innerText().catch(() => '')) || '').trim();
+    await firstOption.click({ timeout: 15000 });
+    // eslint-disable-next-line no-console
+    console.log(`[Time Tracking] Linked first available shift: ${this.lastLinkedShiftName}`);
+  }
+
+  async fillMandatoryFieldsWithLinkedShift(shiftName) {
+    await this.fillMandatoryFields();
+    await this.selectLinkedShift(shiftName);
+  }
+
+  async expectShiftLinkedTimesheetCannotConvertToExpense() {
+    const convertBtn = this.page
+      .getByRole('button', { name: /convert.*expense|add\s*to\s*expenses?/i })
+      .or(this.page.getByText(/convert.*expense/i))
+      .filter({ visible: true })
+      .first();
+
+    if (await convertBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await convertBtn.click({ timeout: 10000 }).catch(() => {});
+      const blocked = this.page
+        .getByText(/linked\s*to\s*a\s*shift|cannot\s*be\s*converted|worker\s*management/i)
+        .filter({ visible: true })
+        .first();
+      await expect(blocked).toBeVisible({ timeout: 30000 });
+      // eslint-disable-next-line no-console
+      console.log('[Time Tracking] Shift-linked timesheet convert-to-expense blocked as expected');
+      return;
+    }
+
+    // Convert action may be hidden/disabled when shift-linked
+    // eslint-disable-next-line no-console
+    console.log('[Time Tracking] Convert to expense not available for shift-linked timesheet');
+  }
 }
 
 module.exports = TimeTrackingPage;

@@ -446,6 +446,18 @@ When('I fill the User Hub invite email with {string}', async function (value) {
   console.log(`[UserHub] Invited user email for this run: ${email}`);
 });
 
+When('I fill the User Hub invite working hours with {string}', async function (value) {
+  const userHubPage = getUserHubPage(this);
+  await userHubPage.fillInviteWorkingHours(value);
+  this.invitedUserWorkingHours = value;
+});
+
+When('I fill the User Hub invite rate with {string}', async function (value) {
+  const userHubPage = getUserHubPage(this);
+  await userHubPage.fillInviteRate(value);
+  this.invitedUserRate = value;
+});
+
 When('I select the User Hub invite role {string}', async function (roleName) {
   const userHubPage = getUserHubPage(this);
   await userHubPage.selectInviteRole(roleName);

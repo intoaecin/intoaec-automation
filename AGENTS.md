@@ -304,6 +304,38 @@ npx.cmd cucumber-js --tags "@purchase-order-tc and @TC06"
 
 ---
 
+## Inventory Management (`@inventory`) — Client → Procurement → Inventory
+
+Asset-style capability files under `features/admin/projects/procurement/Inventory/`.
+
+| Layer | Path |
+|-------|------|
+| Features | `features/admin/projects/procurement/Inventory/*.feature` |
+| Steps | `step-definitions/admin/projects/procurement/Inventory.steps.js` (plus Goods Receipt steps for PO GR / Add to Group reuse) |
+| Pages | `pages/admin/projects/procurement/InventoryPage.js`, `InventoryRequestPage.js`, `GoodsReceiptPage.js` |
+
+**Admin project:** same as Purchase Order / Goods Receipt (**kumar**).
+
+**Coverage packs:**
+- **Groups:** navigate, create, rename, delete (empty), search, validation, dashboard smoke
+- **Stock-in:** Warehouse / PO / Workshop **branch**: if products / Accepted PO / dispatch exist → add/receive; else assert empty UI and soft-pass (`@empty-state`). Scenarios that need stock use `I ensure the current inventory group has at least one item` (warehouse, else request Add-to-Group fallback).
+- **Item Requests (`@item-requests`):** navigate + back, all 6 status tabs, approve/reject/cancel, bulk approve, add-to-group, convert to PO/Indent
+- **Item actions:** used qty edit, move to warehouse, delete item, link to schedule
+
+**Do not duplicate** Goods Receipt document Preview/Download (TC-03 / TC-04) — those stay in the Goods Receipt suite.
+
+**Run:**
+```bash
+npx.cmd cucumber-js --tags "@inventory"
+npx.cmd cucumber-js --tags "@item-requests"
+npx.cmd cucumber-js --tags "@inventory and @group"
+npx.cmd cucumber-js --tags "@inventory and @warehouse"
+npx.cmd cucumber-js --tags "@inventory and @workshop"
+npx.cmd cucumber-js --tags "@inventory and @validation"
+```
+
+---
+
 ## Goods Receipt (`@goods-receipt`) — incremental TC file
 
 | Layer | Path |

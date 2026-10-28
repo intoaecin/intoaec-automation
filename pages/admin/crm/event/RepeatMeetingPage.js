@@ -26,13 +26,12 @@ class RepeatMeetingPage extends EventPage {
   }
 
   async dismissEditMeetingOverlays() {
-    await this.page.keyboard.press('Escape').catch(() => {});
-    await this.page
-      .locator('.MuiPickersPopper-root')
-      .filter({ visible: true })
-      .first()
-      .waitFor({ state: 'hidden', timeout: 3000 })
-      .catch(() => {});
+    // Do not press Escape — it can leave the Edit Meeting page and hide date inputs.
+    const popper = this.page.locator('.MuiPickersPopper-root').filter({ visible: true }).first();
+    if (await popper.isVisible().catch(() => false)) {
+      await this.editMeetingTitleInput().click({ force: true }).catch(() => {});
+      await popper.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+    }
     await this.page
       .locator('.MuiMenu-paper')
       .filter({ visible: true })
@@ -72,7 +71,17 @@ class RepeatMeetingPage extends EventPage {
   }
 
   editPageScheduleDateInputs() {
-    return this.page.locator('input[placeholder="DD MMMM YYYY"], input[placeholder="DD/MM/YYYY"]');
+    // Edit/Repeat schedule uses DD/MM/YYYY (not DD MMMM YYYY).
+    return this.page.locator(
+      'input[placeholder="DD/MM/YYYY"], input[placeholder="DD MMMM YYYY"], input[placeholder*="DD"][placeholder*="YYYY"]'
+    );
+  }
+
+  toNumericScheduleDate(displayDate) {
+    const date = this.parseDisplayDate(displayDate);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${day}/${month}/${date.getFullYear()}`;
   }
 
   editPageScheduleStartDate() {
@@ -539,8 +548,16 @@ class RepeatMeetingPage extends EventPage {
     );
 
     await this.waitForEditMeetingPageReady();
-    await this.selectScheduleDateViaCalendar(this.editPageScheduleStartDate(), schedule.startDate);
-    await this.selectScheduleDateViaCalendar(this.editPageScheduleEndDate(), schedule.endDate);
+    const startNumeric = this.toNumericScheduleDate(schedule.startDate);
+    const endNumeric = this.toNumericScheduleDate(schedule.endDate);
+    try {
+      await this.fillScheduleDateInput(this.editPageScheduleStartDate(), startNumeric);
+      await this.fillScheduleDateInput(this.editPageScheduleEndDate(), endNumeric);
+    } catch (error) {
+      console.log(`[RepeatMeetingPage] Direct date fill failed (${error.message}) — trying calendar`);
+      await this.selectScheduleDateViaCalendar(this.editPageScheduleStartDate(), schedule.startDate);
+      await this.selectScheduleDateViaCalendar(this.editPageScheduleEndDate(), schedule.endDate);
+    }
     await this.selectEditPageTimePickerOption('from-time-picker', schedule.fromTime);
     await this.selectEditPageTimePickerOption('to-time-picker', schedule.toTime);
 

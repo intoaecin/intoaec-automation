@@ -2705,6 +2705,40 @@ class UserHubPage extends BasePage {
     return email;
   }
 
+  /** Working Hours on invite form (User Working Calendar draft fields). */
+  async fillInviteWorkingHours(value) {
+    const hours = String(value != null ? value : '8');
+    this.lastInvite.workingHours = hours;
+    const input = this.page
+      .getByLabel(/working\s*hours/i)
+      .or(this.page.locator('label').filter({ hasText: /working\s*hours/i }).locator('..').locator('input'))
+      .or(this.page.getByRole('textbox', { name: /working\s*hours/i }))
+      .filter({ visible: true })
+      .first();
+    await expect(input).toBeVisible({ timeout: this.uiTimeout });
+    await input.click({ timeout: this.uiTimeout }).catch(() => {});
+    await input.fill('');
+    await input.fill(hours);
+    this.logStep(`Filled invite working hours: ${hours}`);
+  }
+
+  /** Rate on invite form (hourly wage). */
+  async fillInviteRate(value) {
+    const rate = String(value != null ? value : '200');
+    this.lastInvite.rate = rate;
+    const input = this.page
+      .getByLabel(/^rate$/i)
+      .or(this.page.locator('label').filter({ hasText: /^rate$/i }).locator('..').locator('input'))
+      .or(this.page.getByRole('textbox', { name: /rate/i }))
+      .filter({ visible: true })
+      .first();
+    await expect(input).toBeVisible({ timeout: this.uiTimeout });
+    await input.click({ timeout: this.uiTimeout }).catch(() => {});
+    await input.fill('');
+    await input.fill(rate);
+    this.logStep(`Filled invite rate: ${rate}`);
+  }
+
   async selectInviteRole(roleName) {
     const role = String(roleName || '').trim();
     expect(role).toBeTruthy();
@@ -5154,13 +5188,73 @@ class UserHubPage extends BasePage {
   }
 
   _registrationMobileInput() {
+    // UpdateMobilePassword uses MuiTelInput (type=tel); prefer that over generic labels
     return this.page
-      .locator(
-        'input[name="mobileNumber"], input[name="phoneNumber"], input[name="phone"], input[name="mobile"], input[type="tel"]'
+      .locator('.MuiTelInput-root input')
+      .or(this.page.locator('input[name="mobileNumber"]'))
+      .or(this.page.locator('input[type="tel"]'))
+      .or(
+        this.page.locator(
+          'input[name="phoneNumber"], input[name="phone"], input[name="mobile"]'
+        )
       )
-      .or(this.page.getByLabel(/mobile|phone/i))
+      .or(this.page.getByRole('textbox', { name: /mobile|phone/i }))
+      .or(this.page.getByLabel(/mobile\s*number|phone/i))
       .or(this.page.getByPlaceholder(/mobile|phone|contact/i))
       .first();
+  }
+
+  _userVerifiedAcceptButton() {
+    return this.page
+      .getByRole('button', { name: /accept\s*invite|accept\s*invitation/i })
+      .or(
+        this.page
+          .locator('.user-invite-verified button, button')
+          .filter({ hasText: /accept\s*invite|accept\s*invitation/i })
+      )
+      .filter({ visible: true })
+      .first();
+  }
+
+  async _isUserVerifiedAcceptScreen() {
+    const verifiedCopy = this.page
+      .getByText(/user\s*profile\s*already\s*verified|already\s*verified/i)
+      .filter({ visible: true })
+      .first();
+    if (await verifiedCopy.isVisible({ timeout: 800 }).catch(() => false)) return true;
+    return this._userVerifiedAcceptButton().isVisible({ timeout: 800 }).catch(() => false);
+  }
+
+  async _acceptAlreadyVerifiedInvitation() {
+    const btn = this._userVerifiedAcceptButton();
+    await expect(btn).toBeVisible({ timeout: this.defaultTimeout });
+    await btn.scrollIntoViewIfNeeded().catch(() => {});
+    await btn.click({ timeout: this.uiTimeout, force: true });
+    await this.waitForNetworkSettled();
+    await this._waitForInvitationAcceptanceAfterSubmit();
+    this.logStep('Accepted invitation on already-verified user screen');
+  }
+
+  async _isInviteBlockedScreen() {
+    const blocked = this.page
+      .getByText(
+        /link\s*expired|invitation\s*denied|user\s*limit\s*reached|licensed\s*user\s*limit|already\s*used|no\s*longer\s*valid/i
+      )
+      .filter({ visible: true })
+      .first();
+    return blocked.isVisible({ timeout: 800 }).catch(() => false);
+  }
+
+  async _inviteBlockedReason() {
+    const body = ((await this.page.locator('body').innerText().catch(() => '')) || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (/user\s*limit\s*reached|licensed\s*user\s*limit/i.test(body)) {
+      return 'Organization licensed user limit reached — free a seat or upgrade before accepting invites';
+    }
+    if (/link\s*expired/i.test(body)) return 'Invitation link expired';
+    if (/invitation\s*denied/i.test(body)) return 'Invitation denied';
+    return body.slice(0, 300) || 'Invitation blocked';
   }
 
   async _commitReactInput(locator, wanted) {
@@ -5266,21 +5360,16 @@ class UserHubPage extends BasePage {
 
   async _isInvitationAcceptanceComplete() {
     const url = this.page.url() || '';
+    // Still on the invite set-password page → never treat as complete (form may still be loading)
+    if (/updatemobilenumberpassword|update-mobile-number-password/i.test(url)) {
+      return false;
+    }
     if (await this._isPostRegistrationLoginScreen()) return true;
-    if (/\/dashboard|\/userhub/i.test(url) && !/updatemobilenumberpassword/i.test(url)) return true;
+    if (/\/dashboard|\/userhub/i.test(url)) return true;
 
     const body = ((await this.page.locator('body').innerText().catch(() => '')) || '').toLowerCase();
     if (/password updated|successfully updated|invitation accepted|welcome back|logged in/i.test(body)) {
       return true;
-    }
-
-    if (/updatemobilenumberpassword/i.test(url)) {
-      const fieldsVisible = await this._registrationFieldsVisible();
-      const proceedVisible = await this._registrationProceedLoginButton()
-        .first()
-        .isVisible({ timeout: 500 })
-        .catch(() => false);
-      if (!fieldsVisible && !proceedVisible) return true;
     }
 
     return false;
@@ -5313,7 +5402,7 @@ class UserHubPage extends BasePage {
   async _registrationFieldsVisible() {
     const mobileOk = await this._registrationMobileInput().isVisible({ timeout: 1500 }).catch(() => false);
     const passwordOk = await this.page
-      .locator('input[type="password"]')
+      .locator('#password, input[type="password"]')
       .first()
       .isVisible({ timeout: 1500 })
       .catch(() => false);
@@ -5330,19 +5419,46 @@ class UserHubPage extends BasePage {
     return mobileOk || passwordOk || nameOk || proceedOk;
   }
 
+  async _invitationActionSurfaceReady() {
+    if (await this._isInvitationAcceptanceComplete()) return true;
+    if (await this._registrationFieldsVisible()) return true;
+    if (await this._isUserVerifiedAcceptScreen()) return true;
+    if (await this._isInviteBlockedScreen()) return true;
+    return false;
+  }
+
   async prepareInvitationAcceptanceForm() {
     await this.page.bringToFront().catch(() => {});
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
     await this.page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+
+    // Wait out PageLoader / decrypt / subscription checks on updateMobileNumberPassword
+    await expect
+      .poll(async () => this._invitationActionSurfaceReady(), {
+        timeout: 60000,
+        intervals: [500, 1000, 2000, 3000],
+      })
+      .toBeTruthy()
+      .catch(() => false);
 
     if (await this._registrationFieldsVisible()) {
       this.logStep(`Registration form already visible after opening invite link (${this.page.url()})`);
       return;
     }
 
+    if (await this._isUserVerifiedAcceptScreen()) {
+      this.logStep(`Already-verified accept screen is ready (${this.page.url()})`);
+      return;
+    }
+
     if (await this._isInvitationAcceptanceComplete()) {
       this.logStep(`Invitation already accepted / login ready (${this.page.url()})`);
       return;
+    }
+
+    if (await this._isInviteBlockedScreen()) {
+      const reason = await this._inviteBlockedReason();
+      throw new Error(`Invitation cannot be accepted (${this.page.url()}). ${reason}`);
     }
 
     const landingCtAs = this.page
@@ -5380,8 +5496,8 @@ class UserHubPage extends BasePage {
     }
 
     let ready = await expect
-      .poll(async () => (await this._registrationFieldsVisible()) || (await this._isInvitationAcceptanceComplete()), {
-        timeout: 25000,
+      .poll(async () => this._invitationActionSurfaceReady(), {
+        timeout: 45000,
         intervals: [500, 1000, 2000],
       })
       .toBeTruthy()
@@ -5389,7 +5505,7 @@ class UserHubPage extends BasePage {
       .catch(() => false);
 
     if (!ready && this.lastInvitationUrl) {
-      this.logStep('Registration form not ready � reloading invitation URL once');
+      this.logStep('Registration form not ready — reloading invitation URL once');
       await this.page
         .goto(this.lastInvitationUrl, { waitUntil: 'domcontentloaded', timeout: 90000 })
         .catch(() => {});
@@ -5399,10 +5515,10 @@ class UserHubPage extends BasePage {
         await this.waitForNetworkSettled();
       }
       ready = await expect
-        .poll(
-          async () => (await this._registrationFieldsVisible()) || (await this._isInvitationAcceptanceComplete()),
-          { timeout: 30000, intervals: [500, 1000, 2000] }
-        )
+        .poll(async () => this._invitationActionSurfaceReady(), {
+          timeout: 45000,
+          intervals: [500, 1000, 2000],
+        })
         .toBeTruthy()
         .then(() => true)
         .catch(() => false);
@@ -5421,11 +5537,27 @@ class UserHubPage extends BasePage {
       this.logStep(`Invitation already complete after landing (${this.page.url()})`);
       return;
     }
+    if (await this._isUserVerifiedAcceptScreen()) {
+      this.logStep(`Already-verified accept screen ready after landing (${this.page.url()})`);
+      return;
+    }
     this.logStep(`User invitation acceptance form is ready (${this.page.url()})`);
   }
 
   async acceptUserInvitationWithCredentials(mobileSeed, password) {
     await this.prepareInvitationAcceptanceForm();
+
+    if (await this._isInvitationAcceptanceComplete()) {
+      this.logStep('Invitation already complete — skipping mobile/password form');
+      return this.lastInvite?.mobile || String(mobileSeed || '');
+    }
+
+    // Invitee already has mobile on profile → Accept Invite (no password form)
+    if (await this._isUserVerifiedAcceptScreen()) {
+      await this._acceptAlreadyVerifiedInvitation();
+      return this.lastInvite?.mobile || String(mobileSeed || '');
+    }
+
     const mobile = await this.fillUserRegistrationMobile(mobileSeed);
     await this.fillUserRegistrationPassword(password);
     await this.fillUserRegistrationConfirmPassword(password);
@@ -5496,20 +5628,53 @@ class UserHubPage extends BasePage {
   async fillUserRegistrationMobile(value) {
     const digits = String(value || '').replace(/\D/g, '');
     const unique = `98${Date.now().toString().slice(-8)}`;
-    const phone = unique.length === 10 ? unique : digits || unique;
+    const phone = unique.length === 10 ? unique : digits.slice(-10) || unique;
+    this.lastInvite = this.lastInvite || {};
     this.lastInvite.mobile = phone;
-    await this._fillRegistrationInput(this._registrationMobileInput(), phone, 'Mobile Number');
+
+    const input = this._registrationMobileInput();
+    await expect(input).toBeVisible({ timeout: this.defaultTimeout });
+    await input.scrollIntoViewIfNeeded().catch(() => {});
+    await input.click({ timeout: this.uiTimeout });
+
+    // MuiTelInput keeps calling code; clear national digits then type a unique 10-digit number
+    await input.press('Control+A').catch(() => {});
+    await input.press('Backspace').catch(() => {});
+    await input.fill('');
+    await input.pressSequentially(phone, { delay: 35 });
+    await this._commitReactInput(input, phone).catch(() => {});
+
+    // If the widget expects +country + national, retry with India-style E.164 when validation stays red
+    const raw = ((await input.inputValue().catch(() => '')) || '').replace(/\D/g, '');
+    if (raw.length < 10) {
+      const e164 = `+91${phone}`;
+      await input.fill('');
+      await input.pressSequentially(e164, { delay: 35 });
+      await this._commitReactInput(input, e164).catch(() => {});
+      this.lastInvite.mobile = e164;
+      this.logStep(`Using unique registration mobile (E.164): ${e164}`);
+      return e164;
+    }
+
     this.logStep(`Using unique registration mobile (existing numbers may be rejected): ${phone}`);
     return phone;
   }
 
   async fillUserRegistrationPassword(value) {
     this.invitedUserPassword = String(value || '');
-    const first = this.page.locator('input[type="password"]').first();
+    const first = this.page
+      .locator('#password')
+      .or(this.page.locator('input[type="password"]').first())
+      .first();
     await this._fillRegistrationInput(first, this.invitedUserPassword, 'Password');
   }
 
   async fillUserRegistrationConfirmPassword(value) {
+    const confirmById = this.page.locator('#new-password').first();
+    if (await confirmById.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await this._fillRegistrationInput(confirmById, value, 'Confirm Password');
+      return;
+    }
     const inputs = this.page.locator('input[type="password"]');
     const count = await inputs.count().catch(() => 0);
     if (count >= 2) {

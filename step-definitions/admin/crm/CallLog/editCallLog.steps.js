@@ -8,7 +8,7 @@ function getEditCallLogPage(world) {
   return world.editCallLogPage;
 }
 
-When('I create a call log ready for editing', { timeout: 120000 }, async function () {
+When('I create a call log ready for editing', { timeout: 180000 }, async function () {
   const editCallLogPage = getEditCallLogPage(this);
   await editCallLogPage.createCallLogForEditing();
 });

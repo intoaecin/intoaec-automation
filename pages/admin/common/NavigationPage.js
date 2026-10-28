@@ -41,8 +41,22 @@ class NavigationPage extends BasePage {
     return this.page.locator('div, span, p, a, button').filter({ hasText: pattern }).first();
   }
 
+  async dismissBlockingDialogs() {
+    for (let i = 0; i < 3; i += 1) {
+      const dialog = this.page
+        .locator('.MuiDialog-container, [role="dialog"]')
+        .filter({ visible: true })
+        .first();
+      if (!(await dialog.isVisible().catch(() => false))) return;
+      console.log('[NavigationPage] Dismissing blocking dialog before navigation');
+      await this.page.keyboard.press('Escape');
+      await this.page.waitForTimeout(300);
+    }
+  }
+
   async clickCrmDropdown() {
     console.log('[NavigationPage] Opening CRM menu');
+    await this.dismissBlockingDialogs();
     await expect(this.crmSidebarItem).toBeVisible({ timeout: this.defaultTimeout });
     await this.crmSidebarItem.scrollIntoViewIfNeeded().catch(() => {});
     await this.crmSidebarItem.hover().catch(() => {});
@@ -176,16 +190,49 @@ class NavigationPage extends BasePage {
     return `qa.lead.${suffix}@yopmail.com`;
   }
 
-  /** Email sends need a real recipient: dummy-domain or empty lead emails get a yopmail address via Overview → Edit. */
-  async ensureLeadEmailIsNotDummy() {
-    if (!(await this.leadEditButton.isVisible({ timeout: 5000 }).catch(() => false))) {
-      console.log('[NavigationPage] Opening lead Overview to check lead email');
-      await expect(this.overviewSidebarItem).toBeVisible({ timeout: this.defaultTimeout });
-      await this.overviewSidebarItem.click();
-      await this.page.waitForURL(/tab=Overview/i, { timeout: this.defaultTimeout }).catch(() => {});
+  async ensureOverviewVisibleForEmailCheck() {
+    if (await this.leadEditButton.isVisible({ timeout: 5000 }).catch(() => false)) {
+      return;
     }
 
+    console.log('[NavigationPage] Opening lead Overview to check lead email');
+    await expect(this.overviewSidebarItem).toBeVisible({ timeout: this.defaultTimeout });
+    await this.overviewSidebarItem.click();
+    await this.page.waitForURL(/tab=Overview/i, { timeout: this.defaultTimeout }).catch(() => {});
     await expect(this.leadEditButton).toBeVisible({ timeout: this.defaultTimeout });
+  }
+
+  async readOverviewLeadEmail() {
+    const emailSection = this.page
+      .locator('div')
+      .filter({ has: this.page.locator('span').filter({ hasText: /^email$/i }) })
+      .filter({ has: this.page.locator('p') })
+      .first();
+    const text = String((await emailSection.locator('p').first().innerText().catch(() => '')) || '').trim();
+    const match = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    return match ? match[0].trim() : text;
+  }
+
+  async closeEditProjectDialog() {
+    if (!(await this.editProjectDialog.isVisible().catch(() => false))) return;
+
+    await this.cancelEditButton.evaluate((el) => el.click()).catch(() => {});
+    if (await this.editProjectDialog.isVisible().catch(() => false)) {
+      await this.page.keyboard.press('Escape');
+    }
+    await expect(this.editProjectDialog).toBeHidden({ timeout: this.defaultTimeout });
+  }
+
+  /** Email sends need a real recipient: dummy-domain or empty lead emails get a yopmail address via Overview → Edit. */
+  async ensureLeadEmailIsNotDummy() {
+    await this.ensureOverviewVisibleForEmailCheck();
+
+    const overviewEmail = await this.readOverviewLeadEmail();
+    if (overviewEmail && !overviewEmail.toLowerCase().includes(this.dummyEmailDomain)) {
+      console.log(`[NavigationPage] Lead email is not a dummy email: ${overviewEmail}`);
+      return overviewEmail;
+    }
+
     await this.leadEditButton.click();
     await expect(this.editProjectDialog).toBeVisible({ timeout: this.defaultTimeout });
     await expect(this.leadEmailInput).toBeVisible({ timeout: this.defaultTimeout });
@@ -193,8 +240,7 @@ class NavigationPage extends BasePage {
     const currentEmail = (await this.leadEmailInput.inputValue()).trim();
     if (currentEmail && !currentEmail.toLowerCase().includes(this.dummyEmailDomain)) {
       console.log(`[NavigationPage] Lead email is not a dummy email: ${currentEmail}`);
-      await this.cancelEditButton.click();
-      await expect(this.editProjectDialog).toBeHidden({ timeout: this.defaultTimeout });
+      await this.closeEditProjectDialog();
       return currentEmail;
     }
 

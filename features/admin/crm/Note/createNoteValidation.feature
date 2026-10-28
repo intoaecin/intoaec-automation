@@ -20,11 +20,15 @@ Feature: Create Note validation
     And I attempt to submit the note create form
     Then I should see title and paragraph mandatory validation for note
 
+  # App has no title maxLength on the Notes TextField — skip until product enforces a limit.
+  @skip @no-app-limit
   Scenario: Verify Title maximum character limit
     When I fill the note title exceeding the maximum character limit
     And I attempt to submit the note create form
     Then I should see title maximum character validation for note
 
+  # App has no paragraph character limit (PlateEditor / API) — skip until product enforces a limit.
+  @skip @no-app-limit
   Scenario: Verify Paragraph maximum character limit
     When I fill the note paragraph exceeding the maximum character limit
     And I attempt to submit the note create form

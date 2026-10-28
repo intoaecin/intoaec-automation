@@ -158,6 +158,7 @@ class FileUploadPage extends BasePage {
     await this.ensureOrganizationTab();
     await this.hideChatWidget();
     await this.dismissBlockingDialogs();
+    await this.clearDocumentsSearch().catch(() => {});
   }
 
   async expectUploadFilesActionVisible() {
@@ -276,10 +277,10 @@ class FileUploadPage extends BasePage {
     throw new Error('[FileUploadPage] Unsupported .exe was not rejected with a visible error.');
   }
 
-  async searchDocuments(name) {
+  async getDocumentsSearchInput() {
     const search = this.page.getByRole('search', { name: /search file name/i }).first();
     if (!(await search.isVisible({ timeout: 2000 }).catch(() => false))) {
-      return;
+      return null;
     }
     const toggle = search
       .getByRole('button', { name: /search/i })
@@ -296,17 +297,41 @@ class FileUploadPage extends BasePage {
       .or(search.locator('input'))
       .first();
     if (await input.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await input.fill(String(name));
-      await input.press('Enter').catch(() => {});
+      return input;
     }
+    return null;
+  }
+
+  async searchDocuments(name) {
+    const input = await this.getDocumentsSearchInput();
+    if (!input) return;
+    await input.fill(String(name));
+    await input.press('Enter').catch(() => {});
+  }
+
+  /** Clear leftover Search file name filter so later scenarios see the full list. */
+  async clearDocumentsSearch() {
+    const input = await this.getDocumentsSearchInput();
+    if (!input) return;
+    const value = await input.inputValue().catch(() => '');
+    if (!String(value || '').trim()) return;
+    await input.fill('');
+    await input.press('Enter').catch(() => {});
+    // FileUpload debounces searchParam ~400ms after input change.
+    await this.page.waitForTimeout(500);
   }
 
   async waitForRow(name) {
     const visible = await this.getRow(name).isVisible({ timeout: 5000 }).catch(() => false);
+    let usedSearch = false;
     if (!visible) {
       await this.searchDocuments(name).catch(() => {});
+      usedSearch = true;
     }
     await expect(this.getRow(name)).toBeVisible({ timeout: 45000 });
+    if (usedSearch) {
+      await this.clearDocumentsSearch().catch(() => {});
+    }
   }
 
   async openRowMenu(name) {
@@ -339,26 +364,41 @@ class FileUploadPage extends BasePage {
   }
 
   async confirmDialogAction(buttonName) {
+    await this.hideChatWidget();
     await expect(this.confirmDialog).toBeVisible({ timeout: this.defaultTimeout });
-    const named = this.confirmDialog.getByRole('button', { name: new RegExp(buttonName, 'i') }).first();
-    if (await named.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await named.click({ force: true });
-    } else {
-      await this.confirmDialog
-        .getByRole('button')
-        .filter({ hasNotText: /cancel/i })
-        .last()
-        .click({ force: true });
-    }
+
+    const named = this.confirmDialog
+      .getByRole('button', { name: new RegExp(buttonName, 'i') })
+      .filter({ visible: true })
+      .first();
+    const primaryFallback = this.confirmDialog
+      .getByRole('button')
+      .filter({ hasNotText: /^(cancel|close)$/i })
+      .filter({ visible: true })
+      .last();
+    const actionButton = (await named.isVisible({ timeout: 3000 }).catch(() => false))
+      ? named
+      : primaryFallback;
+
+    await expect(actionButton).toBeVisible({ timeout: 15000 });
+    await expect(actionButton).toBeEnabled({ timeout: 15000 });
+    // MUI dialog action buttons can sit under overlays; DOM click is reliable here.
+    await actionButton.evaluate((el) => el.click());
     await expect(this.confirmDialog).toBeHidden({ timeout: this.defaultTimeout });
+    await this.successToast.waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
   }
 
   async ensureCurrentDocumentExists() {
     if (this.currentFileName()) {
-      await this.searchDocuments(this.currentFileName()).catch(() => {});
-      if (await this.getRow(this.currentFileName()).isVisible({ timeout: 8000 }).catch(() => false)) {
+      if (await this.getRow(this.currentFileName()).isVisible({ timeout: 5000 }).catch(() => false)) {
         return;
       }
+      await this.searchDocuments(this.currentFileName()).catch(() => {});
+      if (await this.getRow(this.currentFileName()).isVisible({ timeout: 8000 }).catch(() => false)) {
+        await this.clearDocumentsSearch().catch(() => {});
+        return;
+      }
+      await this.clearDocumentsSearch().catch(() => {});
     }
     if (sharedState.folderName && (await this.getRow(sharedState.folderName).isVisible().catch(() => false))) {
       await this.getRow(sharedState.folderName).click();
@@ -520,7 +560,16 @@ class FileUploadPage extends BasePage {
   }
 
   async restoreCurrentDocumentFromTrash() {
+    await this.hideChatWidget();
     await this.chooseRowAction(this.currentFileName(), 'Restore');
+
+    // Current UI restores immediately (no confirm). If a confirm dialog appears, accept it.
+    if (await this.confirmDialog.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await this.confirmDialogAction('Restore');
+    }
+
+    await this.successToast.waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
+    await expect(this.getRow(this.currentFileName())).toBeHidden({ timeout: 45000 });
   }
 
   async expectRestoredDocumentOnList() {
@@ -546,7 +595,9 @@ class FileUploadPage extends BasePage {
     if (inTrash && (await back.isVisible().catch(() => false))) {
       await back.click({ force: true });
       await expect(this.organizationTab).toBeVisible({ timeout: 45000 });
+      await this.waitForDocumentsReady().catch(() => {});
     }
+    await this.clearDocumentsSearch().catch(() => {});
   }
 
   async deleteCurrentDocumentFromTrash() {

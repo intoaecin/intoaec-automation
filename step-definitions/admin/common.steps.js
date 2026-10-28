@@ -6,7 +6,7 @@ const { resetSharedSession } = require('../../support/world');
 
 /** Only this Admin account is allowed for automation (never aadhi / multi-account). */
 const ALLOWED_ADMIN = {
-  email: 'kumar@diy.in',
+  email: 'thara5568@yopmail.com',
   password: 'Simple@10',
 };
 

@@ -18,7 +18,7 @@ Feature: Create Meeting UI Validation
     And the Create Meeting button should be displayed
     And all Create Meeting popup controls should be properly aligned
 
-  @smoke
+  @smoke @google-integration-connected
   Scenario: Verify switching between Online and Offline tabs
     When I navigate to the first available lead
     And I open the Events module

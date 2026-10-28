@@ -56,6 +56,24 @@ class MeetingValidationPage extends EventPage {
     await expect(this.createMeetingPanel.first()).toBeVisible({ timeout: this.defaultTimeout });
   }
 
+  /**
+   * Online without a connected calendar shows Connect Calendar (no title/schedule fields).
+   * Validation scenarios need the real form — use Offline when the gate is present.
+   */
+  async ensureValidationFormTab() {
+    const connectVisible = await this.panel()
+      .getByRole('button', { name: /^connect calendar$/i })
+      .isVisible()
+      .catch(() => false);
+    if (connectVisible) {
+      console.log('[MeetingValidationPage] Connect Calendar gate — using Offline form for validation');
+      await this.ensureMeetingTabSelected('offline');
+      return 'offline';
+    }
+    await this.ensureMeetingTabSelected('online');
+    return 'online';
+  }
+
   async clearTitleField() {
     const title = this.titleInput();
     await expect(title).toBeVisible({ timeout: this.defaultTimeout });
@@ -82,9 +100,8 @@ class MeetingValidationPage extends EventPage {
     console.log('[MeetingValidationPage] Filling mandatory fields with empty title');
     this.meetingData = this.buildCreateMeetingData();
     this.meetingData.title = '';
-    this.meetingData.meetingType = 'online';
+    this.meetingData.meetingType = await this.ensureValidationFormTab();
 
-    await this.ensureMeetingTabSelected('online');
     await this.clearTitleField();
 
     await expect(this.scheduleStartDate()).toBeVisible({ timeout: this.defaultTimeout });
@@ -95,9 +112,8 @@ class MeetingValidationPage extends EventPage {
       await expect(this.timezoneCombobox()).toBeVisible({ timeout: this.defaultTimeout });
     }
 
-    if (await this.locationInput().isVisible({ timeout: 3000 }).catch(() => false)) {
-      await this.fillLocationWithAutocomplete(this.meetingData.location);
-    }
+    // Skip typed location for title validation — Places autocomplete overlays the submit button.
+    console.log('[MeetingValidationPage] Leaving location as-is for empty-title validation');
 
     if (await this.notificationTypeCombobox().isVisible({ timeout: 3000 }).catch(() => false)) {
       const minutesInput = this.notificationMinutesInput();
@@ -111,9 +127,7 @@ class MeetingValidationPage extends EventPage {
   async fillMandatoryFieldsExceptParticipants() {
     console.log('[MeetingValidationPage] Filling mandatory fields except Participants');
     this.meetingData = this.buildCreateMeetingData();
-    this.meetingData.meetingType = 'online';
-
-    await this.ensureMeetingTabSelected('online');
+    this.meetingData.meetingType = await this.ensureValidationFormTab();
 
     const title = this.titleInput();
     await expect(title).toBeVisible({ timeout: this.defaultTimeout });
@@ -143,11 +157,9 @@ class MeetingValidationPage extends EventPage {
   async fillMandatoryFieldsWithInvalidSchedule() {
     console.log('[MeetingValidationPage] Filling mandatory fields with invalid schedule times');
     this.meetingData = this.buildCreateMeetingData();
-    this.meetingData.meetingType = 'online';
+    this.meetingData.meetingType = await this.ensureValidationFormTab();
     this.meetingData.fromTime = '8:00 PM';
     this.meetingData.toTime = '7:30 PM';
-
-    await this.ensureMeetingTabSelected('online');
 
     const title = this.titleInput();
     await expect(title).toBeVisible({ timeout: this.defaultTimeout });
@@ -176,17 +188,35 @@ class MeetingValidationPage extends EventPage {
     await this.expectParticipantChipVisible();
   }
 
+  async dismissPlacesAutocompleteOverlay() {
+    const pac = this.page.locator('.pac-container').filter({ visible: true }).first();
+    if (!(await pac.isVisible().catch(() => false))) {
+      return;
+    }
+    // Do not press Escape — it can close the Create Meeting drawer.
+    console.log('[MeetingValidationPage] Dismissing Google Places autocomplete overlay');
+    await this.page.evaluate(() => {
+      document.querySelectorAll('.pac-container').forEach((el) => {
+        el.style.display = 'none';
+      });
+    }).catch(() => {});
+    await this.titleInput().click({ force: true }).catch(() => {});
+    await expect(pac).toBeHidden({ timeout: 5000 }).catch(() => {});
+  }
+
   async attemptSubmitCreateMeetingExpectingValidation() {
     console.log('[MeetingValidationPage] Attempting Create Meeting submit expecting validation');
     const submitButton = this.submitCreateMeetingButton();
     await expect(submitButton).toBeVisible({ timeout: this.defaultTimeout });
     await expect(submitButton).toBeEnabled({ timeout: this.defaultTimeout });
+    await this.dismissPlacesAutocompleteOverlay();
+    await submitButton.scrollIntoViewIfNeeded().catch(() => {});
 
     const createResponse = this.page
       .waitForResponse((response) => this.isMeetingCreateRequest(response), { timeout: 10000 })
       .catch(() => null);
 
-    await submitButton.click();
+    await submitButton.click({ force: true });
 
     const response = await createResponse;
     this.createSucceeded = response ? response.status() >= 200 && response.status() < 300 : false;
