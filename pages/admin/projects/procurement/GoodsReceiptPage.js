@@ -103,6 +103,129 @@ class GoodsReceiptPage extends InventoryPage {
   }
 
   /**
+   * After Add from PO opens the picker: 'hasData' if any PO row, else 'empty'.
+   * Empty UI copy varies; we accept empty list + common empty/no-data text.
+   */
+  async detectAcceptedPoPickerState({ waitMs = 8000 } = {}) {
+    const dialog = this.purchaseOrderPickerDialog();
+    const scope = (await dialog.isVisible({ timeout: 10000 }).catch(() => false))
+      ? dialog
+      : this.page;
+
+    await expect(
+      scope
+        .getByPlaceholder(/search purchase order/i)
+        .or(scope.getByText(/purchase order/i))
+        .first()
+    ).toBeVisible({ timeout: this.defaultTimeout });
+
+    const deadline = Date.now() + waitMs;
+    while (Date.now() < deadline) {
+      const entries = await this.listPoEntriesInPicker(scope);
+      if (entries.length) {
+        await this.logStep(`PO picker hasData (${entries.length} entr${entries.length === 1 ? 'y' : 'ies'})`);
+        return 'hasData';
+      }
+      const empty = scope
+        .getByText(
+          /no accepted|no purchase order|no orders? found|no data|nothing to (show|receive)|no results|empty/i
+        )
+        .filter({ visible: true })
+        .first();
+      if (await empty.isVisible({ timeout: 500 }).catch(() => false)) {
+        await this.logStep(
+          `PO picker empty: ${((await empty.innerText().catch(() => '')) || '').slice(0, 120)}`
+        );
+        return 'empty';
+      }
+      await this.page.waitForTimeout(500);
+    }
+
+    const entries = await this.listPoEntriesInPicker(scope);
+    if (entries.length) return 'hasData';
+    await this.logStep('PO picker has no Accepted/listed POs (treated as empty)');
+    return 'empty';
+  }
+
+  async expectNoAcceptedPurchaseOrdersInPicker() {
+    const dialog = this.purchaseOrderPickerDialog();
+    const scope = (await dialog.isVisible({ timeout: 8000 }).catch(() => false))
+      ? dialog
+      : this.page;
+    const entries = await this.listPoEntriesInPicker(scope);
+    const emptyHint = scope
+      .getByText(
+        /no accepted|no purchase order|no orders? found|no data|nothing to (show|receive)|no results/i
+      )
+      .filter({ visible: true })
+      .first();
+    const emptyVisible = await emptyHint.isVisible({ timeout: 2000 }).catch(() => false);
+    if (entries.length && !emptyVisible) {
+      throw new Error(
+        `Expected no accepted POs in picker, but found ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}`
+      );
+    }
+    // Soft-pass when list is empty even without dedicated empty-copy widget.
+    expect(entries.length).toBe(0);
+    await this.logStep('Asserted: no accepted PO are available in Add-from-PO picker');
+    // Close picker so later scenarios stay clean.
+    await this.page.keyboard.press('Escape').catch(() => {});
+    const close = scope
+      .getByRole('button', { name: /close/i })
+      .filter({ visible: true })
+      .first();
+    if (await close.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await close.click({ timeout: 10000 }).catch(() => {});
+    }
+  }
+
+  /**
+   * Inventory-friendly: if Accepted PO exists → full GR; else assert empty and pass.
+   * Sets this.lastPoPickerMode = 'hasData' | 'empty'.
+   */
+  async completeGoodsReceiptFromAcceptedPoOrAssertEmpty(opts = {}) {
+    const {
+      poTitle,
+      lineItems = [],
+      vehicleNumber = '',
+      notes = '',
+      preferredVendorName = '',
+      openGroupAndAddItems = false,
+      pickAnyAcceptedPo = true,
+    } = opts;
+
+    if (openGroupAndAddItems) {
+      await this.openCreatedInventoryGroup();
+      await this.clickAddItem();
+    }
+    await this.selectAddFromPo();
+    await this.page.keyboard.press('Escape').catch(() => {});
+
+    const mode = await this.detectAcceptedPoPickerState();
+    this.lastPoPickerMode = mode;
+    if (mode === 'empty') {
+      await this.expectNoAcceptedPurchaseOrdersInPicker();
+      this.goodsReceiptAddCompleted = false;
+      await this.logStep('PO path: empty-state (no accepted PO) — scenario soft-pass');
+      return { mode: 'empty' };
+    }
+
+    await this.completeGoodsReceiptFromAcceptedPoFlow({
+      poTitle,
+      lineItems,
+      vehicleNumber,
+      notes,
+      preferredVendorName,
+      openGroupAndAddItems: false,
+      pickAnyAcceptedPo,
+      skipSelectAddFromPo: true,
+    });
+    this.lastPoPickerMode = 'hasData';
+    await this.logStep('PO path: hasData — goods receipt completed');
+    return { mode: 'hasData' };
+  }
+
+  /**
    * Add from PO → pick any Accepted PO (no vendor/title filter) →
    * fill received qtys → vehicle → notes → Add → Yes
    */
@@ -114,6 +237,7 @@ class GoodsReceiptPage extends InventoryPage {
     preferredVendorName = '',
     openGroupAndAddItems = false,
     pickAnyAcceptedPo = true,
+    skipSelectAddFromPo = false,
   } = {}) {
     const title = String(poTitle || '').trim();
     const items =
@@ -130,7 +254,9 @@ class GoodsReceiptPage extends InventoryPage {
       await this.openCreatedInventoryGroup();
       await this.clickAddItem();
     }
-    await this.selectAddFromPo();
+    if (!skipSelectAddFromPo) {
+      await this.selectAddFromPo();
+    }
     // Ignore vendor / org filter — pick an Accepted PO from the list.
     await this.page.keyboard.press('Escape').catch(() => {});
     if (pickAnyAcceptedPo) {

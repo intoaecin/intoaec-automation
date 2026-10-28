@@ -36,6 +36,12 @@ When('I fill mandatory fields for timesheet', async function () {
   await timeTrackingPage.fillMandatoryFields(undefined, undefined, undefined, pastDays);
 });
 
+When('I select a linked shift on the timesheet form', { timeout: 120000 }, async function () {
+  ensureTimeTrackingPage(this);
+  const shiftName = this.lastCreatedShiftName || this.workerContext?.lastShiftName || '';
+  await timeTrackingPage.selectLinkedShift(shiftName);
+});
+
 When('I wait {int} seconds for manual attachment upload', { timeout: 180000 }, async function (seconds) {
   await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 });

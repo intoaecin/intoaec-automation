@@ -29,10 +29,11 @@ class EditCallLogPage extends CallLogPage {
 
   async createCallLogForEditing() {
     console.log('[EditCallLogPage] Creating call log ready for editing');
+    await this.closeCallLogFormIfOpen().catch(() => {});
     await this.navigateToCallLogForm();
     await this.fillMandatoryCallLogFields();
     await this.submitCreateCallLog();
-    await this.verifyCallLogCreatedSuccessfully();
+    await this.verifyCallLogCreatedSuccessfully({ timeout: 60000 });
   }
 
   async openEditForCreatedCallLog() {
@@ -152,7 +153,14 @@ class EditCallLogPage extends CallLogPage {
 
     const submitButton = this.updateLogSubmitButton();
     await expect(submitButton).toBeVisible({ timeout: this.defaultTimeout });
-    await expect(submitButton).toBeEnabled({ timeout: this.defaultTimeout });
+
+    // Empty required fields may disable Update Log — do not wait 120s for enabled.
+    const enabled = await submitButton.isEnabled().catch(() => false);
+    if (!enabled) {
+      console.log('[EditCallLogPage] Update Log disabled with empty required fields (client-side block)');
+      this.updateSucceeded = false;
+      return;
+    }
 
     const updateResponsePromise = this.page
       .waitForResponse(

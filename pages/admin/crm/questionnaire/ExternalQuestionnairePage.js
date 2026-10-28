@@ -187,12 +187,43 @@ class ExternalQuestionnairePage extends LeadQuestionnairePage {
     await this.fillAllMandatoryQuestionnaireQuestions();
   }
 
+  async parseAnswerSubmitResult(response) {
+    const status = response.status();
+    const rawText = await response.text().catch(() => '');
+    let result = {};
+    try {
+      result = rawText ? JSON.parse(rawText) : {};
+    } catch {
+      result = { raw: rawText };
+    }
+
+    // API Gateway / Lambda proxy sometimes returns { statusCode, body: "<json string>" }.
+    if (result && result.code == null && result.body != null) {
+      try {
+        const nested = typeof result.body === 'string' ? JSON.parse(result.body) : result.body;
+        if (nested && typeof nested === 'object') {
+          result = { ...result, ...nested };
+        }
+      } catch {
+        // keep original result
+      }
+    }
+
+    console.log(
+      `[ExternalQuestionnairePage] Submit response status=${status} body=${JSON.stringify(result).slice(0, 2000)}`
+    );
+    return result;
+  }
+
   async submitClientQuestionnaire() {
     console.log('[ExternalQuestionnairePage] Submitting the client questionnaire');
     await expect(this.submitAnswerButton).toBeEnabled({ timeout: this.defaultTimeout });
 
     const isAnswerRequest = (request) =>
-      request.method() === 'POST' && /"eventType"\s*:\s*"ANSWER_QUESTIONNAIRE"/.test(request.postData() || '');
+      request.method() === 'POST' &&
+      /\/answer(?:\?|$)/i.test(request.url()) &&
+      /"eventType"\s*:\s*"ANSWER_QUESTIONNAIRE"/.test(request.postData() || '');
+
     const answerRequest = this.page.waitForRequest(isAnswerRequest, { timeout: this.defaultTimeout });
     const answerResponse = this.page.waitForResponse((response) => isAnswerRequest(response.request()), {
       timeout: this.defaultTimeout,
@@ -200,11 +231,30 @@ class ExternalQuestionnairePage extends LeadQuestionnairePage {
 
     await this.submitAnswerButton.click();
 
-    const postData = (await answerRequest).postData() || '';
-    const result = await (await answerResponse).json().catch(() => ({}));
-    expect(result.code, `Questionnaire submit failed: ${result.message || JSON.stringify(result)}`).toBe(
-      'ANSWER_QUESTIONNAIRE_SUCCESSFUL'
+    const request = await answerRequest;
+    console.log(`[ExternalQuestionnairePage] Answer request URL: ${request.url()}`);
+    const postData = request.postData() || '';
+    const response = await answerResponse;
+    const headers = response.headers();
+    const rawBuffer = await response.body().catch(() => Buffer.alloc(0));
+    console.log(
+      `[ExternalQuestionnairePage] Answer response meta status=${response.status()} content-type=${headers['content-type'] || ''} bufferLen=${rawBuffer.length}`
     );
+    const result = await this.parseAnswerSubmitResult(response);
+
+    if (result.code) {
+      expect(
+        result.code,
+        `Questionnaire submit failed: ${result.message || result.error?.message || JSON.stringify(result)}`
+      ).toBe('ANSWER_QUESTIONNAIRE_SUCCESSFUL');
+    } else {
+      // proposal.aecplayhouse.com/answer sometimes returns HTTP 200 with an empty body.
+      // Fall back to the product success screen rather than treating empty JSON as a code mismatch.
+      console.log(
+        '[ExternalQuestionnairePage] /answer returned no success code; verifying submitted page UI'
+      );
+      await this.expectSubmittedPage();
+    }
 
     const answerPattern = new RegExp(`Automation (?:paragraph )?answer ${this.answerSuffix}-\\d+`, 'g');
     this.submittedTextAnswers = [...new Set(postData.match(answerPattern) || [])];

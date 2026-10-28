@@ -46,6 +46,7 @@ class MeetingUIPage extends EventPage {
 
   async expectMandatoryFieldsDisplayed() {
     console.log('[MeetingUIPage] Verifying mandatory fields are displayed');
+    await this.ensureOfflineFormForMandatoryFields();
     await expect(this.requiredFieldLabels.first()).toBeVisible({ timeout: this.defaultTimeout });
 
     const requiredFieldCount = await this.requiredFieldLabels.count();
@@ -107,6 +108,7 @@ class MeetingUIPage extends EventPage {
       ).toBeTruthy();
     }
 
+    await this.ensureOfflineFormForMandatoryFields();
     await expect(this.titleInput()).toBeVisible({ timeout: this.defaultTimeout });
     await expect(this.createButton).toBeVisible({ timeout: this.defaultTimeout });
     await this.createButton.scrollIntoViewIfNeeded().catch(() => {});
@@ -163,6 +165,18 @@ class MeetingUIPage extends EventPage {
   async expectOnlineMeetingFormDisplayed() {
     console.log('[MeetingUIPage] Verifying Online meeting form is displayed');
     await this.expectMeetingTabSelected('online');
+
+    const connectVisible = await this.panel()
+      .getByRole('button', { name: /^connect calendar$/i })
+      .isVisible()
+      .catch(() => false);
+    if (connectVisible) {
+      throw new Error(
+        'Online meeting form blocked by Connect Calendar (no Google calendar connected). ' +
+          'fixtures/google-integration/storage-state.json is missing — Online form UI requires connected calendar.'
+      );
+    }
+
     await this.expectSharedMeetingFormFieldsVisible();
     await expect(this.timezoneCombobox()).toBeVisible({ timeout: this.defaultTimeout });
     await expect(this.notificationTypeCombobox()).toBeVisible({ timeout: this.defaultTimeout });

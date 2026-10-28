@@ -57,11 +57,16 @@ class CallLogPage extends BasePage {
       .or(this.callLogDialog.locator('button:has(svg[data-testid="CloseIcon"])'))
       .first();
 
-    this.searchInput = page
+    // In-tab Call Log ExpandableSearch only. Never use header global search.
+    this.callLogSearch = page.getByRole('search', { name: /search on call purpose/i }).first();
+    this.callLogSearchToggle = this.callLogSearch
+      .getByRole('button', { name: /search on call purpose|^search$/i })
+      .first();
+    this.searchInput = this.callLogSearch
       .getByRole('textbox', { name: /search on call purpose/i })
+      .or(this.callLogSearch.getByPlaceholder(/search on call purpose/i))
+      .or(page.getByRole('textbox', { name: /search on call purpose/i }))
       .or(page.getByPlaceholder(/search on call purpose/i))
-      .or(page.getByRole('textbox', { name: /^search$/i }))
-      .or(page.getByPlaceholder(/^search$/i))
       .first();
 
     this.successToast = page
@@ -561,6 +566,9 @@ class CallLogPage extends BasePage {
       return;
     }
 
+    const value = await this.searchInput.inputValue().catch(() => '');
+    if (!String(value || '').trim()) return;
+
     await this.searchInput.click().catch(() => {});
     await this.searchInput.press('Control+A').catch(() => {});
     await this.searchInput.fill('');
@@ -618,22 +626,19 @@ class CallLogPage extends BasePage {
 
     let isSearchInputVisible = await this.searchInput.isVisible({ timeout: 3000 }).catch(() => false);
     if (!isSearchInputVisible) {
-      const toggle = this.page
-        .getByRole('button', { name: /search/i })
-        .or(this.page.locator('[data-testid="SearchIcon"], svg[data-testid="SearchIcon"]'))
-        .first();
-      if (await toggle.isVisible({ timeout: 3000 }).catch(() => false)) {
-        console.log('[CallLogPage] Revealing search input via search toggle');
-        await toggle.click();
+      if (await this.callLogSearchToggle.isVisible({ timeout: 5000 }).catch(() => false)) {
+        console.log('[CallLogPage] Opening Call Log in-tab search');
+        await this.callLogSearchToggle.click({ timeout: 15000 });
         isSearchInputVisible = await this.searchInput.isVisible({ timeout: 5000 }).catch(() => false);
       }
     }
 
     if (!isSearchInputVisible) {
+      console.warn('[CallLogPage] Call Log in-tab search control was not found; skipping list search');
       return;
     }
 
-    console.log(`[CallLogPage] Searching call log list for: ${identifier}`);
+    console.log(`[CallLogPage] Searching Call Log list for: ${identifier}`);
     await this.searchInput.click().catch(() => {});
     await this.searchInput.press('Control+A').catch(() => {});
     await this.searchInput.fill('');
@@ -763,7 +768,7 @@ class CallLogPage extends BasePage {
     await this.closeCallLogFormIfOpen();
   }
 
-  async verifyCallLogCreatedSuccessfully() {
+  async verifyCallLogCreatedSuccessfully({ timeout = this.defaultTimeout } = {}) {
     console.log('[CallLogPage] Verifying created call log in the list');
     const data = this.callLogData;
     if (!data?.callPurpose) {
@@ -783,7 +788,7 @@ class CallLogPage extends BasePage {
       await expect(row.getByText(data.callPurpose, { exact: false })).toBeVisible();
       await expect(row.getByText(data.callOutcome, { exact: false })).toBeVisible();
       await expect(row.getByText(data.comment, { exact: false })).toBeVisible();
-    }).toPass({ timeout: this.defaultTimeout, intervals: [1000, 2000, 4000] });
+    }).toPass({ timeout, intervals: [1000, 2000, 4000] });
   }
 }
 

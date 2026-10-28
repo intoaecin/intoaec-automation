@@ -1,8 +1,14 @@
 const STATUS_VALUES = {
   pending: /pending/i,
   requested: /requested/i,
-  approved: /approved/i,
+  approved: /approved|in[\s_-]*transit/i,
+  in_transit: /in[\s_-]*transit/i,
   declined: /declined|rejected/i,
+  issued: /issued|direct[\s_-]*issue/i,
+  direct_issue: /direct[\s_-]*issue|issued/i,
+  return_requested: /return[\s_-]*requested/i,
+  return_initiated: /return[\s_-]*initiated/i,
+  returned: /returned/i,
 };
 
 function buildRandomSuffix() {
@@ -58,14 +64,24 @@ function statusToRegex(status) {
   const normalized = String(status || '')
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, '');
+    .replace(/[\s-]+/g, '_');
 
   const aliases = {
     pending: 'pending',
     requested: 'requested',
     approved: 'approved',
+    in_transit: 'in_transit',
+    intransit: 'in_transit',
     declined: 'declined',
     rejected: 'declined',
+    issued: 'issued',
+    direct_issue: 'direct_issue',
+    directissue: 'direct_issue',
+    return_requested: 'return_requested',
+    returnrequested: 'return_requested',
+    return_initiated: 'return_initiated',
+    returninitiated: 'return_initiated',
+    returned: 'returned',
   };
 
   const key = aliases[normalized];

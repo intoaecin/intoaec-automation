@@ -4,7 +4,7 @@ Feature: Navigate to Create Meeting
   Background:
     Given I am logged in
 
-  @smoke
+  @smoke @google-integration-connected
   Scenario: Create an online meeting with full details
     When I navigate to the first available lead
     And I open the Events module

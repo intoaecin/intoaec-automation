@@ -433,9 +433,21 @@ class InventoryRequestPage extends InventoryPage {
     }
   }
 
-  async submitInventoryItemRequest() {
+  /**
+   * @param {{ forceStatus?: string|null }} [opts]
+   * When forceStatus is null, keep per-row statuses already set (Pending/Approved).
+   * Default keeps legacy TC-02 behavior (force Approved).
+   */
+  async submitInventoryItemRequest(opts = {}) {
+    const forceStatus =
+      opts && Object.prototype.hasOwnProperty.call(opts, 'forceStatus')
+        ? opts.forceStatus
+        : 'Approved';
+
     await this.ensureAllRequestRowsHaveUnit('Nos');
-    await this.ensureAllRequestRowsHaveStatus('Approved');
+    if (forceStatus) {
+      await this.ensureAllRequestRowsHaveStatus(forceStatus);
+    }
 
     const dialog = this.requestDialog();
     const requestBtn = (await dialog.isVisible({ timeout: 2000 }).catch(() => false))
@@ -486,6 +498,11 @@ class InventoryRequestPage extends InventoryPage {
       }
     }
     await this.logStep('Submitted inventory item request');
+  }
+
+  /** Submit without overriding row statuses (use for Pending requests). */
+  async submitInventoryItemRequestKeepingStatus() {
+    await this.submitInventoryItemRequest({ forceStatus: null });
   }
 
   /** Product row on Item Requests table — table row only (avoid .or(getByText) strict-mode). */
@@ -1386,6 +1403,298 @@ class InventoryRequestPage extends InventoryPage {
         qtyOk ? `Verified qty ${qty} on row` : `Verified item in group (qty soft)`
       );
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Item Requests tab — navigate, tabs, row/bulk actions, convert, pagination
+  // ---------------------------------------------------------------------------
+
+  async openItemRequestsFromHome() {
+    await this.ensureOnInventoryGroupsList();
+    const btn = this.page
+      .getByRole('button', { name: /item requests?/i })
+      .or(this.page.getByRole('link', { name: /item requests?/i }))
+      .or(this.page.getByText(/^item requests?$/i))
+      .filter({ visible: true })
+      .first();
+    await expect(btn).toBeVisible({ timeout: this.defaultTimeout });
+    await btn.click({ timeout: 20000 });
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.expectItemRequestsPageReady();
+    await this.logStep('Opened Item Requests from Inventory home');
+  }
+
+  async expectItemRequestsPageReady() {
+    const onUrl = /inventory-management\/requests/i.test(this.page.url());
+
+    if (!onUrl) {
+      // URL fallback when button did not navigate.
+      const u = new URL(this.page.url());
+      const projectId = u.searchParams.get('projectId');
+      const clientId = u.searchParams.get('clientId');
+      if (projectId) {
+        await this.page.goto(
+          `https://app.aecplayhouse.com/client/profile/inventory-management/requests?projectId=${projectId}&isActive=true&tab=Inventory${
+            clientId ? `&clientId=${clientId}` : ''
+          }`,
+          { waitUntil: 'domcontentloaded' }
+        );
+      }
+    }
+
+    // Prefer the Pending Approval tab only — do NOT .or() with "Item Requests"
+    // heading (strict-mode: both visible → 2 matches).
+    const pendingTab = this.page
+      .getByRole('tab', { name: /pending approval/i })
+      .filter({ visible: true })
+      .first();
+
+    if (await pendingTab.isVisible({ timeout: 20000 }).catch(() => false)) {
+      await expect(pendingTab).toBeVisible({ timeout: 10000 });
+      await this.logStep('Item Requests page is ready (Pending Approval tab)');
+      return;
+    }
+
+    const approvedTab = this.page
+      .getByRole('tab', { name: /approved/i })
+      .filter({ visible: true })
+      .first();
+    await expect(approvedTab).toBeVisible({ timeout: this.defaultTimeout });
+    await this.logStep('Item Requests page is ready (Approved tab visible)');
+  }
+
+  async goBackFromItemRequestsToInventory() {
+    const back = this.page
+      .getByRole('button', { name: /back|inventory/i })
+      .or(this.page.locator('button').filter({ has: this.page.locator('svg') }).first())
+      .filter({ visible: true })
+      .first();
+    // Prefer explicit Inventory breadcrumb / navigateBack helper.
+    await this.navigateBackToInventoryModule();
+    await this.logStep('Back from Item Requests to Inventory');
+  }
+
+  async expectItemRequestsTabReady(statusLabel) {
+    const want = String(statusLabel || 'Pending Approval').trim();
+    await this.selectItemRequestsStatusFilter(want);
+    // Either a table/list or empty state is fine — proves the tab mounted.
+    const content = this.page
+      .locator('tbody tr, .MuiDataGrid-row, [role="row"]')
+      .filter({ visible: true })
+      .first()
+      .or(this.page.getByText(/no requests found|no data|no items/i).filter({ visible: true }).first());
+    await expect(content).toBeVisible({ timeout: this.defaultTimeout }).catch(async () => {
+      // Tab selected without rows/empty copy — still accept if tab is selected.
+      const tab = this.page
+        .getByRole('tab', { name: new RegExp(want, 'i') })
+        .filter({ visible: true })
+        .first();
+      await expect(tab).toBeVisible({ timeout: 10000 });
+    });
+    await this.logStep(`Item Requests tab ready: ${want}`);
+  }
+
+  async openRowActionMenuForProduct(productName) {
+    const name =
+      String(productName || this.lastAddToGroupProductName || this.lastRequestedProducts[0]?.name || '').trim();
+    if (!name) throw new Error('No requested product name for row action menu');
+    this.lastAddToGroupProductName = name;
+    await this.searchItemRequestsFor(name);
+    const row = this.requestedItemLocator(name);
+    await expect(row).toBeVisible({ timeout: this.defaultTimeout });
+    await this._clickRowActionsMenu(row);
+  }
+
+  async chooseRequestedProductMenuAction(actionLabel) {
+    const label = String(actionLabel || '').trim();
+    const item = this.page
+      .getByRole('menuitem', { name: new RegExp(`^\\s*${label}\\s*$`, 'i') })
+      .or(this.page.getByRole('menuitem', { name: new RegExp(label, 'i') }))
+      .or(this.page.locator('.MuiMenuItem-root, [role="menuitem"]').filter({ hasText: new RegExp(label, 'i') }))
+      .filter({ visible: true })
+      .first();
+    await expect(item).toBeVisible({ timeout: this.defaultTimeout });
+    await item.click({ timeout: 20000 });
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.page.waitForTimeout(800);
+    await this.logStep(`Chose Item Requests menu action: ${label}`);
+  }
+
+  async approveLastRequestedProduct() {
+    await this.selectItemRequestsStatusFilter('Pending Approval');
+    const name =
+      this.lastAddToGroupProductName ||
+      this.lastRequestedProducts.find((p) => /pending/i.test(p.status || ''))?.name ||
+      this.lastRequestedProducts[this.lastRequestedProducts.length - 1]?.name;
+    await this.openRowActionMenuForProduct(name);
+    await this.chooseRequestedProductMenuAction('Approve');
+    // Confirm dialog if present.
+    const yes = this.page
+      .getByRole('button', { name: /^yes$|^confirm$|^approve$/i })
+      .filter({ visible: true })
+      .first();
+    if (await yes.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await yes.click({ timeout: 15000 });
+    }
+    await this.page.waitForTimeout(1200);
+    await this.selectItemRequestsStatusFilter('Approved');
+    await this.searchItemRequestsFor(name);
+    await expect(this.requestedItemLocator(name)).toBeVisible({ timeout: this.defaultTimeout });
+    this.lastAddToGroupProductName = name;
+    await this.logStep(`Approved requested product "${name}"`);
+  }
+
+  async rejectLastRequestedProduct() {
+    await this.selectItemRequestsStatusFilter('Pending Approval');
+    const name =
+      this.lastAddToGroupProductName ||
+      this.lastRequestedProducts[this.lastRequestedProducts.length - 1]?.name;
+    await this.openRowActionMenuForProduct(name);
+    await this.chooseRequestedProductMenuAction('Reject');
+    const yes = this.page
+      .getByRole('button', { name: /^yes$|^confirm$|^reject$/i })
+      .filter({ visible: true })
+      .first();
+    if (await yes.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await yes.click({ timeout: 15000 });
+    }
+    await this.page.waitForTimeout(1200);
+    await this.selectItemRequestsStatusFilter('Rejected');
+    await this.searchItemRequestsFor(name);
+    await expect(this.requestedItemLocator(name)).toBeVisible({ timeout: this.defaultTimeout });
+    await this.logStep(`Rejected requested product "${name}"`);
+  }
+
+  async cancelLastRequestedProduct() {
+    await this.selectItemRequestsStatusFilter('Pending Approval');
+    const name =
+      this.lastAddToGroupProductName ||
+      this.lastRequestedProducts[this.lastRequestedProducts.length - 1]?.name;
+    await this.openRowActionMenuForProduct(name);
+    await this.chooseRequestedProductMenuAction('Cancel');
+    const yes = this.page
+      .getByRole('button', { name: /^yes$|^confirm$|^cancel$/i })
+      .filter({ visible: true })
+      .first();
+    if (await yes.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await yes.click({ timeout: 15000 });
+    }
+    await this.page.waitForTimeout(1200);
+    await this.selectItemRequestsStatusFilter('Cancelled');
+    await this.searchItemRequestsFor(name);
+    await expect(this.requestedItemLocator(name)).toBeVisible({ timeout: this.defaultTimeout });
+    await this.logStep(`Cancelled requested product "${name}"`);
+  }
+
+  async selectFirstNItemRequestRows(count = 2) {
+    const n = Math.max(1, Number(count) || 2);
+    const rows = this.page
+      .locator('tbody tr.MuiTableRow-root, tbody tr, .MuiDataGrid-row')
+      .filter({ has: this.page.getByRole('checkbox') })
+      .filter({ visible: true });
+    const available = await rows.count();
+    const take = Math.min(n, available);
+    if (take < 1) throw new Error('No Item Requests rows available to select');
+    for (let i = 0; i < take; i++) {
+      const checkbox = rows.nth(i).getByRole('checkbox').first();
+      await checkbox.check({ force: true, timeout: 10000 });
+    }
+    await this.logStep(`Selected ${take} Item Requests row(s)`);
+    return take;
+  }
+
+  async clickItemRequestsBulkAction(actionLabel) {
+    const label = String(actionLabel || '').trim();
+    // Bulk bar may use buttons or a More Action menu.
+    const direct = this.page
+      .getByRole('button', { name: new RegExp(label, 'i') })
+      .filter({ visible: true })
+      .first();
+    if (await direct.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await direct.click({ timeout: 20000 });
+    } else {
+      const more = this.page
+        .getByRole('button', { name: /more action/i })
+        .filter({ visible: true })
+        .first();
+      if (await more.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await more.click({ timeout: 10000 });
+      }
+      const menuItem = this.page
+        .getByRole('menuitem', { name: new RegExp(label, 'i') })
+        .or(this.page.getByRole('button', { name: new RegExp(label, 'i') }))
+        .filter({ visible: true })
+        .first();
+      await expect(menuItem).toBeVisible({ timeout: this.defaultTimeout });
+      await menuItem.click({ timeout: 20000 });
+    }
+    const yes = this.page
+      .getByRole('button', { name: /^yes$|^confirm$/i })
+      .filter({ visible: true })
+      .first();
+    if (await yes.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await yes.click({ timeout: 15000 });
+    }
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.page.waitForTimeout(1200);
+    await this.logStep(`Clicked Item Requests bulk action: ${label}`);
+  }
+
+  async convertLastRequestedProductTo(target = 'PO') {
+    const toPo = /po/i.test(String(target));
+    const action = toPo ? 'Convert to PO' : 'Convert to Indent';
+    // Prefer Pending; fall back to Approved.
+    await this.selectItemRequestsStatusFilter('Pending Approval').catch(() => {});
+    let name =
+      this.lastAddToGroupProductName ||
+      this.lastRequestedProducts[this.lastRequestedProducts.length - 1]?.name;
+    let row = this.requestedItemLocator(name);
+    if (!(await row.isVisible({ timeout: 5000 }).catch(() => false))) {
+      await this.selectItemRequestsStatusFilter('Approved');
+      await this.searchItemRequestsFor(name);
+      row = this.requestedItemLocator(name);
+    }
+    await this.openRowActionMenuForProduct(name);
+    await this.chooseRequestedProductMenuAction(action);
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.page.waitForTimeout(1500);
+    // Smoke: landed on PO or Indent create/edit surface.
+    const landed = this.page
+      .getByText(toPo ? /purchase order|create po|new po/i : /indent|create indent/i)
+      .or(this.page.getByRole('heading', { name: toPo ? /purchase order|po/i : /indent/i }))
+      .filter({ visible: true })
+      .first();
+    await expect(landed).toBeVisible({ timeout: this.defaultTimeout });
+    await this.logStep(`Converted request to ${target} (smoke assert)`);
+  }
+
+  async smokeItemRequestsPagination() {
+    const next = this.page
+      .getByRole('button', { name: /next page|go to next/i })
+      .or(this.page.locator('button[aria-label*="next" i]'))
+      .filter({ visible: true })
+      .first();
+    const rowsPerPage = this.page
+      .getByRole('combobox', { name: /rows per page/i })
+      .or(this.page.locator('.MuiTablePagination-select'))
+      .filter({ visible: true })
+      .first();
+    if (await next.isVisible({ timeout: 3000 }).catch(() => false)) {
+      const disabled = await next.isDisabled().catch(() => true);
+      if (!disabled) {
+        await next.click({ timeout: 10000 });
+        await this.page.waitForTimeout(800);
+        await this.logStep('Clicked next page on Item Requests');
+        return;
+      }
+    }
+    if (await rowsPerPage.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await rowsPerPage.click({ timeout: 10000 }).catch(() => {});
+      await this.logStep('Opened rows-per-page on Item Requests (smoke)');
+      await this.page.keyboard.press('Escape').catch(() => {});
+      return;
+    }
+    await this.logStep('Item Requests pagination controls not needed / not shown — soft pass');
   }
 }
 

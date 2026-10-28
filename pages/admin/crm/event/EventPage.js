@@ -136,7 +136,7 @@ class EventPage extends BasePage {
 
   scheduleDateInputs() {
     return this.panel().locator(
-      'input[placeholder="DD MMMM YYYY"], input[placeholder*="MMMM YYYY"], input[placeholder*="DD"], input[type="date"]'
+      'input[placeholder="DD MMMM YYYY"], input[placeholder="DD/MM/YYYY"], input[placeholder*="MMMM YYYY"], input[placeholder*="DD"], input[type="date"]'
     );
   }
 
@@ -800,10 +800,29 @@ class EventPage extends BasePage {
     await actionButton.click();
   }
 
+  createMeetingPanelReadyMarker() {
+    // Online (no calendar) shows Connect Calendar; Offline / connected Online show the title field.
+    return this.titleInput()
+      .or(this.panel().getByRole('button', { name: /^connect calendar$/i }))
+      .or(this.panel().getByText(/connect your calendar/i))
+      .first();
+  }
+
+  async isCreateMeetingPanelReady() {
+    if (!(await this.panel().isVisible().catch(() => false))) {
+      return false;
+    }
+    return this.createMeetingPanelReadyMarker().isVisible().catch(() => false);
+  }
+
   async selectCreateMeeting() {
     console.log('[EventPage] Selecting Create Meeting');
 
     await expect(async () => {
+      if (await this.isCreateMeetingPanelReady()) {
+        return;
+      }
+
       await this.dismissCreateMeetingPanel();
 
       const createMeeting = this.createMeetingMenuItem.first();
@@ -814,7 +833,7 @@ class EventPage extends BasePage {
       await expect(createMeeting).toBeVisible({ timeout: 15000 });
       await createMeeting.click();
       await expect(this.panel()).toBeVisible({ timeout: 15000 });
-      await expect(this.titleInput()).toBeVisible({ timeout: 15000 });
+      await expect(this.createMeetingPanelReadyMarker()).toBeVisible({ timeout: 15000 });
     }).toPass({ timeout: 60000, intervals: [1000, 2000, 3000] });
   }
 
@@ -822,10 +841,25 @@ class EventPage extends BasePage {
     console.log('[EventPage] Verifying Create Meeting panel is open');
     await expect(this.createMeetingPanel.first()).toBeVisible({ timeout: this.defaultTimeout });
     await expect(this.createMeetingHeading).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(this.createMeetingPanelReadyMarker()).toBeVisible({ timeout: this.defaultTimeout });
+  }
+
+  async ensureOfflineFormForMandatoryFields() {
+    const connectVisible = await this.panel()
+      .getByRole('button', { name: /^connect calendar$/i })
+      .isVisible()
+      .catch(() => false);
+    if (!connectVisible) {
+      return;
+    }
+    // Online without calendar shows Connect Calendar — mandatory fields live on Offline.
+    console.log('[EventPage] Connect Calendar gate visible — switching to Offline for mandatory fields');
+    await this.ensureMeetingTabSelected('offline');
   }
 
   async expectMandatoryFieldsAndActionButtonsVisible() {
     console.log('[EventPage] Verifying Create Meeting mandatory fields and actions');
+    await this.ensureOfflineFormForMandatoryFields();
     await expect(this.requiredFieldLabels.first()).toBeVisible({ timeout: this.defaultTimeout });
 
     const requiredFieldCount = await this.requiredFieldLabels.count();
@@ -834,6 +868,7 @@ class EventPage extends BasePage {
       await expect(this.requiredFieldLabels.nth(index)).toBeVisible({ timeout: this.defaultTimeout });
     }
 
+    await expect(this.titleInput()).toBeVisible({ timeout: this.defaultTimeout });
     await expect(this.createMeetingActionButtons.first()).toBeVisible({ timeout: this.defaultTimeout });
   }
 
@@ -1053,6 +1088,17 @@ class EventPage extends BasePage {
   }
 
   async fillCreateMeetingOnlineForm(data) {
+    await this.ensureMeetingTabSelected('online');
+    const connectVisible = await this.panel()
+      .getByRole('button', { name: /^connect calendar$/i })
+      .isVisible()
+      .catch(() => false);
+    if (connectVisible) {
+      throw new Error(
+        'Online meeting form blocked by Connect Calendar (no Google calendar connected). ' +
+          'fixtures/google-integration/storage-state.json is missing — cannot fill Online create without OAuth.'
+      );
+    }
     await this.fillCreateMeetingFormDetails('online', data);
   }
 
@@ -1067,6 +1113,23 @@ class EventPage extends BasePage {
     });
   }
 
+  async dismissPlacesAutocompleteOverlay() {
+    const pac = this.page.locator('.pac-container').filter({ visible: true }).first();
+    if (!(await pac.isVisible().catch(() => false))) {
+      return;
+    }
+    // Avoid Escape — it can close the Create Meeting drawer.
+    console.log('[EventPage] Dismissing Google Places autocomplete overlay');
+    await this.page
+      .evaluate(() => {
+        document.querySelectorAll('.pac-container').forEach((el) => {
+          el.style.display = 'none';
+        });
+      })
+      .catch(() => {});
+    await this.titleInput().click({ force: true }).catch(() => {});
+  }
+
   async submitCreateMeetingForm() {
     if (this.shouldMockMeetingApi()) {
       await this.installMeetingCreateRouteMock();
@@ -1076,13 +1139,15 @@ class EventPage extends BasePage {
     const submitButton = this.submitCreateMeetingButton();
     await expect(submitButton).toBeVisible({ timeout: this.defaultTimeout });
     await expect(submitButton).toBeEnabled({ timeout: this.defaultTimeout });
+    await this.dismissPlacesAutocompleteOverlay();
+    await submitButton.scrollIntoViewIfNeeded().catch(() => {});
 
     const createResponse = this.page.waitForResponse(
       (response) => this.isMeetingCreateRequest(response),
       { timeout: this.defaultTimeout }
     );
 
-    await submitButton.click();
+    await submitButton.click({ force: true });
 
     const response = await createResponse.catch(() => null);
     this.lastCreateStatus = response?.status() ?? null;
