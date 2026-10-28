@@ -95,10 +95,6 @@ class UserHubPage extends BasePage {
       .getByPlaceholder(/^select role$/i)
       .or(page.locator('input[placeholder="Select role"]'))
       .first();
-    this.usersSearchInput = page
-      .getByPlaceholder(/search/i)
-      .or(page.getByRole('textbox', { name: /search/i }))
-      .first();
     this.inviteUsersVendorHeader = page
       .getByLabel(/invite users\/vendor/i)
       .or(page.getByRole('button', { name: /invite users\/vendor/i }))
@@ -146,10 +142,13 @@ class UserHubPage extends BasePage {
   }
 
   async _isRolesSectionReady() {
-    if ((await this._findAddRoleButton()) !== null) return true;
-
     const headers = await this.page.locator('table thead th, table th').allInnerTexts().catch(() => []);
     const normalized = headers.map((h) => String(h || '').trim().toLowerCase());
+    // Users table also has a "Role" column — Email/Status mean we are on Users, not Roles.
+    if (normalized.some((h) => /^e-?mail$|^status$/.test(h))) return false;
+
+    if ((await this._findAddRoleButton()) !== null) return true;
+
     const rolesTableOk =
       normalized.some((h) => /role\s*name|^roles?$/.test(h)) ||
       (normalized.some((h) => /users?/.test(h)) &&
@@ -260,6 +259,61 @@ class UserHubPage extends BasePage {
     if (await menu.count()) {
       await this.page.locator('#topToggle-menu .MuiBackdrop-root').click({ force: true }).catch(() => {});
       await menu.waitFor({ state: 'detached', timeout: 3000 }).catch(() => {});
+    }
+  }
+
+  /**
+   * Batch runs share one browser tab. Without this, a scenario starts on the previous
+   * scenario's User Hub page (open menus, search text, popups, extra Yopmail tabs) and
+   * navigateToUserHub() skips the reload, so row three-dot menus no longer open.
+   */
+  async resetForNextScenario() {
+    const context = this.page.context();
+    for (const other of context.pages()) {
+      if (other !== this.page && !other.isClosed()) {
+        await other.close().catch(() => {});
+      }
+    }
+    await this.page.bringToFront().catch(() => {});
+    await this.page.keyboard.press('Escape').catch(() => {});
+    await this.page.keyboard.press('Escape').catch(() => {});
+
+    const url = this.page.url() || '';
+    if (!/^https?:/i.test(url)) return;
+
+    const env = require('../../../config/env');
+    const origin = /app\.(aecplayhouse|intoaec)/i.test(url)
+      ? new URL(url).origin
+      : String(env.admin || 'https://app.aecplayhouse.com').replace(/\/$/, '');
+    try {
+      await this.page.goto(`${origin}/dashboard`, { waitUntil: 'domcontentloaded', timeout: 90000 });
+      await this.waitForNetworkSettled();
+      await this._dismissBlockingDialogs().catch(() => {});
+      this.logStep('Reset browser for next User Hub scenario (extra tabs closed, dashboard reloaded)');
+    } catch (err) {
+      this.logStep(`Reset for next scenario could not reload dashboard: ${(err && err.message) || err}`);
+    }
+  }
+
+  /** Close leftover modals from the previous scenario. Never clicks Domain-setup Continue. */
+  async _dismissBlockingDialogs() {
+    for (let i = 0; i < 3; i += 1) {
+      const dialog = this.page
+        .locator('.MuiDialog-root, [role="dialog"]')
+        .filter({ visible: true })
+        .first();
+      if (!(await dialog.isVisible({ timeout: 800 }).catch(() => false))) return;
+      const closeBtn = dialog
+        .getByRole('button', { name: /^close$|^cancel$|dismiss|skip|later|got it/i })
+        .or(dialog.locator('button[aria-label*="close" i]'))
+        .filter({ visible: true })
+        .first();
+      if (await closeBtn.isVisible({ timeout: 800 }).catch(() => false)) {
+        await closeBtn.click({ timeout: this.uiTimeout, force: true }).catch(() => {});
+      } else {
+        await this.page.keyboard.press('Escape').catch(() => {});
+      }
+      await this.page.waitForTimeout(400);
     }
   }
 
@@ -812,79 +866,61 @@ class UserHubPage extends BasePage {
   _roleRow(roleName) {
     const name = String(roleName || '').trim();
     const namePattern = new RegExp(this._escapeRegex(name), 'i');
-    // Prefer matching the Role Name cell so user names in other columns do not hijack the row.
+    // Match only the Role Name (first) cell — a Users row whose Role column shows this name must not match.
     return this.page
       .locator('tbody tr')
       .filter({ visible: true })
       .filter({
         has: this.page.locator('td').first().filter({ hasText: namePattern }),
       })
-      .or(this.page.locator('tbody tr').filter({ hasText: namePattern }).filter({ visible: true }))
-      .first();
-  }
-
-  _rolesSearchInput() {
-    return this.page
-      .locator('main, [role="main"], [class*="content" i]')
-      .getByPlaceholder(/search/i)
-      .or(this.page.getByPlaceholder(/search role|search/i))
-      .or(this.page.getByRole('textbox', { name: /search/i }))
-      .filter({ visible: true })
       .first();
   }
 
   async _ensureRolesListTab() {
+    if (await this._isRolesSectionReady()) return;
+
     const rolesTab = this.page
-      .locator('main, [role="main"]')
       .getByRole('tab', { name: /^roles$/i })
+      .or(this.rolesNav())
       .filter({ visible: true })
       .first();
-    if (await rolesTab.isVisible({ timeout: 2000 }).catch(() => false)) {
+    if (await rolesTab.isVisible({ timeout: 3000 }).catch(() => false)) {
       await rolesTab.click({ timeout: this.uiTimeout, force: true }).catch(() => {});
-      await this.page.waitForTimeout(800);
+      await this.waitForNetworkSettled();
     }
+    const ready = await expect
+      .poll(async () => this._isRolesSectionReady(), { timeout: 15000, intervals: [500, 1000, 2000] })
+      .toBeTruthy()
+      .then(() => true)
+      .catch(() => false);
+    if (!ready) {
+      await this.clickRoles();
+    }
+    this.logStep('Roles tab is open (Role Name table, not Users)');
   }
 
+  // The only search box on User Hub is the global header search — never type role names there.
   async _clearRoleSearch() {
-    const search = this._rolesSearchInput();
-    if (await search.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await search.click({ timeout: this.uiTimeout }).catch(() => {});
-      await search.fill('').catch(() => {});
-      await search.press('Control+A').catch(() => {});
-      await search.press('Backspace').catch(() => {});
-      await this.page.waitForTimeout(600);
-    }
+    await this.page.keyboard.press('Escape').catch(() => {});
   }
 
-  async _searchRoleInList(roleName) {
-    const search = this._rolesSearchInput();
-    if (await search.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await search.click({ timeout: this.uiTimeout }).catch(() => {});
-      await search.fill('');
-      await search.fill(String(roleName || '').trim());
-      await search.press('Enter').catch(() => {});
-      await this.page.waitForTimeout(1500);
-    }
+  async _searchRoleInList() {
+    await this._ensureRolesListTab();
   }
 
   async _tryFindRoleRow(roleName, timeoutMs = 8000) {
     const name = String(roleName || '').trim();
     if (!name) return null;
 
+    if (!(await this._isRolesSectionReady())) {
+      await this._ensureRolesListTab().catch(() => {});
+    }
+
     const row = this._roleRow(name);
-    if (await row.isVisible({ timeout: timeoutMs }).catch(() => false)) return row;
-
-    // Fallback: any visible table/list row containing the role name text.
-    const loose = this.page
-      .locator('table tbody tr, [role="row"]')
-      .filter({ visible: true })
-      .filter({ hasText: new RegExp(this._escapeRegex(name), 'i') })
-      .first();
-    if (await loose.isVisible({ timeout: Math.min(2000, timeoutMs) }).catch(() => false)) return loose;
-
-    const textHit = this.page.getByText(new RegExp(this._escapeRegex(name), 'i')).filter({ visible: true }).first();
-    if (await textHit.isVisible({ timeout: 800 }).catch(() => false)) return textHit;
-
+    if (await row.isVisible({ timeout: timeoutMs }).catch(() => false)) {
+      await row.scrollIntoViewIfNeeded().catch(() => {});
+      return row;
+    }
     return null;
   }
 
@@ -2623,7 +2659,11 @@ class UserHubPage extends BasePage {
     await this._openUserInviteViaUrl();
 
     if (!(await this._isUserInviteFormVisible())) {
-      await this._ensureUsersListTab();
+      // Batch runs can land here from another tab with stale state — go through the
+      // Users list the same way the users-list navigation does, then use Invite User.
+      await this.navigateToUserHubUsersDirect().catch(async () => {
+        await this._ensureUsersListTab();
+      });
       const button = await this._findInviteUserButton();
       if (button) {
         await button.scrollIntoViewIfNeeded().catch(() => {});
@@ -2909,20 +2949,19 @@ class UserHubPage extends BasePage {
     const q = String(query || this.lastInvite?.email || '').trim();
     expect(q).toBeTruthy();
     this.lastInvite.search = q;
+    // The only search box on User Hub is the global header search (Enter opens another page),
+    // so read the Users table rows directly instead of typing anywhere.
+    await this.page.keyboard.press('Escape').catch(() => {});
     await this._ensureUsersListTab();
-    if (await this.usersSearchInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await this.usersSearchInput.click({ timeout: this.uiTimeout });
-      await this.usersSearchInput.fill('');
-      await this.usersSearchInput.fill(q);
-      await this.usersSearchInput.press('Enter').catch(() => {});
-      await this.waitForNetworkSettled();
-    }
     const row = this.userRow(q);
+    if (await row.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await row.scrollIntoViewIfNeeded().catch(() => {});
+    }
     if (expectFound) {
       await expect(row).toBeVisible({ timeout: this.defaultTimeout });
       this.logStep(`Found invited user in list for "${q}"`);
     } else {
-      this.logStep(`Searched User Hub users list for "${q}"`);
+      this.logStep(`Checked User Hub users list for "${q}" (no search box)`);
     }
   }
 
@@ -3355,27 +3394,49 @@ class UserHubPage extends BasePage {
     throw new Error('Did not see invitation resent success toast after resend');
   }
 
-  async openUserActionMenu(query) {
-    const q = String(query || this.locatedUserQuery || this.lastInvite?.email || '').trim();
-    expect(q).toBeTruthy();
-
+  async _findLocatedUserRow(q) {
     const preferredStatus = String(this.locatedUserStatus || '').trim();
     const statusOrder = preferredStatus
       ? [preferredStatus, preferredStatus.toLowerCase() === 'accepted' ? 'Pending' : 'Accepted']
       : ['Accepted', 'Pending'];
 
-    let row = null;
     for (const status of statusOrder) {
       const candidate = this._userRowWithStatus(q, status);
       if (await candidate.isVisible({ timeout: 1500 }).catch(() => false)) {
-        row = candidate;
         this.locatedUserStatus = status;
-        break;
+        return candidate;
       }
     }
-    if (!row || !(await row.isVisible({ timeout: 500 }).catch(() => false))) {
-      row = this.userRow(q);
+    const fallback = this.userRow(q);
+    if (await fallback.isVisible({ timeout: 500 }).catch(() => false)) return fallback;
+    return null;
+  }
+
+  async openUserActionMenu(query) {
+    let q = String(query || this.locatedUserQuery || this.lastInvite?.email || '').trim();
+    expect(q).toBeTruthy();
+
+    // Batch runs: the previous delete case (TC-11) can remove the user this case picked,
+    // and the list can lag behind. Refresh once, then move to the next Accepted user
+    // instead of waiting 60s for a row that will never appear.
+    const tried = new Set();
+    let row = await this._findLocatedUserRow(q);
+    for (let attempt = 0; attempt < 3 && !row; attempt += 1) {
+      tried.add(q.toLowerCase());
+      await this.refreshUsersList().catch(() => {});
+      row = await this._findLocatedUserRow(q);
+      if (row) break;
+      if (!/^accepted$/i.test(String(this.locatedUserStatus || ''))) break;
+      const next = await this._pickNextAcceptedUser(tried);
+      if (!next) break;
+      this.logStep(`User "${q}" is no longer in the Users list — using next Accepted user "${next}"`);
+      q = next;
+      this.locatedUserStatus = 'Accepted';
+      this.deletedUserQuery = q;
+      row = await this._findLocatedUserRow(q);
     }
+
+    expect(row, `User row not found for "${q}" before opening action menu`).toBeTruthy();
     await expect(row).toBeVisible({ timeout: this.defaultTimeout });
     await row.scrollIntoViewIfNeeded().catch(() => {});
 
@@ -4334,14 +4395,27 @@ class UserHubPage extends BasePage {
     const emails = await this._listAcceptedUserEmails(25);
     if (emails.length) {
       emails.sort((a, b) => this._acceptedUserPreferenceScore(a) - this._acceptedUserPreferenceScore(b));
-      const query = emails[0];
-      await this.locateUserInListWithStatus(query, 'Accepted');
-      this.locatedUserQuery = query;
-      this.locatedUserStatus = 'Accepted';
+      // TC-11 runs before TC-12 and deletes an Accepted user, so the list can still
+      // show a stale row. Skip any picked user whose row is not really in the table.
+      for (const query of emails) {
+        const row = this._userRowWithStatus(query, 'Accepted');
+        if (!(await row.isVisible({ timeout: 1500 }).catch(() => false))) {
+          this.logStep(`Skipping Accepted user "${query}" — row not in Users list (already deleted?)`);
+          continue;
+        }
+        await this.locateUserInListWithStatus(query, 'Accepted');
+        this.locatedUserQuery = query;
+        this.locatedUserStatus = 'Accepted';
+        this.locatedUserHasLeads = false;
+        this.deletedUserQuery = query;
+        this.logStep(`Selected Accepted user for TC-12 (preferred first): ${query}`);
+        return query;
+      }
+      this.logStep('Every listed Accepted user was stale — creating a fresh one for TC-12');
+      const created = await this.ensureAcceptedUserForDelete();
       this.locatedUserHasLeads = false;
-      this.deletedUserQuery = query;
-      this.logStep(`Selected Accepted user for TC-12 (preferred first): ${query}`);
-      return query;
+      this.deletedUserQuery = created;
+      return created;
     }
 
     try {
@@ -4643,12 +4717,7 @@ class UserHubPage extends BasePage {
   }
 
   async _clearUsersSearch() {
-    if (await this.usersSearchInput.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await this.usersSearchInput.click({ timeout: this.uiTimeout }).catch(() => {});
-      await this.usersSearchInput.fill('');
-      await this.usersSearchInput.press('Enter').catch(() => {});
-      await this.waitForNetworkSettled();
-    }
+    await this.page.keyboard.press('Escape').catch(() => {});
   }
 
   async expectUserRemovedFromList(query) {
@@ -6420,6 +6489,25 @@ class UserHubPage extends BasePage {
       }
     }
 
+    if (selected.length < wanted) {
+      // Row-click fallback: member list rows (avatar + name) that expose no checkbox.
+      const scope = this._createTeamFormScope();
+      const rows = scope
+        .locator('li, tr, [role="listitem"], [class*="member" i]')
+        .filter({ visible: true });
+      const rowCount = await rows.count().catch(() => 0);
+      for (let i = 0; i < rowCount && selected.length < wanted; i += 1) {
+        const rowEl = rows.nth(i);
+        const label = ((await rowEl.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+        if (!label || label.length > 80) continue;
+        const before = selected.length;
+        pushUnique(label);
+        if (selected.length === before) continue;
+        await rowEl.click({ timeout: this.uiTimeout, force: true }).catch(() => {});
+        await this.page.waitForTimeout(200);
+      }
+    }
+
     await captureSelectedChips();
     await this._dismissTeamMemberPopover().catch(() => {});
 
@@ -6776,27 +6864,12 @@ class UserHubPage extends BasePage {
   }
 
   async _clearTeamsSearch() {
-    const search = this._teamsSearchInput();
-    if (!(await search.isVisible({ timeout: 1500 }).catch(() => false))) return;
-    await search.click({ timeout: this.uiTimeout }).catch(() => {});
-    await search.fill('');
-    await search.press('Enter').catch(() => {});
-    await this.waitForNetworkSettled();
+    await this.page.keyboard.press('Escape').catch(() => {});
   }
 
-  async _searchTeamsForName(teamName) {
-    const name = String(teamName || '').trim();
-    if (!name) return;
-    const search = this._teamsSearchInput();
-    if (!(await search.isVisible({ timeout: 1500 }).catch(() => false))) return;
-    // Search by stable prefix (UHCreateTeam), not the full unique id — full ids often return no rows.
-    const token = this._teamSearchToken(name);
-    await search.click({ timeout: this.uiTimeout }).catch(() => {});
-    await search.fill('');
-    await search.fill(token);
-    await search.press('Enter').catch(() => {});
-    await this.waitForNetworkSettled();
-    this.logStep(`Filtered Teams list for "${token}"`);
+  // Never type in the global header search — Teams rows are read from the open Teams list.
+  async _searchTeamsForName() {
+    await this.page.keyboard.press('Escape').catch(() => {});
   }
 
   async _dismissCreateOrEditTeamSurface() {
@@ -7531,13 +7604,6 @@ class UserHubPage extends BasePage {
     return this.expectSelectedTeamMembersDisplayedUnderTeam();
   }
 
-  _teamsSearchInput() {
-    return this.page
-      .getByPlaceholder(/search/i)
-      .or(this.page.getByRole('textbox', { name: /search/i }))
-      .first();
-  }
-
   async _isLocatedTeamRowStillVisible() {
     const name = String(this.locatedTeamName || this.deletedTeamQuery || '').trim();
     if (!name) return false;
@@ -7936,20 +8002,9 @@ class UserHubPage extends BasePage {
     const expectFound = options.expectFound !== false;
     const q = String(query || this.deletedTeamQuery || this.locatedTeamName || '').trim();
     expect(q).toBeTruthy();
+    await this.page.keyboard.press('Escape').catch(() => {});
     await this.expectTeamsPageDisplayed();
-
-    const search = this._teamsSearchInput();
-    if (await search.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await search.click({ timeout: this.uiTimeout });
-      await search.fill('');
-      await search.fill(q);
-      await search.press('Enter').catch(() => {});
-      await this.waitForNetworkSettled();
-      this.logStep(`Searched User Hub Teams list for "${q}"`);
-    } else {
-      this.logStep(`Teams search input not available � skipping search for "${q}"`);
-      return false;
-    }
+    this.logStep(`Checked User Hub Teams list for "${q}" (no search box)`);
 
     if (expectFound) {
       await expect(this._teamRow(q)).toBeVisible({ timeout: this.defaultTimeout });

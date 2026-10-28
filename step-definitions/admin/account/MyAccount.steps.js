@@ -23,7 +23,7 @@ const MY_ACCOUNT_TEST_CASE_LOG = {
   TC14: 'TC-14 — Upload and update My Organization Admin Digital Signature',
 };
 
-Before({ tags: '@my-account or @my-account-tc' }, async function ({ pickle }) {
+Before({ tags: '@my-account or @my-account-tc or @my-account-all' }, async function ({ pickle }) {
   const tags = (pickle.tags || []).map((t) => t.name.replace(/^@/, ''));
   const tc = tags.find((t) => /^TC\d+$/i.test(t));
   if (tc && MY_ACCOUNT_TEST_CASE_LOG[tc.toUpperCase()]) {

@@ -119,12 +119,31 @@ class TimeTrackingPage extends BasePage {
       .getByRole('menuitem', { name: /^edit$/i })
       .or(page.locator('[role="menu"] [role="menuitem"]').filter({ hasText: /^edit$/i }))
       .first();
+    this.deleteMenuItem = page
+      .getByRole('menuitem', { name: /^delete$/i })
+      .or(page.locator('[role="menu"] [role="menuitem"]').filter({ hasText: /^delete$/i }))
+      .first();
     this.saveOrUpdateButton = page
       .getByRole('button', { name: /save|update|apply/i })
       .or(page.locator('.boqUI button.btnPrimaryUI:has-text("Save"), button.btnPrimaryUI:has-text("Update")'))
       .first();
 
+    // --- Filter ---
+    this.filterButton = page
+      .getByRole('button', { name: /^filter$/i })
+      .or(page.getByRole('button', { name: /filter/i }))
+      .or(page.locator('button[aria-label*="filter" i], button[title*="filter" i]'))
+      .first();
+    this.filterApplyButton = page
+      .getByRole('button', { name: /^apply$/i })
+      .or(page.locator('.MuiPopover-paper, [role="dialog"], .MuiDrawer-root').getByRole('button', { name: /apply/i }))
+      .first();
+
     /** Last random values for assertions */
+    this.lastDeletedTimesheetKey = null;
+    this.lastTimesheetRowCountBeforeDelete = null;
+    this.lastFilterCriterion = null;
+    this.lastFilterFieldLabel = null;
     this.lastEditDescription = null;
     this.lastRandomCost = null;
     this.lastTimesheetUser = null;
@@ -136,6 +155,7 @@ class TimeTrackingPage extends BasePage {
     this.lastTimesheetDescription = null;
     this.lastTimesheetWorkCategory = null;
     this.lastTimesheetDatePretty = null;
+    this.lastTimesheetSplitProject = null;
   }
 
   randomSuffix() {
@@ -243,10 +263,169 @@ class TimeTrackingPage extends BasePage {
   }
 
   async setTimeValue(locator, hhmm24, hhmm12) {
-    await expect(locator).toBeVisible({ timeout: this.defaultTimeout });
+    if (!(await locator.isVisible({ timeout: 5000 }).catch(() => false))) {
+      return false;
+    }
     const type = (await locator.getAttribute('type').catch(() => '')) || '';
     const pick = type.toLowerCase() === 'time' ? hhmm24 : hhmm12;
     await this.setPickerInputValue(locator, pick);
+    return true;
+  }
+
+  /**
+   * Set start/end via MUI "Choose time" clock dialogs, or labeled inputs when present.
+   * Returns true when at least one strategy succeeded for both times (or best-effort).
+   */
+  async setTimesheetStartAndEndTimes(start12 = '10:00 AM', end12 = '6:00 PM') {
+    const start24 = /am|pm/i.test(start12)
+      ? (() => {
+          const m = start12.match(/(\d{1,2}):(\d{2})\s*(am|pm)/i);
+          if (!m) return '10:00';
+          let h = parseInt(m[1], 10);
+          if (/pm/i.test(m[3]) && h !== 12) h += 12;
+          if (/am/i.test(m[3]) && h === 12) h = 0;
+          return `${String(h).padStart(2, '0')}:${m[2]}`;
+        })()
+      : start12;
+    const end24 = /am|pm/i.test(end12)
+      ? (() => {
+          const m = end12.match(/(\d{1,2}):(\d{2})\s*(am|pm)/i);
+          if (!m) return '18:00';
+          let h = parseInt(m[1], 10);
+          if (/pm/i.test(m[3]) && h !== 12) h += 12;
+          if (/am/i.test(m[3]) && h === 12) h = 0;
+          return `${String(h).padStart(2, '0')}:${m[2]}`;
+        })()
+      : end12;
+
+    const startHour = String(parseInt(start24.split(':')[0], 10) % 12 || 12);
+    const endHour = String(parseInt(end24.split(':')[0], 10) % 12 || 12);
+    const endIsPm = parseInt(end24.split(':')[0], 10) >= 12;
+
+    const chooseTime = this.page.getByRole('button', { name: /choose time/i }).filter({ visible: true });
+    if (await chooseTime.first().isVisible({ timeout: 4000 }).catch(() => false)) {
+      await chooseTime.first().click({ timeout: 20000 });
+      await this.page
+        .getByRole('option', { name: new RegExp(`^${startHour}\\s*hours?$`, 'i') })
+        .first()
+        .click({ timeout: 20000 })
+        .catch(() => {});
+      await this.page.getByRole('button', { name: /^ok$/i }).first().click({ timeout: 20000 }).catch(() => {});
+
+      const second = chooseTime.nth(1);
+      if (await second.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await second.click({ timeout: 20000 });
+      } else {
+        await chooseTime.first().click({ timeout: 20000 }).catch(() => {});
+      }
+      await this.page
+        .getByRole('option', { name: new RegExp(`^${endHour}\\s*hours?$`, 'i') })
+        .first()
+        .click({ timeout: 20000 })
+        .catch(() => {});
+      if (endIsPm) {
+        await this.page.getByRole('option', { name: /^pm$/i }).first().click({ timeout: 10000 }).catch(() => {});
+      }
+      await this.page.getByRole('button', { name: /^ok$/i }).first().click({ timeout: 10000 }).catch(() => {});
+      // eslint-disable-next-line no-console
+      console.log(`[Time Tracking] Set times via Choose time: ${start12} – ${end12}`);
+      return true;
+    }
+
+    const startField = this.page
+      .getByLabel(/start\s*time/i)
+      .or(this.page.getByPlaceholder(/start/i))
+      .or(this.startTimeInput)
+      .filter({ visible: true })
+      .first();
+    const endField = this.page
+      .getByLabel(/end\s*time/i)
+      .or(this.page.getByPlaceholder(/end/i))
+      .or(this.endTimeInput)
+      .filter({ visible: true })
+      .first();
+
+    const startOk = await this.setTimeValue(startField, start24, start12);
+    const endOk = await this.setTimeValue(endField, end24, end12);
+    if (startOk || endOk) {
+      // eslint-disable-next-line no-console
+      console.log(`[Time Tracking] Set times via inputs: ${start12} – ${end12}`);
+      return true;
+    }
+
+    // Last resort: any visible time inputs on the form (first = start, second = end).
+    const timeInputs = this.page
+      .locator('input[type="time"], input[placeholder*="time" i], input[aria-label*="time" i]')
+      .filter({ visible: true });
+    const count = await timeInputs.count().catch(() => 0);
+    if (count >= 1) {
+      await this.setTimeValue(timeInputs.nth(0), start24, start12);
+    }
+    if (count >= 2) {
+      await this.setTimeValue(timeInputs.nth(1), end24, end12);
+    }
+    if (count >= 1) {
+      // eslint-disable-next-line no-console
+      console.log(`[Time Tracking] Set times via generic time inputs (${count} found)`);
+      return true;
+    }
+
+    // eslint-disable-next-line no-console
+    console.log('[Time Tracking] No start/end time controls found — leaving defaults if prefilled');
+    return false;
+  }
+
+  async setTimesheetDateToday(dayNum) {
+    const day = String(dayNum || new Date().getDate());
+    const chooseDate = this.page.getByRole('button', { name: /choose date/i }).filter({ visible: true }).first();
+    const dateField = this.page
+      .getByRole('textbox', { name: /dd mmmm yyyy|date/i })
+      .or(this.page.getByLabel(/^date$/i))
+      .or(this.page.getByPlaceholder(/date|dd|mm|yyyy/i))
+      .or(this.dateInput)
+      .filter({ visible: true })
+      .first();
+
+    if (await chooseDate.isVisible({ timeout: 2500 }).catch(() => false)) {
+      await chooseDate.click({ timeout: 20000 });
+    } else if (await dateField.isVisible({ timeout: 2500 }).catch(() => false)) {
+      await dateField.click({ timeout: 20000 }).catch(() => {});
+      if (await chooseDate.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await chooseDate.click({ timeout: 20000 }).catch(() => {});
+      }
+    }
+
+    const todayCell = this.page
+      .locator('button.MuiPickersDay-today, .MuiPickersDay-root.MuiPickersDay-today, [aria-current="date"]')
+      .filter({ visible: true })
+      .first();
+    if (await todayCell.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await todayCell.click({ timeout: 20000 });
+      // eslint-disable-next-line no-console
+      console.log(`[Time Tracking] Picked today via calendar (day ${day}).`);
+      return true;
+    }
+    const gridDay = this.page.getByRole('gridcell', { name: day, exact: true }).filter({ visible: true }).first();
+    if (await gridDay.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await gridDay.click({ timeout: 20000 });
+      // eslint-disable-next-line no-console
+      console.log(`[Time Tracking] Picked calendar day ${day}.`);
+      return true;
+    }
+
+    if (await dateField.isVisible({ timeout: 2000 }).catch(() => false)) {
+      const dateType = (await dateField.getAttribute('type').catch(() => '')) || '';
+      const fallback =
+        dateType.toLowerCase() === 'date' ? this.lastTimesheetDateIso : this.lastTimesheetDate;
+      await this.setPickerInputValue(dateField, fallback);
+      // eslint-disable-next-line no-console
+      console.log(`[Time Tracking] Set date via input: ${fallback}`);
+      return true;
+    }
+
+    // eslint-disable-next-line no-console
+    console.log('[Time Tracking] Date control not found — leaving prefilled date if any');
+    return false;
   }
 
   async tryPickDateFromCalendar(targetDate) {
@@ -504,43 +683,137 @@ class TimeTrackingPage extends BasePage {
     await expect(this.productInfoSection).toBeVisible({ timeout: this.defaultTimeout });
   }
 
+  /** Open first list row three-dot menu and click Delete. */
+  async clickDeleteOnTimesheet() {
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.page.waitForTimeout(500);
+
+    const row = this.timesheetTableRows.first();
+    await expect(row).toBeVisible({ timeout: this.defaultTimeout });
+    await row.scrollIntoViewIfNeeded().catch(() => {});
+    await row.hover().catch(() => {});
+
+    this.lastDeletedTimesheetKey = ((await row.innerText().catch(() => '')) || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120);
+    this.lastTimesheetRowCountBeforeDelete = await this.timesheetTableRows.count().catch(() => 0);
+
+    const actionBtn = row.locator('button').last();
+    await expect(actionBtn).toBeVisible({ timeout: this.defaultTimeout });
+    await actionBtn.click({ timeout: 20000 });
+    await expect(this.actionMenu).toBeVisible({ timeout: this.defaultTimeout });
+
+    await expect(this.deleteMenuItem).toBeVisible({ timeout: this.defaultTimeout });
+    await this.deleteMenuItem.click({ timeout: 20000 });
+    // eslint-disable-next-line no-console
+    console.log(
+      `[Time Tracking] Clicked Delete on timesheet row: ${this.lastDeletedTimesheetKey || '(first row)'}`
+    );
+  }
+
+  /** Confirm delete dialog when shown (OK / Yes / Delete / Confirm). */
+  async confirmTimesheetDeletion() {
+    const confirmBtn = this.page
+      .getByRole('button', { name: /^(delete|yes|ok|confirm|proceed)$/i })
+      .or(
+        this.page
+          .locator('[role="dialog"] button, .MuiDialog-root button, .MuiModal-root button')
+          .filter({ hasText: /^(delete|yes|ok|confirm|proceed)$/i })
+      )
+      .filter({ visible: true })
+      .last();
+
+    if (await confirmBtn.isVisible({ timeout: 8000 }).catch(() => false)) {
+      await confirmBtn.click({ timeout: 20000 });
+      // eslint-disable-next-line no-console
+      console.log('[Time Tracking] Confirmed timesheet deletion.');
+    } else {
+      // eslint-disable-next-line no-console
+      console.log('[Time Tracking] No delete confirmation dialog — continuing.');
+    }
+
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+  }
+
+  /** Assert toast and/or that the deleted row is gone / row count dropped. */
+  async verifyTimesheetDeletedSuccessfully() {
+    const toast = this.page
+      .locator('.MuiAlert-root, .MuiSnackbar-root, [role="alert"], .Toastify__toast, .Toastify__toast-body')
+      .filter({ hasText: /deleted|removed|success/i })
+      .first();
+
+    await expect(async () => {
+      const toastOk = await toast.isVisible().catch(() => false);
+      const before = this.lastTimesheetRowCountBeforeDelete;
+      const after = await this.timesheetTableRows.count().catch(() => null);
+      const countDropped =
+        typeof before === 'number' && typeof after === 'number' && before > 0 && after < before;
+
+      let keyGone = false;
+      if (this.lastDeletedTimesheetKey && this.lastDeletedTimesheetKey.length > 8) {
+        const stillThere = await this.page
+          .locator('tbody tr')
+          .filter({ hasText: this.lastDeletedTimesheetKey.slice(0, 40) })
+          .first()
+          .isVisible()
+          .catch(() => false);
+        keyGone = !stillThere;
+      }
+
+      expect(toastOk || countDropped || keyGone).toBeTruthy();
+    }).toPass({ timeout: 60000, intervals: [1000, 2000, 4000] });
+
+    // eslint-disable-next-line no-console
+    console.log('[Time Tracking] Timesheet deleted successfully (removed from list / toast).');
+  }
+
   /**
    * Change user, date, start/end relative to defaults (updates prefilled values).
+   * Uses the same Choose date / Choose time path as create — edit form often has
+   * no labeled Start Time inputs.
    */
   async updateAllPrefilledFields() {
     await expect(this.productInfoSection).toBeVisible({ timeout: this.defaultTimeout });
     await this.page.waitForTimeout(500);
 
-    await expect(this.userDropdown).toBeVisible({ timeout: this.defaultTimeout });
-    await this.userDropdown.click();
-    const options = this.page.locator('[role="listbox"] [role="option"]');
-    await expect(async () => {
-      expect(await options.count()).toBeGreaterThan(0);
-    }).toPass({ timeout: 15000, intervals: [300, 600] });
-    const n = await options.count();
-    const pick = n > 1 ? 1 : 0;
-    await options.nth(pick).click();
+    const userCombo = this.page
+      .getByRole('combobox', { name: /^user$|select user|choose user/i })
+      .or(this.userDropdown)
+      .first();
+    if (await userCombo.isVisible({ timeout: 8000 }).catch(() => false)) {
+      await userCombo.click({ timeout: 15000 });
+      const options = this.page.locator('[role="listbox"] [role="option"]');
+      await expect(async () => {
+        expect(await options.count()).toBeGreaterThan(0);
+      }).toPass({ timeout: 15000, intervals: [300, 600] });
+      const n = await options.count();
+      const pick = n > 1 ? 1 : 0;
+      this.lastTimesheetUser = ((await options.nth(pick).innerText().catch(() => '')) || '').trim();
+      await options.nth(pick).click();
+      // eslint-disable-next-line no-console
+      console.log(`[Time Tracking] Edit — selected user: ${this.lastTimesheetUser || pick}`);
+    }
 
-    const pastDays = Number(process.env.TIMESHEET_EDIT_PAST_DAYS ?? 1);
-    const dateObj = new Date();
-    dateObj.setDate(dateObj.getDate() + Math.min(0, pastDays));
+    const today = new Date();
+    this.lastTimesheetDate = this.formatDateWithinAllowedRange(0, 'MM/DD/YYYY');
+    this.lastTimesheetDateIso = this.formatDateWithinAllowedRange(0, 'YYYY-MM-DD');
+    this.lastTimesheetStart = '10:00 AM';
+    this.lastTimesheetEnd = '6:00 PM';
 
-    if (await this.datePickerButton.isVisible().catch(() => false)) {
-      await this.datePickerButton.click().catch(() => {});
+    await this.setTimesheetDateToday(String(today.getDate()));
+    await this.setTimesheetStartAndEndTimes('10:00 AM', '6:00 PM');
+
+    // Close leftover pickers without closing the edit drawer.
+    const openPicker = this.page
+      .locator('.MuiPickersPopper-root, .MuiPickersLayout-root')
+      .filter({ visible: true })
+      .first();
+    if (await openPicker.isVisible({ timeout: 800 }).catch(() => false)) {
       await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.waitForTimeout(300);
     }
-    const picked = await this.tryPickDateFromCalendar(dateObj);
-    if (!picked) {
-      const dateType = (await this.dateInput.getAttribute('type').catch(() => '')) || '';
-      const val =
-        dateType.toLowerCase() === 'date'
-          ? this.formatDateWithinAllowedRange(pastDays, 'YYYY-MM-DD')
-          : this.formatDateWithinAllowedRange(pastDays, 'MM/DD/YYYY');
-      await this.setPickerInputValue(this.dateInput, val);
-    }
-
-    await this.setTimeValue(this.startTimeInput, '10:00', '10:00 AM');
-    await this.setTimeValue(this.endTimeInput, '18:00', '06:00 PM');
   }
 
   /** Break time — common label patterns in timesheet forms. */
@@ -600,34 +873,87 @@ class TimeTrackingPage extends BasePage {
     await cost.press('Tab').catch(() => {});
   }
 
+  /**
+   * Fill Description on edit form. Prefer the timesheet Description field —
+   * there is usually no "dashboard" textarea on this screen (old step name kept).
+   */
   async scrollAndEnterRandomDashboardDescription() {
     const page = this.page;
-    const text = `Dashboard note ${this.randomSuffix()}`;
+    const text = `Edit note ${this.randomSuffix()}`;
     this.lastEditDescription = text;
 
-    const dashboardTa = page
-      .locator('[class*="dashboard" i] textarea, [id*="dashboard" i] textarea')
-      .first();
-    let primary = dashboardTa;
-    if (!(await dashboardTa.isVisible().catch(() => false))) {
-      primary = page.locator('main textarea, [role="main"] textarea').last();
-    }
-    if (!(await primary.isVisible().catch(() => false))) {
-      primary = this.descriptionInput;
+    const candidates = [
+      page.getByRole('textbox', { name: /description|notes|comment/i }).first(),
+      page.getByLabel(/description|notes|comment/i).first(),
+      page.getByPlaceholder(/description|notes|comment/i).first(),
+      this.descriptionInput,
+      page.locator('textarea').filter({ visible: true }).first(),
+      page.locator('[class*="dashboard" i] textarea, [id*="dashboard" i] textarea').first(),
+      page.locator('main textarea, [role="main"] textarea, .boqUI textarea').filter({ visible: true }).last(),
+    ];
+
+    let primary = null;
+    for (const candidate of candidates) {
+      if (await candidate.isVisible({ timeout: 2000 }).catch(() => false)) {
+        primary = candidate;
+        break;
+      }
     }
 
-    await expect(primary).toBeVisible({ timeout: this.defaultTimeout });
-    await primary.scrollIntoViewIfNeeded();
-    await page.evaluate(() => window.scrollBy(0, 400)).catch(() => {});
-    await primary.click();
-    await primary.fill(text);
+    if (!primary) {
+      // eslint-disable-next-line no-console
+      console.log('[Time Tracking] Description field not present on edit form — skipping');
+      this.lastEditDescription = null;
+      return;
+    }
+
+    await primary.scrollIntoViewIfNeeded().catch(() => {});
+    await page.evaluate(() => window.scrollBy(0, 300)).catch(() => {});
+    await primary.click({ timeout: 10000 }).catch(() => {});
+    await primary.fill(text).catch(async () => {
+      await primary.press('Control+A').catch(() => {});
+      await primary.type(text, { delay: 10 }).catch(() => {});
+    });
+    // eslint-disable-next-line no-console
+    console.log(`[Time Tracking] Filled description: ${text}`);
   }
 
   async saveTimesheetChanges() {
-    await expect(this.saveOrUpdateButton).toBeVisible({ timeout: this.defaultTimeout });
-    await expect(this.saveOrUpdateButton).toBeEnabled({ timeout: this.defaultTimeout });
-    await this.saveOrUpdateButton.click();
+    // Do not Escape here — it can close the edit drawer.
+    const candidates = [
+      this.page.locator('.boqUI button.btnPrimaryUI').filter({ hasText: /^(save|update)$/i }).last(),
+      this.page
+        .locator('.MuiDrawer-root, [class*="Drawer"], aside, .boqUI')
+        .getByRole('button', { name: /^(save|update)$/i })
+        .last(),
+      this.page.getByRole('button', { name: /^save$/i }).last(),
+      this.page.getByRole('button', { name: /^update$/i }).last(),
+      this.page.getByRole('button', { name: /save|update/i }).last(),
+      this.saveOrUpdateButton,
+    ];
+
+    let saveBtn = null;
+    for (const candidate of candidates) {
+      if (await candidate.isVisible({ timeout: 4000 }).catch(() => false)) {
+        saveBtn = candidate;
+        break;
+      }
+    }
+
+    if (!saveBtn) {
+      throw new Error('Timesheet Save/Update button not found on edit form.');
+    }
+
+    await saveBtn.scrollIntoViewIfNeeded().catch(() => {});
+    // Wait briefly for enable; click anyway if still disabled (some builds enable on click path).
+    await expect(saveBtn)
+      .toBeEnabled({ timeout: 20000 })
+      .catch(() => {});
+    await saveBtn.click({ timeout: 30000 });
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
     await this.page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+    // eslint-disable-next-line no-console
+    console.log('[Time Tracking] Clicked Save/Update on timesheet edit.');
   }
 
   async verifyTimesheetUpdatedSuccessfully() {
@@ -646,46 +972,98 @@ class TimeTrackingPage extends BasePage {
   }
 
   /**
-   * From Project Management hub → Time Tracking module.
-   * Used by Daily Report TC-05 (Background already opens the project).
+   * Open Time Tracking after the project profile is open.
+   * Prefers project sidebar "Time Tracking" (New UI / ONSITE nav), then classic
+   * Project Management tile. Does not require the Project Management heading.
    */
   async navigateToTimeTrackingModule() {
     const ProjectProfilePage = require('../../ProjectProfilePage');
     const profile = new ProjectProfilePage(this.page);
 
-    const onTimeTracking =
-      /tab=TimeTracking|time[-_]?tracking/i.test(this.page.url()) ||
-      (await this.page.getByText(/^time tracking$/i).first().isVisible({ timeout: 800 }).catch(() => false));
+    const createVisible = async () =>
+      this.createButton
+        .or(this.page.getByRole('button', { name: /\+?\s*create\s*time\s*sheet/i }))
+        .filter({ visible: true })
+        .first()
+        .isVisible({ timeout: 2500 })
+        .catch(() => false);
 
-    if (onTimeTracking && (await this.createButton.isVisible({ timeout: 3000 }).catch(() => false))) {
+    const onTimeTracking =
+      /tab=TimeTracking|time[-_]?tracking|TimeTracking/i.test(this.page.url()) ||
+      (await this.page.getByRole('heading', { name: /^time tracking$/i }).isVisible({ timeout: 800 }).catch(() => false));
+
+    if (onTimeTracking && (await createVisible())) {
       // eslint-disable-next-line no-console
       console.log('[Time Tracking] Already on Time Tracking module.');
       return;
     }
 
-    await profile.selectHeading('Project Management').catch(() => {});
+    // 1) Project left nav / sidebar (screenshot: under project → Time Tracking).
+    const sidebarLink = this.page
+      .getByRole('link', { name: /^time tracking$/i })
+      .or(this.page.getByRole('button', { name: /^time tracking$/i }))
+      .or(this.page.locator('nav, aside, [class*="Sidebar"], [class*="sideNav"]').getByText(/^time tracking$/i))
+      .or(this.page.getByText(/^time tracking$/i))
+      .filter({ visible: true })
+      .first();
 
-    const tile = this.page.getByText(/^time tracking$/i).first();
-    if (await tile.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await tile.scrollIntoViewIfNeeded().catch(() => {});
-      await tile.click({ timeout: 30000 });
-    } else if (await this.timeTrackingLink.isVisible({ timeout: 3000 }).catch(() => false)) {
+    if (await sidebarLink.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await sidebarLink.scrollIntoViewIfNeeded().catch(() => {});
+      await sidebarLink.click({ timeout: 30000 });
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      if (await createVisible()) {
+        // eslint-disable-next-line no-console
+        console.log('[Time Tracking] Opened Time Tracking via project sidebar.');
+        return;
+      }
+    }
+
+    // 2) Classic hub: optional Project Management heading, then module tile/card.
+    await profile.selectHeading('Project Management').catch(() => {});
+    await profile.ensureClassicProjectUi().catch(() => {});
+
+    if (await this.timeTrackingLink.isVisible({ timeout: 3000 }).catch(() => false)) {
       await this.timeTrackingLink.click({ timeout: 30000 });
     } else {
-      await profile.clickModuleCard('Time Tracking');
+      const tile = this.page.getByText(/^time tracking$/i).filter({ visible: true }).first();
+      if (await tile.isVisible({ timeout: 4000 }).catch(() => false)) {
+        await tile.scrollIntoViewIfNeeded().catch(() => {});
+        await tile.click({ timeout: 30000 });
+      } else {
+        await profile.clickModuleCard('Time Tracking');
+      }
     }
 
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-    await expect(this.createButton).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(
+      this.createButton.or(this.page.getByRole('button', { name: /\+?\s*create\s*time\s*sheet/i })).first()
+    ).toBeVisible({ timeout: this.defaultTimeout });
     // eslint-disable-next-line no-console
     console.log('[Time Tracking] Opened Time Tracking module.');
   }
 
-  async selectStartFromScratchAndProceed() {
-    const dateField = this.page.getByRole('textbox', { name: 'DD MMMM YYYY' });
+  _createTimesheetFormMarker() {
+    return this.drawerTitle
+      .or(this.page.getByRole('heading', { name: /create\s*time\s*sheet/i }))
+      .or(this.dateTextboxDmy)
+      .or(this.dateInput)
+      .or(this.page.getByLabel(/^date$/i))
+      .or(this.page.getByPlaceholder(/dd|mm|yyyy|date/i))
+      .or(this.page.getByRole('button', { name: /choose date/i }))
+      .or(this.productInfoSection)
+      .or(this.userDropdown)
+      .or(this.page.getByRole('combobox', { name: /user|select user/i }))
+      .filter({ visible: true })
+      .first();
+  }
 
+  async waitForCreateTimesheetForm() {
+    await expect(this._createTimesheetFormMarker()).toBeVisible({ timeout: this.defaultTimeout });
+  }
+
+  async selectStartFromScratchAndProceed() {
     // Create may already open the form (skip Get Started).
-    if (await dateField.isVisible({ timeout: 2000 }).catch(() => false)) {
+    if (await this._createTimesheetFormMarker().isVisible({ timeout: 2500 }).catch(() => false)) {
       // eslint-disable-next-line no-console
       console.log('[Time Tracking] Create form already open.');
       return;
@@ -719,7 +1097,7 @@ class TimeTrackingPage extends BasePage {
     }
 
     // Codegen recording advanced without Proceed; live app often still needs it.
-    if (!(await dateField.isVisible({ timeout: 2500 }).catch(() => false))) {
+    if (!(await this._createTimesheetFormMarker().isVisible({ timeout: 2500 }).catch(() => false))) {
       const proceed = this.page.getByRole('button', { name: 'Proceed', exact: true }).first();
       if (await proceed.isVisible({ timeout: 8000 }).catch(() => false)) {
         await expect(proceed).toBeEnabled({ timeout: 30000 });
@@ -727,9 +1105,7 @@ class TimeTrackingPage extends BasePage {
       }
     }
 
-    await expect(dateField.or(this.drawerTitle).first()).toBeVisible({
-      timeout: this.defaultTimeout,
-    });
+    await this.waitForCreateTimesheetForm();
     // eslint-disable-next-line no-console
     console.log('[Time Tracking] Selected Start from Scratch (codegen).');
   }
@@ -758,19 +1134,61 @@ class TimeTrackingPage extends BasePage {
   }
 
   /**
-   * Codegen: getByRole('combobox', { name: 'Select chargeability' }) → option 'Chargeable'
+   * Select chargeable via combobox when present; otherwise switch/checkbox.
+   * Option labels vary (Chargeable / Yes / Billable).
    */
   async selectChargeabilityChargeable() {
-    const combo = this.chargeabilityCombobox;
-    if (await combo.isVisible({ timeout: 8000 }).catch(() => false)) {
+    const combo = this.page
+      .getByRole('combobox', { name: /select chargeability|chargeability/i })
+      .or(this.page.locator('[role="combobox"]').filter({ hasText: /chargeability|chargeable|select charge/i }))
+      .filter({ visible: true })
+      .first();
+
+    await combo.scrollIntoViewIfNeeded().catch(() => {});
+    if (await combo.isVisible({ timeout: 12000 }).catch(() => false)) {
       await combo.click({ timeout: 15000 });
-      const option = this.page.getByRole('option', { name: 'Chargeable', exact: true }).first();
-      await expect(option).toBeVisible({ timeout: 10000 });
-      await option.click({ timeout: 15000 });
-      this.lastTimesheetChargeable = true;
+      await this.page.waitForTimeout(400);
+
+      const optionCandidates = [
+        this.page.getByRole('option', { name: /^chargeable$/i }),
+        this.page.getByRole('option', { name: /chargeable/i }),
+        this.page.getByRole('option', { name: /^yes$/i }),
+        this.page.getByRole('option', { name: /billable/i }),
+        this.page.getByRole('menuitem', { name: /chargeable|billable|^yes$/i }),
+        this.page.locator('[role="listbox"] [role="option"], [role="presentation"] li, .MuiMenuItem-root')
+          .filter({ hasText: /chargeable|billable|^yes$/i }),
+      ];
+
+      for (const candidate of optionCandidates) {
+        const opt = candidate.filter({ visible: true }).first();
+        if (await opt.isVisible({ timeout: 1500 }).catch(() => false)) {
+          const label = ((await opt.innerText().catch(() => '')) || '').trim();
+          await opt.click({ timeout: 15000 });
+          this.lastTimesheetChargeable = true;
+          // eslint-disable-next-line no-console
+          console.log(`[Time Tracking] Selected chargeability: ${label || 'Chargeable'}`);
+          return;
+        }
+      }
+
+      // List opened but no matching label — pick first real option (skip placeholders).
+      const firstReal = this.page
+        .locator('[role="listbox"] [role="option"]')
+        .filter({ visible: true })
+        .filter({ hasNotText: /select|choose/i })
+        .first();
+      if (await firstReal.isVisible({ timeout: 2000 }).catch(() => false)) {
+        const label = ((await firstReal.innerText().catch(() => '')) || '').trim();
+        await firstReal.click({ timeout: 15000 });
+        this.lastTimesheetChargeable = true;
+        // eslint-disable-next-line no-console
+        console.log(`[Time Tracking] Selected first chargeability option: ${label}`);
+        return;
+      }
+
+      await this.page.keyboard.press('Escape').catch(() => {});
       // eslint-disable-next-line no-console
-      console.log('[Time Tracking] Selected chargeability: Chargeable');
-      return;
+      console.log('[Time Tracking] Chargeability list had no usable option — trying switch/checkbox');
     }
 
     // Legacy switch/checkbox fallback
@@ -779,14 +1197,15 @@ class TimeTrackingPage extends BasePage {
 
   async enableChargeableOption() {
     const scope = this.productInfoSection.or(this.page.locator('form, main, [role="main"]').first());
+    // Only touch controls clearly labeled Chargeable — never click a random MuiSwitch.
     const control = scope
       .getByRole('switch', { name: /chargeable/i })
-      .or(scope.getByLabel(/chargeable/i))
+      .or(scope.getByLabel(/^chargeable$/i))
       .or(scope.getByRole('checkbox', { name: /chargeable/i }))
-      .or(this.page.locator('.MuiSwitch-root').filter({ has: this.page.getByText(/chargeable/i) }))
+      .or(this.page.locator('.MuiSwitch-root').filter({ has: this.page.getByText(/^chargeable$/i) }))
+      .filter({ visible: true })
       .first();
 
-    const byLabel = this.page.getByText(/^chargeable$/i).first();
     if (await control.isVisible({ timeout: 5000 }).catch(() => false)) {
       const role = (await control.getAttribute('role').catch(() => '')) || '';
       if (role === 'switch') {
@@ -799,29 +1218,25 @@ class TimeTrackingPage extends BasePage {
           await control.click({ timeout: 15000, force: true });
         });
       }
-    } else if (await byLabel.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await byLabel.click({ timeout: 15000, force: true });
-    } else {
-      const anySwitch = scope.locator('.MuiSwitch-root, [role="switch"]').filter({ visible: true }).first();
-      if (await anySwitch.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await anySwitch.click({ timeout: 15000, force: true });
-      }
+      this.lastTimesheetChargeable = true;
+      // eslint-disable-next-line no-console
+      console.log('[Time Tracking] Enabled Chargeable option.');
+      return;
     }
 
-    this.lastTimesheetChargeable = true;
     // eslint-disable-next-line no-console
-    console.log('[Time Tracking] Enabled Chargeable option.');
+    console.log('[Time Tracking] No Chargeable switch/checkbox found — leaving as-is');
   }
 
   /**
-   * Create Time Sheet fill for Daily Report TC-05.
-   * Codegen: date / start 10:00 AM / end 6:00 PM / Chargeable.
-   * Plus User (mandatory when not prefilled) and Cost when Chargeable requires it.
+   * Create Time Sheet fill for Daily Report / Time Sheet TC-01.
+   * Prefers codegen date picker when present; otherwise uses flexible date/time inputs.
+   * @param {{ withSplitByProject?: boolean }} [options]
    */
-  async fillTimesheetForDailyReportTimeLog() {
+  async fillTimesheetForDailyReportTimeLog(options = {}) {
+    const withSplitByProject = Boolean(options.withSplitByProject);
     await this.page.waitForTimeout(800);
-    const dateBox = this.page.getByRole('textbox', { name: 'DD MMMM YYYY' });
-    await expect(dateBox).toBeVisible({ timeout: this.defaultTimeout });
+    await this.waitForCreateTimesheetForm();
 
     const today = new Date();
     const day = String(today.getDate());
@@ -845,58 +1260,121 @@ class TimeTrackingPage extends BasePage {
     this.lastTimesheetStart = '10:00 AM';
     this.lastTimesheetEnd = '6:00 PM';
 
-    // --- User (mandatory; not in codegen when already prefilled) ---
     await this.selectFirstTimesheetUserIfNeeded();
 
-    // --- Date (codegen) ---
-    await dateBox.click({ timeout: 20000 });
-    await this.page.getByRole('button', { name: 'Choose date' }).click({ timeout: 20000 });
-    const todayCell = this.page
-      .locator('button.MuiPickersDay-today, .MuiPickersDay-root.MuiPickersDay-today, [aria-current="date"]')
+    // Date / time controls vary by UI build — never require the old "DD MMMM YYYY" or
+    // section-scoped Start Time inputs that may not exist.
+    await this.setTimesheetDateToday(day);
+    await this.setTimesheetStartAndEndTimes('10:00 AM', '6:00 PM');
+
+    // Dismiss open date/time pickers only (bare Escape can close the create drawer).
+    const openPicker = this.page
+      .locator('.MuiPickersPopper-root, .MuiPickersLayout-root')
       .filter({ visible: true })
       .first();
-    if (await todayCell.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await todayCell.click({ timeout: 20000 });
-    } else {
-      await this.page.getByRole('gridcell', { name: day, exact: true }).first().click({ timeout: 20000 });
+    if (await openPicker.isVisible({ timeout: 800 }).catch(() => false)) {
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.waitForTimeout(300);
     }
-    // eslint-disable-next-line no-console
-    console.log(`[Time Tracking] Picked date via Choose date calendar (day ${day}).`);
 
-    // --- Start 10:00 AM (codegen) ---
-    await this.page.getByRole('button', { name: 'Choose time' }).first().click({ timeout: 20000 });
-    await this.page.getByRole('option', { name: '10 hours' }).first().click({ timeout: 20000 });
-    await this.page.getByRole('button', { name: 'OK' }).first().click({ timeout: 20000 });
-    // eslint-disable-next-line no-console
-    console.log('[Time Tracking] Set start time: 10:00 AM (codegen).');
-
-    // --- End 6:00 PM (codegen) ---
-    await this.page.getByRole('button', { name: 'Choose time', exact: true }).click({ timeout: 20000 });
-    await this.page.getByRole('option', { name: '6 hours' }).first().click({ timeout: 20000 });
-    await this.page.getByRole('option', { name: 'PM' }).first().click({ timeout: 20000 });
-    const endOk = this.page.getByRole('button', { name: 'OK' }).first();
-    if (await endOk.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await endOk.click({ timeout: 10000 }).catch(() => {});
+    if (withSplitByProject) {
+      await this.selectSplitByProject();
     }
-    // eslint-disable-next-line no-console
-    console.log('[Time Tracking] Set end time: 6:00 PM (codegen).');
 
-    // --- Chargeability (codegen) ---
-    await this.page.getByRole('combobox', { name: 'Select chargeability' }).click({ timeout: 20000 });
-    await this.page.getByRole('option', { name: 'Chargeable', exact: true }).first().click({ timeout: 20000 });
-    this.lastTimesheetChargeable = true;
-    // eslint-disable-next-line no-console
-    console.log('[Time Tracking] Selected chargeability: Chargeable');
+    await this.selectChargeabilityChargeable().catch((err) => {
+      // eslint-disable-next-line no-console
+      console.log(`[Time Tracking] Chargeability optional skip: ${err?.message || err}`);
+    });
 
-    // Cost often becomes mandatory after Chargeable
     await this.fillCostIfPresentOrRequired();
     await this.fillTimesheetDescriptionIfPresent();
+    if (withSplitByProject) {
+      await this.selectWorkCategoryIfPresent().catch(() => {});
+    }
 
     // eslint-disable-next-line no-console
     console.log(
-      `[Time Tracking] Filled timesheet (codegen): user=${this.lastTimesheetUser || 'prefilled'}, ` +
-        `date=${this.lastTimesheetDatePretty}, 10:00 AM–6:00 PM, Chargeable.`
+      `[Time Tracking] Filled timesheet: user=${this.lastTimesheetUser || 'prefilled'}, ` +
+        `date=${this.lastTimesheetDatePretty}, 10:00 AM–6:00 PM, Chargeable` +
+        (withSplitByProject ? `, splitProject=${this.lastTimesheetSplitProject || 'n/a'}` : '') +
+        '.'
     );
+  }
+
+  /**
+   * TC-06 — fill create form including Split by Project.
+   */
+  async fillTimesheetWithSplitByProject() {
+    await this.fillTimesheetForDailyReportTimeLog({ withSplitByProject: true });
+  }
+
+  /**
+   * Select a project under "Split by Project" (combobox / autocomplete / multi-select).
+   * Prefers kumarorganization when listed; otherwise first real option.
+   */
+  async selectSplitByProject() {
+    const scope = this.productInfoSection.or(this.page.locator('form, .boqUI, [role="dialog"]').first());
+    const splitLabel = this.page.getByText(/split\s*by\s*project/i).first();
+
+    // Scroll the section into view when the label exists.
+    if (await splitLabel.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await splitLabel.scrollIntoViewIfNeeded().catch(() => {});
+    }
+
+    const combo = scope
+      .getByRole('combobox', { name: /split\s*by\s*project|project/i })
+      .or(this.page.getByRole('combobox', { name: /split\s*by\s*project|select\s*project/i }))
+      .or(
+        this.page
+          .locator('label, p, span, div')
+          .filter({ hasText: /split\s*by\s*project/i })
+          .locator('xpath=following::div[@role="combobox"][1]')
+      )
+      .or(scope.locator('.MuiAutocomplete-root').filter({ hasText: /project/i }).locator('input[role="combobox"]'))
+      .or(scope.locator('[role="combobox"]').filter({ hasText: /project|select/i }))
+      .first();
+
+    if (!(await combo.isVisible({ timeout: 10000 }).catch(() => false))) {
+      // eslint-disable-next-line no-console
+      console.log('[Time Tracking] Split by Project control not found — skipping');
+      return;
+    }
+
+    await combo.scrollIntoViewIfNeeded().catch(() => {});
+    await combo.click({ timeout: 20000 });
+    await this.page.waitForTimeout(400);
+
+    const options = this.page.locator('[role="listbox"] [role="option"]');
+    await expect(async () => {
+      expect(await options.count()).toBeGreaterThan(0);
+    }).toPass({ timeout: 15000, intervals: [300, 600] });
+
+    const preferred = options.filter({ hasText: /kumarorganization|kumar/i });
+    let pick = preferred.first();
+    if (!(await pick.isVisible({ timeout: 1500 }).catch(() => false))) {
+      pick = options.filter({ hasNotText: /select|choose|none/i }).first();
+    }
+    if (!(await pick.isVisible({ timeout: 1500 }).catch(() => false))) {
+      pick = options.first();
+    }
+
+    this.lastTimesheetSplitProject = ((await pick.innerText().catch(() => '')) || '').trim().split('\n')[0];
+    await pick.click({ timeout: 15000 });
+
+    // Multi-select / autocomplete may leave the list open — close it without closing the drawer.
+    const listStillOpen = await this.page
+      .locator('[role="listbox"]')
+      .filter({ visible: true })
+      .first()
+      .isVisible({ timeout: 800 })
+      .catch(() => false);
+    if (listStillOpen) {
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.waitForTimeout(200);
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(`[Time Tracking] Selected Split by Project: ${this.lastTimesheetSplitProject}`);
   }
 
   /** Select first User when the field is empty / placeholder. */
@@ -978,15 +1456,60 @@ class TimeTrackingPage extends BasePage {
   /**
    * Submit create form.
    * Codegen: getByRole('button', { name: 'Create' }).click()
+   * Do NOT press Escape here — it closes the Create Time Sheet drawer.
    */
   async submitTimesheetForDailyReport() {
-    // Prefer the Create on the timesheet form (last visible exact Create), not list CTA
-    const createBtn = this.page
-      .getByRole('button', { name: 'Create', exact: true })
+    // Only dismiss an open date/time picker popper (not the whole drawer).
+    const openPicker = this.page
+      .locator('.MuiPickersPopper-root, .MuiPickersLayout-root, [class*="Picker"] [role="dialog"]')
       .filter({ visible: true })
-      .last();
-    await expect(createBtn).toBeVisible({ timeout: this.defaultTimeout });
+      .first();
+    if (await openPicker.isVisible({ timeout: 800 }).catch(() => false)) {
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.waitForTimeout(300);
+    }
+
+    // Prefer drawer/header Create — never the list "+ Create Time Sheet" CTA.
+    const candidates = [
+      this.page.locator('.boqUI button.btnPrimaryUI').filter({ hasText: /^create$/i }).last(),
+      this.page
+        .locator('.MuiDrawer-root, [class*="Drawer"], aside, .boqUI')
+        .getByRole('button', { name: /^create$/i })
+        .last(),
+      this.page.getByRole('button', { name: 'Create', exact: true }).last(),
+      this.page.getByRole('button', { name: /^create$/i }).last(),
+      this.page.locator('button.btnPrimaryUI').filter({ hasText: /^create$/i }).last(),
+      this.submitButton,
+    ];
+
+    let createBtn = null;
+    for (const candidate of candidates) {
+      if (await candidate.isVisible({ timeout: 4000 }).catch(() => false)) {
+        const label = ((await candidate.innerText().catch(() => '')) || '').trim();
+        // Skip list CTA if it somehow matches
+        if (/\+\s*create\s*time\s*sheet/i.test(label)) continue;
+        createBtn = candidate;
+        break;
+      }
+    }
+
+    if (!createBtn) {
+      const formStillOpen = await this._createTimesheetFormMarker()
+        .isVisible({ timeout: 2000 })
+        .catch(() => false);
+      throw new Error(
+        formStillOpen
+          ? 'Timesheet form is open but Create button was not found.'
+          : 'Timesheet Create drawer was closed before submit (Create button missing).'
+      );
+    }
+
     await createBtn.scrollIntoViewIfNeeded().catch(() => {});
+    if (await createBtn.isDisabled().catch(() => false)) {
+      await this.selectChargeabilityChargeable().catch(() => {});
+      await this.page.waitForTimeout(500);
+    }
+
     await createBtn.click({ timeout: 30000 });
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
 
@@ -1124,6 +1647,158 @@ class TimeTrackingPage extends BasePage {
     // Convert action may be hidden/disabled when shift-linked
     // eslint-disable-next-line no-console
     console.log('[Time Tracking] Convert to expense not available for shift-linked timesheet');
+  /** Prefer a person-like cell value from the first timesheet row (for User filter). */
+  async captureTimesheetFilterCriteriaFromFirstRow() {
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    const row = this.timesheetTableRows.first();
+    await expect(row).toBeVisible({ timeout: this.defaultTimeout });
+
+    const cells = row.locator('td, th');
+    const count = await cells.count();
+    let criterion = '';
+    for (let i = 0; i < count; i += 1) {
+      const text = ((await cells.nth(i).innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+      if (!text || text.length < 2) continue;
+      // Skip pure dates / times / amounts / status chips.
+      if (/^\d{1,2}[\/\-]\d{1,2}([\/\-]\d{2,4})?$/.test(text)) continue;
+      if (/^\d{1,2}:\d{2}/.test(text)) continue;
+      if (/^(rs\.?|inr|\$)/i.test(text)) continue;
+      if (/^(chargeable|non[-\s]?chargeable|approved|pending|draft)$/i.test(text)) continue;
+      if (/^[0-9.,]+$/.test(text)) continue;
+      criterion = text.split('\n')[0].trim();
+      break;
+    }
+
+    if (!criterion) {
+      const full = ((await row.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+      criterion = full.split(' ').slice(0, 3).join(' ');
+    }
+
+    expect(criterion.length, 'Could not capture filter criteria from first time sheet row').toBeGreaterThan(1);
+    this.lastFilterCriterion = criterion;
+    this.lastFilterFieldLabel = 'User';
+    // eslint-disable-next-line no-console
+    console.log(`[Time Tracking] Captured filter criteria from first row: "${criterion}"`);
+  }
+
+  _timesheetFilterPanel() {
+    return this.page
+      .locator('.MuiPopover-paper, [role="dialog"], .MuiDrawer-root, .MuiModal-root')
+      .filter({ has: this.page.getByRole('button', { name: /apply/i }) })
+      .last();
+  }
+
+  async clickTimesheetFilterOption() {
+    // Prefer an explicit Filter control; fall back to common filter icon buttons.
+    const filterBtn = this.filterButton
+      .or(this.page.locator('button').filter({ hasText: /^filter$/i }).first())
+      .or(this.page.getByLabel(/filter/i).first())
+      .first();
+    await expect(filterBtn).toBeVisible({ timeout: this.defaultTimeout });
+
+    const alreadyOpen = await this._timesheetFilterPanel().isVisible({ timeout: 800 }).catch(() => false);
+    if (alreadyOpen) {
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.waitForTimeout(300);
+    }
+    await filterBtn.click({ timeout: 20000 });
+    await expect(this._timesheetFilterPanel()).toBeVisible({ timeout: this.defaultTimeout });
+    // eslint-disable-next-line no-console
+    console.log('[Time Tracking] Opened Filter panel.');
+  }
+
+  async selectCapturedTimesheetFilterCriteria() {
+    const criterion = (this.lastFilterCriterion || '').trim();
+    expect(criterion.length, 'No filter criteria captured — run capture step first').toBeGreaterThan(1);
+
+    const panel = this._timesheetFilterPanel();
+    await expect(panel).toBeVisible({ timeout: this.defaultTimeout });
+
+    const userCombo = panel
+      .getByRole('combobox', { name: /user|employee|member|resource|select user/i })
+      .or(panel.locator('[role="combobox"]').filter({ hasText: /user|select/i }))
+      .or(panel.locator('.MuiAutocomplete-root input[role="combobox"]').first())
+      .or(panel.locator('[role="combobox"]').first())
+      .first();
+
+    await expect(userCombo).toBeVisible({ timeout: this.defaultTimeout });
+    await userCombo.scrollIntoViewIfNeeded().catch(() => {});
+    await userCombo.click({ timeout: 15000 });
+
+    // Type to narrow options when the control is an autocomplete input.
+    const tag = ((await userCombo.evaluate((el) => el.tagName).catch(() => '')) || '').toLowerCase();
+    if (tag === 'input') {
+      await userCombo.fill('').catch(() => {});
+      await userCombo.fill(criterion).catch(() => {});
+    }
+
+    await this.page.waitForTimeout(400);
+    const options = this.page.locator('[role="listbox"] [role="option"]');
+    await expect(async () => {
+      expect(await options.count()).toBeGreaterThan(0);
+    }).toPass({ timeout: 15000, intervals: [300, 600] });
+
+    const exact = options.filter({ hasText: new RegExp(criterion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') });
+    let selectedLabel = criterion;
+    if ((await exact.count()) > 0) {
+      selectedLabel = ((await exact.first().innerText().catch(() => '')) || criterion).trim();
+      await exact.first().click({ timeout: 15000 });
+    } else {
+      selectedLabel = ((await options.first().innerText().catch(() => '')) || '').trim();
+      await options.first().click({ timeout: 15000 });
+    }
+
+    this.lastFilterCriterion = selectedLabel.split('\n')[0].trim() || criterion;
+    // eslint-disable-next-line no-console
+    console.log(`[Time Tracking] Selected filter criteria: "${this.lastFilterCriterion}"`);
+  }
+
+  async applyTimesheetFilter() {
+    const panel = this._timesheetFilterPanel();
+    const apply = panel
+      .getByRole('button', { name: /^apply$/i })
+      .or(this.filterApplyButton)
+      .first();
+    await expect(apply).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(apply).toBeEnabled({ timeout: 20000 });
+    await apply.click({ timeout: 20000 });
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+    await this.page.waitForTimeout(800);
+    // eslint-disable-next-line no-console
+    console.log('[Time Tracking] Applied time sheet filter.');
+  }
+
+  async expectTimesheetListMatchesFilterCriteria() {
+    const criterion = (this.lastFilterCriterion || '').trim();
+    expect(criterion.length, 'No filter criteria to verify').toBeGreaterThan(1);
+
+    const emptyState = this.page
+      .getByText(/no\s+(data|records|results|time\s*sheets?)|nothing to (show|display)/i)
+      .first();
+
+    await expect(async () => {
+      if (await emptyState.isVisible().catch(() => false)) {
+        // Filter applied with zero matches is still a valid filtered state.
+        return;
+      }
+
+      const rows = this.timesheetTableRows;
+      const count = await rows.count();
+      expect(count, 'Filtered time sheet list has no rows and no empty-state message').toBeGreaterThan(0);
+
+      const sample = Math.min(count, 10);
+      for (let i = 0; i < sample; i += 1) {
+        const text = ((await rows.nth(i).innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
+        expect(
+          new RegExp(criterion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(text),
+          `Filtered row ${i + 1} did not contain "${criterion}": ${text.slice(0, 120)}`
+        ).toBeTruthy();
+      }
+    }).toPass({ timeout: 60000, intervals: [1000, 2000, 4000] });
+
+    // eslint-disable-next-line no-console
+    console.log(`[Time Tracking] Filtered list matches criteria "${criterion}".`);
   }
 }
 

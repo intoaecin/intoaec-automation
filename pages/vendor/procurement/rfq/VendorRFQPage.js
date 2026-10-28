@@ -522,7 +522,7 @@ class VendorRFQPage extends BasePage {
     };
 
     // Prefer kumar project names, but not org contact rows.
-    const isPreferredPoojaa = (text) => {
+    const isPreferredKumar = (text) => {
       if (this.isConnectedOrganizationRowText(text)) return false;
       return /kumar(?!@)/i.test(String(text || ''));
     };
@@ -597,7 +597,7 @@ class VendorRFQPage extends BasePage {
         clickable: row,
         link: clickable,
         text,
-        preferred: isPreferredPoojaa(text),
+        preferred: isPreferredKumar(text),
       });
     }
 

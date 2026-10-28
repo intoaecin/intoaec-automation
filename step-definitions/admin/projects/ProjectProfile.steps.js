@@ -55,7 +55,7 @@ When('I open an admin project for Vendor RFQ', { timeout: 180000 }, async functi
   const useAny = !configured || /^(any|\*|first)$/i.test(configured);
 
   /** Admin RFQ must be a kumar Project Name (client may be John, Abu, etc.). */
-  const requirePoojaa = /kumar(?!@)/i;
+  const requireKumar = /kumar(?!@)/i;
   const isAdityaName = (name) => /aditya[_\s-]*const|adityaconst|\bmalick\b|\bzayan\b/i.test(String(name || ''));
   const isBlockedAdityaUrl = (url) =>
     /projectId=b042a8dd-51b2-4d16-b242-405158add775/i.test(String(url || '')) ||
@@ -84,7 +84,7 @@ When('I open an admin project for Vendor RFQ', { timeout: 180000 }, async functi
 
   const isExcludedName = (name) => {
     const n = String(name || '').toLowerCase();
-    return !n || isAdityaName(n) || !requirePoojaa.test(n) ||
+    return !n || isAdityaName(n) || !requireKumar.test(n) ||
       /aec[_\s-]*solutions|^bbb$|\bbb\b|mvb|hari|dev[-\s]?in[-\s]?progress|dont\s*touch/i.test(n);
   };
 
@@ -134,7 +134,7 @@ When('I open an admin project for Vendor RFQ', { timeout: 180000 }, async functi
       openedName = await projectNavigationPage.clickAvailableProjectSkipping({
         skipNames: useAny ? skipNames : [...skipNames, configured],
         preferNames,
-        requireNamePattern: requirePoojaa,
+        requireNamePattern: requireKumar,
       });
     } catch (err) {
       throw new Error(
@@ -146,7 +146,7 @@ When('I open an admin project for Vendor RFQ', { timeout: 180000 }, async functi
     // Hard post-check: must have opened a kumar Project Name, never Aditya.
     const body = ((await this.page.locator('body').innerText().catch(() => '')) || '').slice(0, 1200);
     const url = String(this.page.url() || '');
-    const openedOk = requirePoojaa.test(String(openedName || '')) || requirePoojaa.test(body);
+    const openedOk = requireKumar.test(String(openedName || '')) || requireKumar.test(body);
     if (isAdityaName(openedName) || isBlockedAdityaUrl(url) || (!openedOk && isAdityaName(body))) {
       throw new Error(
         `Opened wrong Admin project "${openedName}" (${url}). ` +
@@ -164,7 +164,7 @@ When('I open an admin project for Vendor RFQ', { timeout: 180000 }, async functi
       `[VendorRFQ] Opened Admin project "${this.lastAdminProjectName}" (kumar only; Aditya blocked)`
     );
   } else {
-    if (isAdityaName(configured) || !requirePoojaa.test(configured)) {
+    if (isAdityaName(configured) || !requireKumar.test(configured)) {
       throw new Error(
         `VENDOR_RFQ_ADMIN_PROJECT="${configured}" is not a kumar project — Aditya is blocked`
       );
@@ -200,7 +200,7 @@ When('I open an admin project for Purchase Order', { timeout: 180000 }, async fu
   const projectNavigationPage = new ProjectNavigationPage(this.page);
 
   /** Same as Vendor RFQ: kumar Project Name only (never Aditya / AEC Solutions). */
-  const requirePoojaa = /kumar(?!@)/i;
+  const requireKumar = /kumar(?!@)/i;
   const isAdityaName = (name) => /aditya[_\s-]*const|adityaconst|\bmalick\b|\bzayan\b/i.test(String(name || ''));
   const isBlockedAdityaUrl = (url) =>
     /projectId=b042a8dd-51b2-4d16-b242-405158add775/i.test(String(url || '')) ||
@@ -232,7 +232,7 @@ When('I open an admin project for Purchase Order', { timeout: 180000 }, async fu
     return (
       !n ||
       isAdityaName(n) ||
-      !requirePoojaa.test(n) ||
+      !requireKumar.test(n) ||
       /aec[_\s-]*solutions|^bbb$|\bbb\b|mvb|hari|dev[-\s]?in[-\s]?progress|dont\s*touch/i.test(n)
     );
   };
@@ -289,7 +289,7 @@ When('I open an admin project for Purchase Order', { timeout: 180000 }, async fu
   const openedName = await projectNavigationPage.clickAvailableProjectSkipping({
     skipNames,
     preferNames,
-    requireNamePattern: requirePoojaa,
+    requireNamePattern: requireKumar,
   });
   if (isExcludedName(openedName)) {
     throw new Error(

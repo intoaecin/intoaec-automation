@@ -10,8 +10,8 @@ setDefaultTimeout(60000);
 
 const PREFERENCES_TEST_CASE_LOG = {
   TC01: 'TC-01 — Update Domain Configuration with an available domain name',
-  TC02: 'TC-02 — Book Online Meeting via Calendar Availability link and verify on Dashboard',
-  TC03: 'TC-03 — Book In-Person Meeting via Calendar Availability link and verify on Dashboard',
+  TC02: 'TC-02 — Book Online Meeting via Calendar Availability link and verify on Calendar',
+  TC03: 'TC-03 — Book In-Person Meeting via Calendar Availability link and verify on Calendar',
   TC04: 'TC-04 — Submit Facebook Lead Capture form and verify lead in Lead Manager',
   TC05: 'TC-05 — Submit Instagram Lead Capture form and verify lead in Lead Manager',
   TC06: 'TC-06 — Submit Website Lead Capture form and verify lead in Lead Manager',
@@ -371,6 +371,40 @@ When('I select the Meeting Event section on the Dashboard', { timeout: 120000 },
   await preferences.selectMeetingEventSectionOnDashboard();
 });
 
+When('I navigate to the Admin Calendar', { timeout: 120000 }, async function () {
+  const preferences = getPreferencesPage(this);
+  await preferences.navigateToAdminCalendar();
+});
+
+Then(
+  'the booked Calendar Availability meeting should be reflected on the Calendar',
+  { timeout: 180000 },
+  async function () {
+    const preferences = getPreferencesPage(this);
+    const meetingData = this.calendarMeetingData || preferences.lastMeeting || {};
+    preferences.lastMeeting = { ...meetingData };
+    await preferences.expectBookedMeetingOnCalendar(meetingData);
+  }
+);
+
+Then(
+  'the booked Calendar Availability in-person meeting should be reflected on the Calendar',
+  { timeout: 180000 },
+  async function () {
+    const preferences = getPreferencesPage(this);
+    const meetingData = {
+      ...(this.calendarMeetingData || preferences.lastMeeting || {}),
+      mode: 'In Person',
+    };
+    preferences.lastMeeting = { ...meetingData };
+    if (this.calendarMeetingCreate) {
+      preferences.lastMeetingCreate = this.calendarMeetingCreate;
+    }
+    this.calendarMeetingData = { ...meetingData };
+    await preferences.expectBookedInPersonMeetingOnCalendar(meetingData);
+  }
+);
+
 Then(
   'the booked Calendar Availability meeting should be reflected on the Dashboard',
   { timeout: 180000 },
@@ -378,7 +412,7 @@ Then(
     const preferences = getPreferencesPage(this);
     const meetingData = this.calendarMeetingData || preferences.lastMeeting || {};
     preferences.lastMeeting = { ...meetingData };
-    await preferences.expectBookedMeetingOnDashboard(meetingData);
+    await preferences.expectBookedMeetingOnCalendar(meetingData);
   }
 );
 
@@ -396,7 +430,7 @@ Then(
       preferences.lastMeetingCreate = this.calendarMeetingCreate;
     }
     this.calendarMeetingData = { ...meetingData };
-    await preferences.expectBookedInPersonMeetingOnDashboard(meetingData);
+    await preferences.expectBookedInPersonMeetingOnCalendar(meetingData);
   }
 );
 

@@ -1,22 +1,23 @@
-# -----------------------------------------------------------------------------
+l# -----------------------------------------------------------------------------
 # Preferences — incremental TCs in ONE file.
 #
 # TS-01 Domain Configuration — @TS01 @TC01
 #   TC-01 — Settings → Preferences → Domain Configuration → Edit →
-#           enter domain "Lead" (or another available name if taken) → Save →
+#           enter domain "kumar" (or another available name if taken) → Save →
 #           verify section shows updated domain + success toast
+#           (never type into the header global "Search Anything" box)
 #
 # TS-02 Calendar Availability (Online) — @TS02 @TC02
 #   TC-02 — Settings → Preferences → Calendar Availability → Copy link →
 #           open link in new tab → Online Meeting → pick slot → fill details →
-#           Confirm Booking → verify success → Admin Dashboard Meeting/Event
-#           shows the booked meeting
+#           Confirm Booking → verify success → Admin Calendar (Event) shows the
+#           booked meeting (do not use Dashboard Meeting Event)
 #
 # TS-03 Calendar Availability (In-Person) — @TS03 @TC03
 #   TC-03 — Settings → Preferences → Calendar Availability → Copy link →
 #           open link in new tab → In-Person Meeting → pick slot → fill details →
 #           enter location/address → Confirm Booking → verify success →
-#           Admin Dashboard Meeting/Event shows the booked in-person meeting
+#           Admin Calendar (Event) shows the booked in-person meeting
 #
 # TS-04 Facebook Lead Capture — @TS04 @TC04
 #   TC-04 — Settings → Preferences → Lead Capture → Copy Facebook Lead Capture link →
@@ -252,7 +253,7 @@ Feature: Preferences — incremental test cases
   Scenario: TC-01 — Update Domain Configuration with an available domain name
     When I select Domain Configuration
     And I click Edit on Domain Configuration
-    And I enter the domain name "Lead"
+    And I enter the domain name "kumar"
     Then I should see whether the domain name is available
     When I enter another available domain name if the current one is unavailable
     And I save Domain Configuration
@@ -264,7 +265,7 @@ Feature: Preferences — incremental test cases
   # ===========================================================================
 
   @TS02 @TC02 @smoke @regression @positive
-  Scenario: TC-02 — Book Online Meeting via Calendar Availability link and verify on Dashboard
+  Scenario: TC-02 — Book Online Meeting via Calendar Availability link and verify on Calendar
     When I select Calendar Availability
     And I copy the Calendar Availability link
     When I open the copied Calendar Availability link in a new browser tab
@@ -274,16 +275,15 @@ Feature: Preferences — incremental test cases
     And I click Confirm Booking on the Calendar Availability page
     Then the Calendar Availability meeting booking should be confirmed successfully
     When I switch back to the Admin Portal from Calendar Availability
-    And I navigate to the Admin Dashboard
-    And I select the Meeting Event section on the Dashboard
-    Then the booked Calendar Availability meeting should be reflected on the Dashboard
+    And I navigate to the Admin Calendar
+    Then the booked Calendar Availability meeting should be reflected on the Calendar
 
   # ===========================================================================
   # TS-03 — Calendar Availability In-Person (@TS03 @TC03)
   # ===========================================================================
 
   @TS03 @TC03 @smoke @regression @positive
-  Scenario: TC-03 — Book In-Person Meeting via Calendar Availability link and verify on Dashboard
+  Scenario: TC-03 — Book In-Person Meeting via Calendar Availability link and verify on Calendar
     When I select Calendar Availability
     And I copy the Calendar Availability link
     When I open the copied Calendar Availability link in a new browser tab
@@ -294,9 +294,8 @@ Feature: Preferences — incremental test cases
     And I click Confirm Booking on the Calendar Availability page
     Then the Calendar Availability in-person meeting booking should be confirmed successfully
     When I switch back to the Admin Portal from Calendar Availability
-    And I navigate to the Admin Dashboard
-    And I select the Meeting Event section on the Dashboard
-    Then the booked Calendar Availability in-person meeting should be reflected on the Dashboard
+    And I navigate to the Admin Calendar
+    Then the booked Calendar Availability in-person meeting should be reflected on the Calendar
 
   # ===========================================================================
   # TS-04 — Facebook Lead Capture (@TS04 @TC04)

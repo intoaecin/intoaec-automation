@@ -173,7 +173,15 @@ When(
   }
 );
 
-When('I submit the timesheet for the daily report time log', { timeout: 120000 }, async function () {
+When(
+  'I fill timesheet with user, date, times, split by project, chargeability and other required details',
+  { timeout: 180000 },
+  async function () {
+    await getTimeTrackingPage(this).fillTimesheetWithSplitByProject();
+  }
+);
+
+When('I submit the timesheet for the daily report time log', { timeout: 180000 }, async function () {
   await getTimeTrackingPage(this).submitTimesheetForDailyReport();
 });
 
