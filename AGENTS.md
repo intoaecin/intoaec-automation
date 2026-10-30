@@ -418,3 +418,31 @@ npx.cmd cucumber-js --tags "@customer-portal and @TC04"
 npx.cmd cucumber-js --tags "@customer-portal and @TC05"
 npx.cmd cucumber-js --tags "@customer-portal and @TC06"
 ```
+
+---
+
+## Factory Management (`@factory-tc`) — incremental TC file
+
+Mirror the Warehouse pattern (`FactoryManagement_TestCases.feature`). Factory Management is an admin Resources module at `/factory-management`. Jobs are raised on a project **Manufacturing Order** tab, then accepted, produced, packed, and dispatched on the factory page.
+
+| Layer | Path |
+|-------|------|
+| Feature | `features/admin/resources/FactoryManagement/FactoryManagement_TestCases.feature` |
+| Steps | `step-definitions/admin/resources/FactoryManagement/FactoryManagementStep.js` |
+| Pages | `pages/admin/resources/FactoryManagement/FactoryManagementPage.js`, `ManufacturingOrderPage.js`, `FactoryWorkshopPage.js` |
+| Session | `pages/admin/resources/FactoryManagement/factoryTestContext.js` |
+
+**Tags:** `@factory-tc` runs this file. Scenarios use `@TS01`…`@TS11` and `@TC01`…`@TC38`. `@smoke` is the golden path (navigation, location, trade/stage, raise, accept/start, stock, pack/complete, dispatch). `@negative` covers validation.
+
+**URL:** `config/urls.js` → `factoryManagement` (from `config/env.js`). Do not hardcode the host.
+
+**Background:** login → close the post-login popup → Resources → Factory Management. A later TC reuses the workshop and job stored in `factoryTestContext.js`. A TC run alone creates any missing location, trade, stage, or job.
+
+**Step cache:** `world.factoryManagementPage`, `world.manufacturingOrderPage`, `world.factoryWorkshopPage`.
+
+**Run:**
+```bash
+npm.cmd run test:admin:resources:factory
+npx.cmd cucumber-js features/admin/resources/FactoryManagement/FactoryManagement_TestCases.feature --tags "@TS01 and @TC01"
+npm.cmd run test:admin:resources:factory:tc01
+```

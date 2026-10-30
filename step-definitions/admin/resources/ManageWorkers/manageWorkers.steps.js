@@ -3,7 +3,7 @@ const ManageWorkersPage = require('../../../../pages/admin/resources/ManageWorke
 const { syncContextToWorld, getContext } = require('../../../../pages/admin/resources/ManageWorkers/workerTestContext');
 
 function getManageWorkersPage(world) {
-  if (!world.manageWorkersPage) {
+  if (!world.manageWorkersPage || world.manageWorkersPage.page !== world.page) {
     world.manageWorkersPage = new ManageWorkersPage(world.page);
   }
   return world.manageWorkersPage;
