@@ -34,6 +34,7 @@ const urls = {
   clientsProjectsList: joinUrl(adminBase, '/client?isActive=true'),
   clientProfile: joinUrl(adminBase, '/client/profile'),
   leadManagerMaster: joinUrl(adminBase, '/leadmanager/master?isActive=true&isSnoozed=false'),
+  factoryManagement: joinUrl(adminBase, '/factory-management'),
   joinUrl,
   stripSlash,
   pathnameOf,
@@ -49,6 +50,10 @@ const urls = {
     } catch {
       return true;
     }
+  },
+  isFactoryManagement(url) {
+    const path = pathnameOf(url);
+    return path === '/factory-management' || path.startsWith('/factory-management/');
   },
   /** Client/lead profile hub opened from Clients/Projects (`/client/profile?...&projectId=`). */
   isClientProjectProfile(url) {

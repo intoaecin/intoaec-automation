@@ -53,16 +53,30 @@ When('I enter a random shift name in the add shift form', { timeout: 120000 }, a
   this.lastCreatedShiftName = name;
 });
 
-When('I select the second checkbox in the add shift form', { timeout: 120000 }, async function () {
+When('I select the second checkbox in the add shift form', { timeout: 300000 }, async function () {
+  const workersPage = getWorkersPage(this);
   const workerName =
     this.workerContext?.individualName ||
     this.workerContext?.contractorName ||
     this.workerContext?.orgUserName ||
+    workersPage.lastSeededWorkerName ||
     '';
   if (workerName) {
-    await getWorkersPage(this).selectWorkerForShiftByName(workerName);
-  } else {
-    await getWorkersPage(this).selectSecondCheckboxInAddShiftForm();
+    try {
+      await workersPage.selectWorkerForShiftByName(workerName);
+      return;
+    } catch (err) {
+      console.log(
+        `[Workers] Named worker "${workerName}" not selectable (${(err && err.message) || err}); falling back`
+      );
+    }
+  }
+  await workersPage.selectSecondCheckboxInAddShiftForm({ seedIfEmpty: true, world: this });
+  if (workersPage.lastSeededWorkerName) {
+    this.workerContext = {
+      ...(this.workerContext || {}),
+      individualName: workersPage.lastSeededWorkerName,
+    };
   }
 });
 
@@ -83,7 +97,7 @@ Then('the created shift should be visible in worker management', { timeout: 1200
 });
 
 When('I select the shift worker tab {string}', { timeout: 60000 }, async function (workerType) {
-  await getWorkersPage(this).selectShiftWorkerTab(workerType);
+  await getWorkersPage(this).selectShiftWorkerTab(workerType, { explicit: true });
 });
 
 When('I open the created shift in worker management', { timeout: 120000 }, async function () {

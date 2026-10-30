@@ -1,7 +1,7 @@
 @resources @workers @positive @manage-workers @yopmail @user-wage
 Feature: Create User With Wages for Worker Management
 
-  Scenario: Invite a user with wage details, accept invitation, and verify Accepted status
+  Scenario: Invite a user with wage details, accept invitation, return to admin, open Manage Workers
     Given I am logged in
     Then I should be logged in successfully
     When I navigate to User Hub
@@ -27,3 +27,4 @@ Feature: Create User With Wages for Worker Management
     And I refresh the User Hub users list
     And I search the User Hub users list for the invited user
     Then the invited user should appear in the User Hub users list with status "Accepted" after acceptance
+    When I navigate to the Resources Manage Workers page

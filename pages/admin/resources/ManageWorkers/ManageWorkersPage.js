@@ -143,7 +143,9 @@ class ManageWorkersPage extends BasePage {
   workingHoursInput() {
     const scope = this.formScope();
     return scope
-      .locator('input[name="shiftDuration"]')
+      .getByPlaceholder(/working\s*hours|hours/i)
+      .or(scope.locator('input[name="workingHours"], input[name="workHours"], input[name="shiftDuration"]'))
+      .or(scope.getByLabel(/working\s*hours/i))
       .first();
   }
 

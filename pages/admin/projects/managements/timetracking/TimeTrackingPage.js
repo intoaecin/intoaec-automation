@@ -1647,6 +1647,8 @@ class TimeTrackingPage extends BasePage {
     // Convert action may be hidden/disabled when shift-linked
     // eslint-disable-next-line no-console
     console.log('[Time Tracking] Convert to expense not available for shift-linked timesheet');
+  }
+
   /** Prefer a person-like cell value from the first timesheet row (for User filter). */
   async captureTimesheetFilterCriteriaFromFirstRow() {
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});

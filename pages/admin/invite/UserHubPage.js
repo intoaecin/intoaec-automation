@@ -2779,6 +2779,13 @@ class UserHubPage extends BasePage {
     this.logStep(`Filled invite rate: ${rate}`);
   }
 
+  _isLicensedSeatRoleName(label) {
+    // Auto-picking these roles often hits "licensed user limit" on accept in shared orgs.
+    return /^(admin|owner|super\s*admin|organisation\s*admin|organization\s*admin)$/i.test(
+      String(label || '').replace(/\s+/g, ' ').trim()
+    );
+  }
+
   async selectInviteRole(roleName) {
     const role = String(roleName || '').trim();
     expect(role).toBeTruthy();
@@ -2803,14 +2810,22 @@ class UserHubPage extends BasePage {
     if (await exactOption.isVisible({ timeout: 3000 }).catch(() => false)) {
       await exactOption.click({ timeout: this.uiTimeout });
     } else {
-      // Suite may have renamed/deleted "Project Manager" � pick a visible fallback role.
+      // Suite may have renamed/deleted the requested role — pick a visible non-licensed fallback.
       await this.roleSelectInput.fill('');
       await this.page.waitForTimeout(300);
       const options = this.page
         .locator('[role="listbox"] [role="option"], .MuiAutocomplete-option, [role="option"], .ant-select-item')
         .filter({ visible: true });
       const count = await options.count().catch(() => 0);
-      const preferred = [role, 'Project Manager', 'Electrician', 'Site Engineer', 'Admin', 'Approver'];
+      const preferred = [
+        role,
+        'Project Manager',
+        'Electrician',
+        'Site Engineer',
+        'Approver',
+        'Member',
+        'Worker',
+      ];
       let picked = '';
       for (const want of preferred) {
         for (let i = 0; i < count; i += 1) {
@@ -2827,8 +2842,22 @@ class UserHubPage extends BasePage {
         for (let i = 0; i < count; i += 1) {
           const label = ((await options.nth(i).innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
           if (!label || /select\s*role|no\s*options/i.test(label)) continue;
+          if (this._isLicensedSeatRoleName(label)) continue;
           await options.nth(i).click({ timeout: this.uiTimeout, force: true });
           picked = label;
+          break;
+        }
+      }
+      // Last resort only: Admin/Owner — may fail later with licensed seat limit.
+      if (!picked && count > 0) {
+        for (let i = 0; i < count; i += 1) {
+          const label = ((await options.nth(i).innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+          if (!label || /select\s*role|no\s*options/i.test(label)) continue;
+          await options.nth(i).click({ timeout: this.uiTimeout, force: true });
+          picked = label;
+          this.logStep(
+            `Only licensed/fallback role available for invite: "${picked}" (may hit seat limit on accept)`
+          );
           break;
         }
       }
@@ -2841,7 +2870,7 @@ class UserHubPage extends BasePage {
       }
       selectedRole = picked || role;
       if (!new RegExp(`^${this._escapeRegex(role)}$`, 'i').test(selectedRole)) {
-        this.logStep(`Role "${role}" not in list � selected "${selectedRole}" instead`);
+        this.logStep(`Role "${role}" not in list — selected "${selectedRole}" instead`);
       }
     }
 
@@ -3117,8 +3146,13 @@ class UserHubPage extends BasePage {
     return email;
   }
 
-  async locateFirstPendingUserWithYopmailEmail() {
+  async locateFirstPendingUserWithYopmailEmail(excludeEmails = []) {
     const wanted = 'Pending';
+    const exclude = new Set(
+      [...(excludeEmails || [])]
+        .filter(Boolean)
+        .map((e) => String(e).trim().toLowerCase())
+    );
     await this._ensureUsersListTab();
     await this.refreshUsersList();
 
@@ -3131,6 +3165,7 @@ class UserHubPage extends BasePage {
       const rowText = ((await row.innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
       const emailMatch = rowText.match(/[\w.+-]+@yopmail\.com/i);
       if (!emailMatch) continue;
+      if (exclude.has(String(emailMatch[0]).toLowerCase())) continue;
 
       await row.scrollIntoViewIfNeeded().catch(() => {});
       this.locatedUserQuery = emailMatch[0];
@@ -3140,7 +3175,7 @@ class UserHubPage extends BasePage {
       return emailMatch[0];
     }
 
-    this.logStep('No Pending Yopmail user found � using first Pending user');
+    this.logStep('No Pending Yopmail user found — using first Pending user');
     return this.locateFirstUserWithStatus(wanted);
   }
 
@@ -4164,6 +4199,96 @@ class UserHubPage extends BasePage {
     if (/tc11deletehub/.test(e)) return 100;
     if (/siiva|maxadam|jack|madhan|adam|hari|bhavani/.test(e)) return 0;
     return 10;
+  }
+
+  _seatFreePreferenceScore(email) {
+    const e = String(email || '').toLowerCase();
+    if (/wageauto|autoworker|tc11delete|e2eauto|testauto|automation/.test(e)) return 200;
+    if (/@yopmail\.com$/i.test(e)) return 50 + this._acceptedUserPreferenceScore(e);
+    return this._acceptedUserPreferenceScore(e);
+  }
+
+  /**
+   * Best-effort: delete disposable Pending/Accepted users so invite accept can proceed
+   * when the org is at licensed-user capacity. Returns how many users were deleted.
+   */
+  async tryFreeLicensedSeatForInviteAccept({ excludeEmails = [], maxDeletes = 3 } = {}) {
+    const exclude = new Set(
+      [...excludeEmails, process.env.ADMIN_EMAIL, process.env.ADMIN_USER, 'thara5568@yopmail.com', 'kumar@diy.in']
+        .filter(Boolean)
+        .map((e) => String(e).trim().toLowerCase())
+    );
+    const target = Math.max(1, Number(maxDeletes) || 3);
+    let freed = 0;
+
+    await this.navigateToUserHubUsersDirect();
+    await this.refreshUsersList();
+
+    const tryDeleteLocated = async (query, statusLabel) => {
+      const q = String(query || '').trim();
+      if (!q || exclude.has(q.toLowerCase())) return false;
+      try {
+        await this.locateUserInListWithStatus(q, statusLabel);
+        this.locatedUserStatus = statusLabel;
+        this.deletedUserQuery = q;
+        await this.openUserActionMenu(q);
+        await this.clickDeleteUser();
+
+        if (await this._isAssigneeReassignPopupVisible().catch(() => false)) {
+          this.logStep(`Skipping seat-free delete for "${q}" (has lead assignment)`);
+          await this._dismissAnyUserDeleteDialogs();
+          return false;
+        }
+
+        await this.confirmDeleteUser('Free licensed seat for automation invite accept');
+        await this.expectUserDeletedToast().catch(() => {});
+        exclude.add(q.toLowerCase());
+        freed += 1;
+        this.logStep(`Freed licensed seat by deleting ${statusLabel} user: ${q} (${freed}/${target})`);
+        return true;
+      } catch (err) {
+        await this._dismissAnyUserDeleteDialogs().catch(() => {});
+        this.logStep(
+          `Seat-free delete failed for "${q}" (${statusLabel}): ${(err && err.message) || err}`
+        );
+        return false;
+      }
+    };
+
+    // Prefer Pending disposable invites first (safer than Accepted). Skip the current invite email.
+    for (let i = 0; i < target; i += 1) {
+      try {
+        const pending = await this.locateFirstPendingUserWithYopmailEmail([...exclude]);
+        if (!pending || !(await tryDeleteLocated(pending, 'Pending'))) break;
+      } catch (err) {
+        this.logStep(`No disposable Pending user for seat-free: ${(err && err.message) || err}`);
+        break;
+      }
+    }
+
+    if (freed < target) {
+      const emails = await this._listAcceptedUserEmails(40);
+      const candidates = emails
+        .filter((e) => e && !exclude.has(String(e).toLowerCase()))
+        .filter((e) => this._seatFreePreferenceScore(e) > 0)
+        .sort((a, b) => this._seatFreePreferenceScore(b) - this._seatFreePreferenceScore(a));
+
+      for (const email of candidates) {
+        if (freed >= target) break;
+        await tryDeleteLocated(email, 'Accepted');
+      }
+    }
+
+    if (freed > 0) {
+      // Give subscription/seat counters a moment to refresh before re-opening the invite.
+      await this.page.waitForTimeout(8000);
+      await this.refreshUsersList().catch(() => {});
+      this.logStep(`Seat-free complete: deleted ${freed} disposable user(s)`);
+      return true;
+    }
+
+    this.logStep('Could not free a licensed seat (no disposable Pending/Accepted user deleted)');
+    return false;
   }
 
   async _dismissAnyUserDeleteDialogs() {
