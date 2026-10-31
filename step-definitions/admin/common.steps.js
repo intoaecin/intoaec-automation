@@ -4,27 +4,19 @@ const LoginPage = require('../../pages/admin/auth/LoginPage');
 const testData = require('../../utils/testData');
 const { resetSharedSession } = require('../../support/world');
 
-/** Only this Admin account is allowed for automation (never aadhi / multi-account). */
-const ALLOWED_ADMIN = {
-  email: 'thara5568@yopmail.com',
-  password: 'Simple@10',
-};
-
+/** Admin credentials come from `.env` via `utils/testData.js` (`ADMIN_EMAIL` / `ADMIN_PASSWORD`). */
 function resolveAdminCredentials() {
   const email = String(testData.admin?.validUser?.email || '').trim().toLowerCase();
   const password = String(testData.admin?.validUser?.password || '').trim();
-  if (email !== ALLOWED_ADMIN.email.toLowerCase()) {
+  if (!email || !password) {
     throw new Error(
-      `Blocked Admin login for "${email}". Only ${ALLOWED_ADMIN.email} is allowed. Update utils/testData.js.`
+      'Admin credentials missing. Set ADMIN_EMAIL and ADMIN_PASSWORD in .env (or utils/testData.js).',
     );
   }
   if (/aadhi@/i.test(email)) {
     throw new Error('aadhi@yopmail.com is disabled for Admin automation');
   }
-  return {
-    email: ALLOWED_ADMIN.email,
-    password: password || ALLOWED_ADMIN.password,
-  };
+  return { email, password };
 }
 
 async function ensureLoggedIn(world) {

@@ -88,6 +88,7 @@
     "test:admin:crm:questionnaire": "npx cucumber-js features/admin/crm/questionnaire/",
     "test:admin:crm:questionnaire:send": "npx cucumber-js features/admin/crm/questionnaire/sendQuestionnaire.feature",
     "test:admin:crm:lead:create": "npx cucumber-js features/admin/crm/lead-profile/createLead.feature",
+    "test:admin:crm:customersupport": "cucumber-js features/admin/crm/CustomerSupport/CustomerSupport_TestCases.feature --tags \"@customer-support-tc\"",
     "test:admin:invite:invitevendor": "npx cucumber-js features/admin/invite/InviteVendor.feature",
     "test:admin:invite:userhub": "npx cucumber-js features/admin/invite/UserHub_TestCases.feature",
     "test:admin:invite:userhub:all": "npx cucumber-js --tags \"@userhub-all\"",
