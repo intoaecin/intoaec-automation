@@ -38,7 +38,11 @@ class EstimatePage extends BasePage {
     this.columnTypeSelect = page.getByText(/^text$/i).first();
     this.applyButton = page.getByRole('button', { name: 'Apply' });
     this.actionButton = page.getByRole('button', { name: 'Action', exact: true }).first();
-    this.composeEmailButton = page.getByText(/compose email/i).first();
+    this.composeEmailButton = page.getByRole('menuitem', { name: /compose email/i }).or(page.getByText(/compose email/i)).first();
+    this.sendAsEstimateMenuItem = page
+      .getByRole('menuitem', { name: /send as estimate/i })
+      .or(page.getByText(/send as estimate/i))
+      .first();
     this.sendEmailButton = page.getByRole('button', { name: /send email/i }).first();
     this.emailDialog = page.locator('[role="dialog"], .modal.show, .offcanvas.show').first();
     this.recipientInput = page.locator('input[placeholder*="To"], input[name*="recipient"], input[name*="email"]').first();
@@ -106,6 +110,65 @@ class EstimatePage extends BasePage {
     let out = '';
     for (let i = 0; i < len; i += 1) out += chars[Math.floor(Math.random() * chars.length)];
     return out;
+  }
+
+  logStep(msg) {
+    // eslint-disable-next-line no-console
+    console.log(`[Estimate] ${msg}`);
+  }
+
+  pickRandom(list) {
+    return list[Math.floor(Math.random() * list.length)];
+  }
+
+  randomAecSectionName() {
+    const sections = [
+      'Electrical works',
+      'Civil works',
+      'Plumbing',
+      'HVAC',
+      'Interior finishes',
+      'Waterproofing',
+      'Structural steel',
+    ];
+    return `${this.pickRandom(sections)} ${this.randomLetters(4)}`;
+  }
+
+  randomAecItemName() {
+    const items = [
+      'Copper cable 2.5mm',
+      'False ceiling labour',
+      'PVC conduit pipe',
+      'LED panel light',
+      'Switchboard labour',
+      'Cement plaster',
+      'Floor tiling',
+      'Door frame',
+    ];
+    return `${this.pickRandom(items)} ${this.randomLetters(4)}`;
+  }
+
+  randomAecEstimateTitle() {
+    const titles = [
+      'Interior fit-out estimate',
+      'Electrical BOQ',
+      'Civil works estimate',
+      'MEP estimate',
+      'Waterproofing estimate',
+    ];
+    return `${this.pickRandom(titles)} ${this.randomLetters(4)}`;
+  }
+
+  randomAecUnit() {
+    return this.pickRandom(['Nos', 'Sqm', 'Rmt']);
+  }
+
+  randomAecQty() {
+    return 1 + Math.floor(Math.random() * 50);
+  }
+
+  randomAecRate() {
+    return 100 + Math.floor(Math.random() * 10) * 100;
   }
 
   async waitForNetworkIdle() {
@@ -1254,26 +1317,59 @@ class EstimatePage extends BasePage {
   }
 
   async composeAndSendEmail() {
-    const actionBtn = this.page.getByRole('button', { name: 'Action', exact: true }).first();
+    const actionBtn = this.actionButton;
     await expect(actionBtn).toBeVisible({ timeout: this.defaultTimeout });
     await actionBtn.click();
+    this.logStep('Clicked Action.');
 
-    const composeMenuItem = this.page.getByRole('menuitem', { name: 'Compose email' }).first();
+    const composeMenuItem = this.composeEmailButton;
     await expect(composeMenuItem).toBeVisible({ timeout: this.defaultTimeout });
     await composeMenuItem.click();
+    this.logStep('Clicked Compose email.');
 
-    // Nested action menu: Compose email → Send as Estimate
-    const sendAsEstimate = this.page.getByRole('menuitem', { name: 'Send as Estimate' }).first();
+    const sendAsEstimate = this.sendAsEstimateMenuItem;
     await expect(sendAsEstimate).toBeVisible({ timeout: this.defaultTimeout });
     await sendAsEstimate.click();
+    this.logStep('Clicked Send as Estimate.');
 
-    // Compose popup takes time to render; wait for the Send button to be ready.
-    const sendBtn = this.page.getByRole('button', { name: 'Send Email' }).first();
+    const sendBtn = this.sendEmailButton;
     await expect(sendBtn).toBeVisible({ timeout: this.defaultTimeout });
     await expect(sendBtn).toBeEnabled({ timeout: this.defaultTimeout });
     await sendBtn.click();
-    await this.page.waitForTimeout(1500);
-    await this.waitForNetworkIdle();
+    this.logStep('Clicked Send Email.');
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.waitForNetworkIdle().catch(() => {});
+  }
+
+  /**
+   * TC-01: Create Estimate → Start from scratch → AEC section + line item
+   * (qty / unit / rate) → title → Action → Compose email → Send as Estimate → Send Email.
+   */
+  async completeCreateFromScratchAndSendAsEstimateJourney() {
+    const sectionName = this.randomAecSectionName();
+    const itemName = this.randomAecItemName();
+    const title = this.randomAecEstimateTitle();
+    const qty = this.randomAecQty();
+    const unit = this.randomAecUnit();
+    const rate = this.randomAecRate();
+
+    await this.clickCreateEstimate();
+    this.logStep('Clicked Create Estimate.');
+    await this.startFromScratchAndProceed();
+    this.logStep('Started from scratch; create estimate page is displayed.');
+
+    await this.fillSectionNameAtIndex(0, sectionName);
+    this.logStep(`Filled section: ${sectionName}`);
+
+    await this.addManualItem({ name: itemName }, { manualIndex: 0 });
+    await this.fillItemQtyUnitRateProfit(0, 0, { qty, unit, rate, profit: 0 });
+    this.logStep(`Filled line item: ${itemName}, qty ${qty}, unit ${unit}, rate ${rate}`);
+
+    await this.fillEstimateTitleOnly(title);
+    this.logStep(`Filled estimate title: ${title}`);
+
+    await this.composeAndSendEmail();
+    this.logStep('Complete create-from-scratch and send-as-estimate journey finished.');
   }
 
   async createAndSendMinimalEstimateForRfq(title) {

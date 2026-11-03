@@ -12,16 +12,16 @@
 #   TC-08 — Task create (random name, today, first assignee) → Daily Report → task listed → Create
 #   TC-09 — Task create (×3, same as TC-08) → Daily Report → Task Progress edit → verify → unselect 1 → Save → Create
 #
-# Run one case:
-#   npx cross-env STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC01"
-#   npx cross-env STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC02"
-#   npx cross-env STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC03"
-#   npx cross-env STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC04"
-#   npx cross-env STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC05"
-#   npx cross-env STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC06"
-#   npx cross-env STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC07"
-#   npx cross-env STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC08"
-#   npx cross-env STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC09"
+# Run one case (KEEP_BROWSER=false closes browser without Press ENTER):
+#   npx cross-env KEEP_BROWSER=false STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC01"
+#   npx cross-env KEEP_BROWSER=false STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC02"
+#   npx cross-env KEEP_BROWSER=false STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC03"
+#   npx cross-env KEEP_BROWSER=false STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC04"
+#   npx cross-env KEEP_BROWSER=false STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC05"
+#   npx cross-env KEEP_BROWSER=false STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC06"
+#   npx cross-env KEEP_BROWSER=false STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC07"
+#   npx cross-env KEEP_BROWSER=false STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC08"
+#   npx cross-env KEEP_BROWSER=false STEP_DELAY_MS=0 cucumber-js features/admin/projects/management/DailyReport/Dailyreport.feature --tags "@TS01 and @TC09"
 #
 # npm:
 #   npm run test:admin:projects:management:dailyreport
@@ -136,7 +136,7 @@ Feature: Daily Report — incremental test cases
     When I click Create on the daily report create page
     Then I should see the daily report created successfully
 
-  # --- TC-06 (Schedule create → Daily Report create → Create — no Schedule Progress edit) -
+  # --- TC-06 (Schedule create → Daily Report create → Create — no Schedule Progress edit)
   @TS01 @TC06 @regression @positive @daily-report-schedule
   Scenario: TC-06 — Created schedule appears on Daily Report create page
     When I click the "Schedule" module card

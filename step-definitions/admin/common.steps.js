@@ -4,6 +4,13 @@ const LoginPage = require('../../pages/admin/auth/LoginPage');
 const testData = require('../../utils/testData');
 const { resetSharedSession } = require('../../support/world');
 
+<<<<<<< HEAD
+async function ensureLoggedIn(world) {
+  const loginPage = new LoginPage(world.page);
+  const headerReady = await loginPage.appHeader.isVisible({ timeout: 800 }).catch(() => false);
+  if (headerReady) {
+    return;
+=======
 /** Only this Admin account is allowed for automation (never aadhi / multi-account). */
 const ALLOWED_ADMIN = {
   email: 'thara5568@yopmail.com',
@@ -17,6 +24,7 @@ function resolveAdminCredentials() {
     throw new Error(
       `Blocked Admin login for "${email}". Only ${ALLOWED_ADMIN.email} is allowed. Update utils/testData.js.`
     );
+>>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   }
   if (/aadhi@/i.test(email)) {
     throw new Error('aadhi@yopmail.com is disabled for Admin automation');
@@ -27,6 +35,19 @@ function resolveAdminCredentials() {
   };
 }
 
+<<<<<<< HEAD
+Given('I am logged in', { timeout: 120000 }, async function () {
+  const loginPage = new LoginPage(this.page);
+  const headerReady = await loginPage.appHeader.isVisible({ timeout: 800 }).catch(() => false);
+  if (headerReady) {
+    console.log('Already logged in — continuing in same tab');
+    await loginPage.waitForPostLoginShell();
+    return;
+  }
+  await ensureLoggedIn(this);
+  const loginChrome = loginPage.appHeader.or(loginPage.appShell).first();
+  await loginChrome.waitFor({ state: 'visible', timeout: 20000 });
+=======
 async function ensureLoggedIn(world) {
   await world.ensureLivePage();
   const { email, password } = resolveAdminCredentials();
@@ -69,6 +90,7 @@ Given('I am logged in', { timeout: 180000 }, async function () {
       await this.init();
     }
   }
+>>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
 });
 
 Given('User is logged in', { timeout: 120000 }, async function () {

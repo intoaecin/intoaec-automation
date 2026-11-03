@@ -6,8 +6,9 @@ const SchedulePage = require('../../../pages/admin/projects/management/Schedule/
 
 When('I navigate to the Projects page', { timeout: 120000 }, async function () {
   const projectProfilePage = new ProjectProfilePage(this.page);
-  if (await projectProfilePage.isInsideProjectProfile()) {
-    console.log('Already on project profile — skipping Projects navigation');
+  if (await projectProfilePage.isProjectWorkspaceOpen()) {
+    await projectProfilePage.ensureClassicProjectUi();
+    console.log('Already on project workspace — classic UI ensured; skipping Projects list nav');
     return;
   }
   const projectNavigationPage = new ProjectNavigationPage(this.page);

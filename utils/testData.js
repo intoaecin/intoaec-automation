@@ -8,10 +8,14 @@ function fromEnv(name, fallback) {
 
 const testData = {
   admin: {
+<<<<<<< HEAD
+    validUser: { email: 'mydheen020@yopmail.com', password: 'Courage@10' },
+=======
     validUser: {
       email: fromEnv('ADMIN_EMAIL', 'kumar@diy.in'),
       password: fromEnv('ADMIN_PASSWORD', 'Simple@10'),
     },
+>>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
     invalidUser: { email: 'wrong@gmail.com', password: 'wrongpass' },
   },
   vendor: {
@@ -67,6 +71,10 @@ const testData = {
     },
   },
   client: {
+<<<<<<< HEAD
+    validUser:   { email: 'mydheen020@yopmail.com', password: 'Courage@10' }
+  }
+=======
     validUser: {
       email: fromEnv('CLIENT_EMAIL', 'client@gmail.com'),
       password: fromEnv('CLIENT_PASSWORD', 'Client@10'),
@@ -98,6 +106,7 @@ const testData = {
       clientId: process.env.ADMIN_MVB_CLIENT_ID || '810fe142-aae5-4596-91af-8710a241c5e3',
     },
   },
+>>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
 };
 
 module.exports = testData;

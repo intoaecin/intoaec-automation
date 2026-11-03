@@ -20,6 +20,9 @@ const config = {
   },
 };
 
+<<<<<<< HEAD
+module.exports = config[ENV];
+=======
 const selected = config[ENV] || config.testing;
 
 function fromEnv(key, fallback) {
@@ -33,3 +36,4 @@ module.exports = {
   vendor: fromEnv('VENDOR_URL', selected.vendor),
   client: fromEnv('CLIENT_URL', selected.client),
 };
+>>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0

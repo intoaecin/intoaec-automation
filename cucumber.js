@@ -249,6 +249,185 @@ module.exports = {
     publishQuiet: true,
     tags: '@vendor-portal',
   },
+<<<<<<< HEAD
+  /** Estimate — incremental TCs */
+  estimate: {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/design/estimate/Estimate_TestCases.feature',
+    ],
+  },
+  /** Estimate TC-01 */
+  'estimate-tc01': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/design/estimate/Estimate_TestCases.feature',
+    ],
+    tags: '@TS01 and @TC01',
+  },
+  /** Invoice — all create TCs */
+  invoice: {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+  },
+  /** Invoice TC-01 — Start from Scratch + manual line item */
+  'invoice-tc01': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+    tags: '@TS01 and @TC01',
+  },
+  /** Credit Note TC-02 — Create Credit Note + line item */
+  'invoice-tc02': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+    tags: '@TS02 and @TC02',
+  },
+  /** Payment TC-03 — Register Payment against outstanding invoice */
+  'invoice-tc03': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+    tags: '@TS03 and @TC03',
+  },
+  /** Payment TC-04 — Void invoice from Invoice-tab kebab after register payment */
+  'invoice-tc04': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+    tags: '@TS04 and @TC04',
+  },
+  /** Invoice TC-05 — Delete invoice from kebab after register payment */
+  'invoice-tc05': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+    tags: '@TS05 and @TC05',
+  },
+  /** Invoice TC-06 — Preview invoice from kebab after register payment */
+  'invoice-tc06': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+    tags: '@TS06 and @TC06',
+  },
+  /** Invoice TC-07 — Edit invoice from kebab, increase qty, Update */
+  'invoice-tc07': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+    tags: '@TS07 and @TC07',
+  },
+  /** Invoice TC-08 — Send invoice email from kebab composer */
+  'invoice-tc08': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+    tags: '@TS08 and @TC08',
+  },
+  /** Invoice TC-09 — Send invoice email from kebab after create (no payment) */
+  'invoice-tc09': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+    tags: '@TS09 and @TC09',
+  },
+  /** Invoice TC-10 — Refund credit note from kebab after create */
+  'invoice-tc10': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+    tags: '@TS10 and @TC10',
+  },
+  /** Invoice TC-11 — Preview created refund from kebab */
+  'invoice-tc11': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+    tags: '@TS11 and @TC11',
+  },
+  /** Invoice TC-12 — Refund payment from kebab after register payment */
+  'invoice-tc12': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+    tags: '@TS12 and @TC12',
+  },
+  /** Invoice TC-13 — Create invoice with Pay Now button to client enabled */
+  'invoice-tc13': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+    tags: '@TS13 and @TC13',
+  },
+  /** Invoice TC-14 — Pay Now from preview with new card after TC-13 create */
+  'invoice-tc14': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+    tags: '@TS14 and @TC14',
+  },
+  /** Invoice TC-15 — TC-14 plus extra payment terms while creating */
+  'invoice-tc15': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
+    ],
+    tags: '@TS15 and @TC15',
+=======
   'vendor-all': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
     format: ['progress', 'html:reports/cucumber-report.html'],
@@ -296,5 +475,6 @@ module.exports = {
     format: ['progress', 'html:reports/cucumber-report.html'],
     publishQuiet: true,
     tags: '@customer-portal and @TC03',
+>>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   },
 };

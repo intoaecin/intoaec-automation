@@ -103,6 +103,77 @@ class ProjectNavigationPage extends BasePage {
   }
 
   async openClientsProjectsList() {
+<<<<<<< HEAD
+    if (await this._namedClientOrProjectCell().first().isVisible({ timeout: 400 }).catch(() => false)) {
+      // eslint-disable-next-line no-console
+      console.log('[nav] Clients/Projects list already visible');
+      return;
+    }
+
+    // eslint-disable-next-line no-console
+    console.log('[nav] Opening Clients/Projects list URL');
+    await this._gotoClientsProjectsListByUrl();
+    await expect(this._namedClientOrProjectCell().first()).toBeVisible({ timeout: 15000 });
+    // eslint-disable-next-line no-console
+    console.log(`[nav] Clients/Projects list ready. URL=${this.page.url()}`);
+  }
+
+  _clientsProjectsNavCandidates() {
+    const sidebar = this._sidebarScopes().first();
+    return [
+      this.page
+        .getByLabel('Clients/Projects')
+        .getByRole('button', { name: /clients\/projects/i })
+        .first(),
+      this.projectsLink,
+      this.page
+        .getByLabel('Clients/Projects')
+        .getByRole('link', { name: /clients\/projects/i })
+        .first(),
+      this.page.getByRole('link', { name: /clients\/projects/i }).first(),
+      this.page.getByRole('button', { name: /clients\/projects/i }).first(),
+      sidebar.getByRole('button', { name: /clients\/projects/i }).first(),
+      sidebar.getByRole('link', { name: /clients\/projects/i }).first(),
+    ];
+  }
+
+  async _anyClientsProjectsNavVisible(timeout = 1500) {
+    for (const candidate of this._clientsProjectsNavCandidates()) {
+      if (await candidate.isVisible({ timeout }).catch(() => false)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async _waitForClientsProjectsNav(timeout = 60000) {
+    await expect
+      .poll(
+        async () => {
+          if (await this._isClientsProjectsListVisible()) return true;
+          return this._anyClientsProjectsNavVisible(800);
+        },
+        { timeout, intervals: [500, 1000, 2000, 3000] }
+      )
+      .toBe(true);
+  }
+
+  async _gotoClientsProjectsListByUrl() {
+    const base = String(env.admin || '').replace(/\/$/, '');
+    await this.page.goto(`${base}/client?isActive=true`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 45000,
+    });
+  }
+
+  async _waitForProjectProfile(timeout = 15000) {
+    const profile = this._profilePage();
+    try {
+      await expect(async () => {
+        expect(await profile.isProjectWorkspaceOpen()).toBeTruthy();
+      }).toPass({ timeout, intervals: [400, 800, 1500] });
+      await profile.ensureClassicProjectUi();
+=======
     const env = require('../../../config/env');
     const adminBase = String(env.admin || '').replace(/\/$/, '');
     const clientsUrl = `${adminBase}/client?isActive=true`;
@@ -160,6 +231,7 @@ class ProjectNavigationPage extends BasePage {
       await expect(async () => {
         expect(await profile.isInsideProjectProfile()).toBeTruthy();
       }).toPass({ timeout: 15000, intervals: [500, 1000, 2000, 3000] });
+>>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
       return true;
     } catch {
       return false;
@@ -250,7 +322,10 @@ class ProjectNavigationPage extends BasePage {
   /** Leave Activity Tracker / deep link and open the project profile hub. */
   async returnToProjectProfile() {
     const profile = this._profilePage();
-    if (await profile.isInsideProjectProfile()) return true;
+    if (await profile.isProjectWorkspaceOpen()) {
+      await profile.ensureClassicProjectUi();
+      return true;
+    }
 
     if (await this._isActivityTrackerView()) {
       if (await this._clickModuleBackButton()) return true;
@@ -308,6 +383,148 @@ class ProjectNavigationPage extends BasePage {
     await this.openClientsProjectsList();
   }
 
+<<<<<<< HEAD
+  _clientNameCells() {
+    return this.page.locator('th[scope="row"] span.text-dark').filter({ visible: true });
+  }
+
+  _namedClientOrProjectCell() {
+    return this.page
+      .locator('th[scope="row"] span.text-dark, table th[scope="row"], table [role="rowheader"]')
+      .filter({ visible: true })
+      .filter({ hasText: /\S{2,}/ });
+  }
+
+  _hasProjectIdInUrl() {
+    return /projectId=/i.test(this.page.url() || '');
+  }
+
+  async _clickVisible(locator, timeout = 15000) {
+    await locator.scrollIntoViewIfNeeded().catch(() => {});
+    await locator.click({ timeout }).catch(async () => {
+      await locator.click({ timeout: Math.min(timeout, 10000), force: true });
+    });
+  }
+
+  async _clickFirstClientName() {
+    const target = this._namedClientOrProjectCell().first();
+    await expect(target).toBeVisible({ timeout: 15000 });
+    const label = ((await target.innerText().catch(() => '')) || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+    await target.click({ timeout: 8000, force: true });
+    // eslint-disable-next-line no-console
+    console.log(`[nav] Clicked first client: ${label || '(unnamed)'}`);
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+  }
+
+  async _clickFirstProjectUnderClient(nameCountBefore, urlBefore) {
+    if (await this._profilePage().isProjectWorkspaceOpen()) {
+      return true;
+    }
+
+    let nameCountAfter = nameCountBefore;
+    try {
+      await expect
+        .poll(
+          async () => {
+            if (await this._profilePage().isProjectWorkspaceOpen()) {
+              return true;
+            }
+            nameCountAfter = await this._namedClientOrProjectCell().count();
+            return nameCountAfter > nameCountBefore;
+          },
+          { timeout: 1500, intervals: [200, 400, 700] }
+        )
+        .toBe(true);
+    } catch {
+      nameCountAfter = await this._namedClientOrProjectCell().count().catch(() => nameCountBefore);
+    }
+
+    if (await this._profilePage().isProjectWorkspaceOpen()) {
+      return true;
+    }
+
+    if (nameCountAfter > nameCountBefore) {
+      const projectName = this._namedClientOrProjectCell().nth(1);
+      const visible = await projectName.isVisible({ timeout: 1200 }).catch(() => false);
+      if (visible) {
+        const clicked = await projectName
+          .click({ timeout: 4000, force: true })
+          .then(() => true)
+          .catch(() => false);
+        if (clicked) {
+          const label = ((await projectName.innerText().catch(() => '')) || '').trim().slice(0, 80);
+          // eslint-disable-next-line no-console
+          console.log(`[nav] Clicked first project under client${label ? `: ${label}` : ''}`);
+          await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+          return true;
+        }
+      }
+      // eslint-disable-next-line no-console
+      console.log('[nav] Nested project row disappeared or was not clickable — continuing');
+    }
+
+    const urlAfter = this.page.url();
+    if (
+      urlAfter !== urlBefore &&
+      (await this._namedClientOrProjectCell().first().isVisible({ timeout: 800 }).catch(() => false)) &&
+      !(await this._profilePage().isProjectWorkspaceOpen())
+    ) {
+      const projectName = this._namedClientOrProjectCell().first();
+      const clicked = await projectName
+        .click({ timeout: 4000, force: true })
+        .then(() => true)
+        .catch(() => false);
+      if (clicked) {
+        // eslint-disable-next-line no-console
+        console.log('[nav] Clicked first project on client detail page');
+        await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  async _clickSelectedRowProfileIcon() {
+    const selected = this.page
+      .locator('tbody tr.Mui-selected, tbody tr[aria-selected="true"]')
+      .filter({ visible: true })
+      .first();
+    const row = (await selected.isVisible({ timeout: 800 }).catch(() => false))
+      ? selected
+      : this.page.locator('tbody tr').filter({ visible: true }).first();
+    const iconBtn = row
+      .locator('button.MuiIconButton-root.MuiIconButton-sizeSmall, button.MuiIconButton-root')
+      .filter({ visible: true })
+      .first();
+    const rowLink = row.locator('a').filter({ visible: true }).first();
+
+    if (await iconBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      const clicked = await iconBtn
+        .click({ timeout: 5000, force: true })
+        .then(() => true)
+        .catch(() => false);
+      if (clicked) {
+        // eslint-disable-next-line no-console
+        console.log('[nav] Clicked client/project row profile icon');
+        await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+        return true;
+      }
+    }
+    if (await rowLink.isVisible({ timeout: 1500 }).catch(() => false)) {
+      const clicked = await rowLink
+        .click({ timeout: 4000, force: true })
+        .then(() => true)
+        .catch(() => false);
+      if (clicked) {
+        // eslint-disable-next-line no-console
+        console.log('[nav] Clicked client/project row link');
+        await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+        return true;
+      }
+    }
+    return false;
+=======
   /**
    * Always open the Active Clients list (never skip when already inside a project profile).
    * Target: {admin}/client?isActive=true  e.g. https://app.aecplayhouse.com/client?isActive=true
@@ -319,10 +536,42 @@ class ProjectNavigationPage extends BasePage {
       throw new Error(`Expected Active Clients list (/client?isActive=true) but was on: ${url}`);
     }
     console.log(`[Admin] Active Clients list ready: ${url}`);
+>>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   }
 
   async clickFirstProject() {
     const profile = this._profilePage();
+<<<<<<< HEAD
+    if (this._hasProjectIdInUrl() || (await profile.isProjectWorkspaceOpen())) {
+      await profile.ensureClassicProjectUi();
+      // eslint-disable-next-line no-console
+      console.log('[nav] Already on project workspace — New UI turned OFF if it was on');
+      return;
+    }
+
+    await this.openClientsProjectsList();
+
+    if (this._hasProjectIdInUrl() || (await profile.isProjectWorkspaceOpen())) {
+      await profile.ensureClassicProjectUi();
+      return;
+    }
+
+    const urlBefore = this.page.url();
+    const nameCountBefore = await this._namedClientOrProjectCell().count().catch(() => 0);
+
+    await this._clickFirstClientName();
+    if (this._hasProjectIdInUrl() || (await this._waitForProjectProfile(2500))) {
+      return;
+    }
+
+    await this._clickFirstProjectUnderClient(nameCountBefore, urlBefore);
+    if (this._hasProjectIdInUrl() || (await this._waitForProjectProfile(2500))) {
+      return;
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(`[nav] First client/project did not open hub. URL=${this.page.url()}`);
+=======
 
     // Always land on Active Clients list first so we do not reuse another project's profile.
     await this.openClientsProjectsList();
@@ -1003,6 +1252,7 @@ class ProjectNavigationPage extends BasePage {
     throw new Error(
       `Could not find project "${wanted}" in Active/All/Inactive Clients lists (${adminBase}/client)`
     );
+>>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   }
 
   async openRfqFromClientMenu() {

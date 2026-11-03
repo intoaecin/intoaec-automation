@@ -1,9 +1,2 @@
-const BasePage = require('../../../../BasePage');
-
-class MoneyMattersPage extends BasePage {
-    constructor(page) {
-        super(page);
-    }
-}
-
-module.exports = MoneyMattersPage;
+/** Re-export — invoice locators and journeys live in create-invoice/. */
+module.exports = require('./create-invoice/invoice.page');
