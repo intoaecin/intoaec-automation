@@ -61,6 +61,7 @@ When adding new `When/Then` steps for the estimate module, prefer these method n
 
 - Don’t duplicate locators in step definitions.
 - Don’t hardcode long `waitForTimeout()` sequences unless a UI animation requires it (and keep them minimal).
+- Don’t hardcode environment URLs (hosts or full page URLs such as admin dashboard, sign-in, or Clients/Projects). Use `config/env.js` and `config/urls.js`.
 - Don’t create new step-definition files for existing modules; extend the existing module steps/page objects unless the repo already has that pattern.
 
 ---
@@ -68,6 +69,13 @@ When adding new `When/Then` steps for the estimate module, prefer these method n
 ## General automation standards (all modules)
 
 Apply these conventions when adding or refactoring tests. **If a rule is already satisfied in the repo, do not duplicate work;** only add or align what is missing.
+
+### Environment URLs
+
+- **Never hardcode** app hosts or full page URLs in page objects, steps, or scripts.
+- **Hosts** live in **`config/env.js`** (`admin`, `vendor`, `client`), selected by **`TEST_ENV`** (`testing` | `production`). Override when needed with **`ADMIN_BASE_URL`**, **`VENDOR_URL`**, **`CLIENT_URL`**.
+- **Page URLs** live in **`config/urls.js`** (`adminBase`, `adminSignIn`, `adminDashboard`, `clientsProjectsList`, `leadManagerMaster`, `vendorSignIn`, …). All `page.goto(...)` calls and URL fallbacks must use these constants.
+- Detect screens by **path helpers** on that module (`urls.isAdminDashboard(url)`, `urls.isClientsProjectsList(url)`), not by a hardcoded host.
 
 ### Timeouts
 
@@ -127,3 +135,314 @@ Apply these conventions when adding or refactoring tests. **If a rule is already
 - Fall back to stable **`data-testid`** or scoped CSS only when the UI does not expose good roles/labels.
 - Avoid brittle selectors that depend on generated CSS class names unless no alternative exists.
 
+---
+
+## Task Management (`@task`) — incremental TC file
+
+Mirror the **Schedule** pattern (`Schedule_TestCases.feature`):
+
+| Layer | Path |
+|-------|------|
+| Feature | `features/admin/projects/managements/TaskManagement/Task_TestCases.feature` |
+| Steps | `step-definitions/admin/projects/management/TaskManagement/TaskStep.js` |
+| Page | `pages/admin/projects/management/TaskManagement/TaskManagementPage.js` |
+
+**UI reference:** `intoaec-UI/src/features/TaskManagement/` (`TaskManagementHome.tsx`, kanban, create modal).
+
+**Tags:** `@task` on the feature; `@TS01` / `@TC01` … per test sheet (same as Schedule).
+
+**Background:** login → project → Project Management → `I navigate to the task management module` (handles arriving from Schedule without changing Schedule files).
+
+**Schedule cross-module checks (unchanged):** `Schedule_TestCases.feature` still uses `pages/admin/projects/management/TaskPage.js` and steps in `ScheduleStep.js` (`I open the Task module from project management`, kanban verify, linked schedule). Do **not** move or refactor those for Task Management TCs.
+
+**Step cache:** `world.taskManagementPage` + `getTaskManagementPage(world)` in `TaskStep.js`.
+
+**Run one TC:**
+```bash
+npx cucumber-js features/admin/projects/managements/TaskManagement/Task_TestCases.feature --tags "@TS01 and @TC01"
+```
+
+---
+
+## Budgeting (`@budgeting`) — incremental TC file
+
+Mirror the **Schedule** / **Task** pattern (`Budgeting_TestCases.feature`):
+
+| Layer | Path |
+|-------|------|
+| Feature | `features/admin/projects/managements/Budgeting/Budgeting_TestCases.feature` |
+| Steps | `step-definitions/admin/projects/management/Budgeting/BudgetingStep.js` |
+| Page | `pages/admin/projects/management/Budgeting/BudgetingPage.js` |
+
+**UI reference:** `intoaec-UI/src/features/projectSchedule/components/` — `BudgetView.tsx`, `ActualBudgetCard.tsx`, `BudgetLinkPlannedCost.tsx`, `ManualBudgetTabContent.tsx`, `EstimatesTabContent.tsx`, `ProposalsTabContent.tsx`, `BudgetTable.tsx`.
+
+**Tags:** `@budgeting` on the feature; `@TS01`…`@TS12` / `@TC01`…`@TC20` per test sheet (`TC04`–`TC07` share `@TS04`; `TC08`–`TC09` share `@TS05`; `TC10`–`TC11` share `@TS06`; `TC14`–`TC15` share `@TS09`; `TC16`–`TC17` share `@TS10`; `TC19`–`TC20` share `@TS12`).
+
+**Background:** login → project → Project Management → `I navigate to the budgeting module` → wait for module load.
+
+**Money / math rule:** amounts used for manual add and for estimate/proposal link validation must be **multiples of 100** (default random range **100–1,000** step 100). Estimate items: qty `1`, rate multiple of 100, profit `0`. Store last linked/deleted amounts on `world` so Actual Budget card total, category breakdown, and unallocated can be asserted with add/subtract. Login user is **Approver** (manual budgets show Approved).
+
+**Cross-module:** TC-01 reuses Schedule quick-add / add-child steps. TC-04/05 reuse Estimate create+send steps (with controlled amount). TC-06/07 reuse Proposal send + Yopmail accept patterns; budgeting-specific steps live in `BudgetingStep.js` / `BudgetingPage.js`.
+
+**Step cache:** `world.budgetingPage` + `getBudgetingPage(world)` in `BudgetingStep.js`.
+
+**Run one TC:**
+```bash
+npx cucumber-js features/admin/projects/managements/Budgeting/Budgeting_TestCases.feature --tags "@TS01 and @TC01"
+```
+
+---
+
+## Vendor Portal Login (`@vendor` / `@vendor-login`) — incremental TC file
+
+Mirror the **Warehouse** / **Services** pattern (`VendorLogin_TestCases.feature`):
+
+| Layer | Path |
+|-------|------|
+| Feature | `features/vendor/auth/VendorLogin_TestCases.feature` |
+| Steps | `step-definitions/vendor/auth/VendorLoginStep.js` |
+| Page | `pages/vendor/auth/VendorLoginPage.js`, `pages/vendor/profile/VendorProfilePage.js`, `pages/vendor/organization/VendorOrganizationPage.js`, `pages/vendor/products/VendorProductsPage.js`, `pages/vendor/services/VendorServicesPage.js` |
+
+**Tags:** `@vendor-portal` is the unique tag to run this file alone (`@vendor` also matches purchase-order vendor features). Feature also has `@vendor` `@vendor-login`; scenarios use `@TS01` / `@TC01` … per test sheet.
+
+**URL:** `config/urls.js` → `vendorSignIn` (from `config/env.js` → `vendor`; override with `VENDOR_URL`).
+
+**TC-01** is the vendor sign-in flow (`praveen@yopmail.com` / `Simple@10`). **TC-02** uses `Given I am logged in to the vendor portal` then Account Settings → **My Profile** → Edit → Save. **TC-03** uses My Profile → **Security** → change password (`Simple@10` → `Courage@10`) → logout → login with the new password. After TC-03 the original password (`Simple@10`) is restored so TC-01 / TC-02 keep working. **TC-04** uses Account Settings → **My Organization** → **Company Info** → Edit → registration number + category → Update. **TC-05** uses My Organization → **Business Info** → Edit → address line 1/2, city, state, country, ZIP → Update. **TC-06** uses My Organization → **Social Media** → Edit → Facebook/Twitter/LinkedIn/Instagram/Public Profile/Website URLs → Save → refresh → verify. **TC-07** uses My Organization → **E-Signature** → Draw a signature → Update → refresh → verify Existing Digital Signature. **TC-08** uses My Organization → **E-Signature** → Upload `sample_signature.png` → Update → verify Existing Digital Signature. **TC-09** uses **Products** → **Add Product** → **Start From Scratch** → Product Information (name/category/subcategory/qty/brand/description) → Save → Product List. **TC-10** uses **Services** → **Create New** → Service Name/Category/Type/Description → Fixed Price / 2500 / Taxable → Save → Service List. **TC-11** uses Admin (`kumar@diy.in` / `Simple@10`) → Invite Vendor (`praveen@yopmail.com`, registers with `Simple@10`) → Yopmail → register → Accepted.
+
+**Vendor My Profile fields:** the live form exposes core contact/address fields (First/Last Name, Email, Mobile, Organization, Job Title/Designation, Address, City, State, Country, Zip). Optional TC fields (Experience, Expertise, Skills, Industry, Website, Profile Description) are attempted when present and skipped otherwise.
+
+**Step cache:** `world.vendorLoginPage` + `getVendorLoginPage(world)`; `world.vendorProfilePage` + `getVendorProfilePage(world)`; `world.vendorOrganizationPage` + `getVendorOrganizationPage(world)`; `world.vendorProductsPage` + `getVendorProductsPage(world)`; `world.vendorServicesPage` + `getVendorServicesPage(world)` in `VendorLoginStep.js`.
+
+**Run all vendor portal TCs** (PowerShell: use `npx.cmd` / `npm.cmd` if `npx.ps1` is blocked by execution policy):
+```bash
+npx.cmd cucumber-js --tags "@vendor-portal"
+```
+
+**Run one TC:**
+```bash
+npx.cmd cucumber-js --tags "@vendor-portal and @TC01"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC02"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC03"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC04"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC05"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC06"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC07"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC08"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC09"
+npx.cmd cucumber-js --tags "@vendor-portal and @TC10"
+```
+
+---
+
+## Vendor Portal RFQ (`@vendor-rfq`) — incremental TC file
+
+| Layer | Path |
+|-------|------|
+| Feature | `features/vendor/procurement/rfq/VendorRFQ_TestCases.feature` |
+| Steps | `step-definitions/vendor/procurement/rfq/VendorRFQStep.js` |
+| Page | `pages/vendor/procurement/rfq/VendorRFQPage.js` |
+
+**Admin:** [https://app.aecplayhouse.com/dashboard](https://app.aecplayhouse.com/dashboard) — `Given I am logged in` uses `testData.admin.validUser` (`kumar@diy.in` / `Simple@10`). **TC-01** opens a **kumar** Admin project only (never **Aditya** / malick / **AEC Solutions** / BBB).
+
+**Vendor URL only in feature comments:** [https://vendor.aecplayhouse.com/auth/signIn](https://vendor.aecplayhouse.com/auth/signIn). RFQ add prefers `testData.vendor.rfqUser` (`praveen@yopmail.com` / `Simple@10`, override with `VENDOR_RFQ_EMAIL` / `VENDOR_RFQ_PASSWORD`); portal login uses the **selected RFQ vendor** email. Org default `kumar` (`VENDOR_RFQ_ORG_NAME`) — Procurement Hub project click also skips AEC Solutions.
+
+**TC-01:** Verify Admin Can Send RFQ to Accepted Vendor — Admin (`kumar@diy.in` / `Simple@10`) → **kumar** project only → Create RFQ from scratch **"New One"** → Required By today + Created On random → **add first vendor** → create **2** new Material products (unique name → **Add in cost catalog** → Type Material → Create) → qty + Unit **Each** (falls back to **Nos**, the account has no Each unit) → compose/send → Vendor Portal (org **kumar** → first project) → Preview → verify RFQ + 2 products / quantities / Unit Each.
+
+**TC-02:** Vendor Portal → org **kumar** → RFQ **"New One"** → **Update Price 1000** → Admin → open the **project associated with the RFQ** (reuses TC-01 session URL) → RFQ module → open **"New One"** → verify price-update status → vendor response/status → updated price **1000**.
+
+**TC-03:** Vendor Portal → org **kumar** → RFQ **"New One"** → Preview → overflow **Decline RFQ** → confirm → Declined on Vendor → Admin associated project → RFQ → open **"New One"** → verify Declined status + vendor declined response.
+
+**TC-04:** Admin → Create RFQ **"Vendor Comment RFQ"** from scratch → Material 1 / qty 1 / Each → Compose/Send → success toast. Run this before TC-05.
+
+**TC-05:** Vendor Portal → org **Aditya Constructions** → RFQ **"Vendor Comment RFQ"** → Preview → **Show comments** → **"For Testing Process"** → suggestion **Save**, then the green header **Save**. The list 3-dot menu has no Add Comment.
+
+**TC-06:** Admin → project **Bhavani** → RFQ → open **"Vendor Comment RFQ"** → verify vendor comment **"For Testing Process"**. Run this after TC-05.
+
+**Run:**
+```bash
+npx.cmd cucumber-js --tags "@vendor-rfq and @TC01"
+npx.cmd cucumber-js --tags "@vendor-rfq and @TC02"
+npx.cmd cucumber-js --tags "@vendor-rfq and @TC03"
+npx.cmd cucumber-js --tags "@vendor-rfq and @TC04"
+npx.cmd cucumber-js --tags "@vendor-rfq and @TC05"
+npx.cmd cucumber-js --tags "@vendor-rfq and @TC06"
+npx.cmd cucumber-js --tags "@vendor-rfq"
+```
+
+---
+
+## Purchase Order (`@purchase-order-tc`) — incremental TC file
+
+| Layer | Path |
+|-------|------|
+| Feature | `features/admin/projects/procurement/purchase-order/PurchaseOrder_TestCases.feature` |
+| Steps | `step-definitions/admin/projects/procurement/purchase-order/create-po/*.steps.js` |
+| Page | `pages/admin/projects/procurement/purchase-order/create-po/purchase-order-create-po.page.js`, `purchase-order-action-create-po.page.js` |
+
+**TC-01:** Admin login → open a **kumar** project only (never Aditya / Dev-Inprogress / Dont touch / BBB / AEC Solutions) → Procurement → Purchase Order → Create from scratch → title **"New PO 1"** → vendor (prefer RFQ vendor) → **Add Items** → select **3 different** Product Item dropdown products → qty **1**, **2**, **3** → Unit **Each** → remaining required details → Action → **Compose/Send email** → success toast → PO visible on list. Session saved for TC-02 / TC-03.
+
+**TC-02:** Continues the **same PO** from TC-01 → Vendor Portal login (PO-added vendor / RFQ vendor `praveen@yopmail.com` / `Simple@10`) → Procurement Hub → org **kumar** → first project → Purchase Order tab → **click most recently received PO** (`PO######`, e.g. `PO0000093`) → **3-dots** → **Preview** → verify vendor details, items, quantities 1/2/3, unit Each, price/amount, total amount.
+
+**TC-03:** Vendor Portal login → Procurement Hub → org **Aditya Constructions** → first project → Purchase Order → **Preview** the **TC-01 session PO number** (e.g. `PO0000001`; falls back to most recent only if none saved) → **Accept P.O** → confirm if shown → success / vendor **Accepted** → switch to **Admin Portal** PO list → find card by **PO No** → **Preview icon** → refresh until the preview header shows **Accepted**.
+
+**TC-04:** Vendor Portal → **kumar** → Purchase Order → select a PO with status **Received** (not Accepted — Accepted cannot be declined) → Preview → **3-dots** → **Decline P.O** → confirm → success → status **Declined** (vendor only; no Admin check).
+
+**TC-05:** Vendor Portal → **kumar** → Purchase Order → Preview required PO → **3-dots** → **Add Comment** → **"For Testing Process"** → submit → success → comment displayed on PO.
+
+**TC-06:** Vendor Portal → same Add Comment flow as TC-05 → **Admin Portal** → kumar project → Purchase Order → open **"New PO 1"** → Preview / comments → verify **"For Testing Process"** from Vendor.
+
+**Run:**
+```bash
+npx.cmd cucumber-js --tags "@purchase-order-tc"
+npx.cmd cucumber-js --tags "@purchase-order-tc and @TC01"
+npx.cmd cucumber-js --tags "@purchase-order-tc and @TC02"
+npx.cmd cucumber-js --tags "@purchase-order-tc and @TC03"
+npx.cmd cucumber-js --tags "@purchase-order-tc and @TC04"
+npx.cmd cucumber-js --tags "@purchase-order-tc and @TC05"
+npx.cmd cucumber-js --tags "@purchase-order-tc and @TC06"
+```
+
+---
+
+## Inventory Management (`@inventory`) — Client → Procurement → Inventory
+
+Asset-style capability files under `features/admin/projects/procurement/Inventory/`.
+
+| Layer | Path |
+|-------|------|
+| Features | `features/admin/projects/procurement/Inventory/*.feature` |
+| Steps | `step-definitions/admin/projects/procurement/Inventory.steps.js` (plus Goods Receipt steps for PO GR / Add to Group reuse) |
+| Pages | `pages/admin/projects/procurement/InventoryPage.js`, `InventoryRequestPage.js`, `GoodsReceiptPage.js` |
+
+**Admin project:** same as Purchase Order / Goods Receipt (**kumar**).
+
+**Coverage packs:**
+- **Groups:** navigate, create, rename, delete (empty), search, validation, dashboard smoke
+- **Stock-in:** Warehouse / PO / Workshop **branch**: if products / Accepted PO / dispatch exist → add/receive; else assert empty UI and soft-pass (`@empty-state`). Scenarios that need stock use `I ensure the current inventory group has at least one item` (warehouse, else request Add-to-Group fallback).
+- **Item Requests (`@item-requests`):** navigate + back, all 6 status tabs, approve/reject/cancel, bulk approve, add-to-group, convert to PO/Indent
+- **Item actions:** used qty edit, move to warehouse, delete item, link to schedule
+
+**Do not duplicate** Goods Receipt document Preview/Download (TC-03 / TC-04) — those stay in the Goods Receipt suite.
+
+**Run:**
+```bash
+npx.cmd cucumber-js --tags "@inventory"
+npx.cmd cucumber-js --tags "@item-requests"
+npx.cmd cucumber-js --tags "@inventory and @group"
+npx.cmd cucumber-js --tags "@inventory and @warehouse"
+npx.cmd cucumber-js --tags "@inventory and @workshop"
+npx.cmd cucumber-js --tags "@inventory and @validation"
+```
+
+---
+
+## Goods Receipt (`@goods-receipt`) — incremental TC file
+
+| Layer | Path |
+|-------|------|
+| Feature | `features/admin/projects/procurement/GoodsReceipt/GoodsReceipt_TestCases.feature` |
+| Steps | `step-definitions/admin/projects/procurement/GoodsReceipt.steps.js`, `purchase-order/vendor/purchase-order-vendor-yopmail.steps.js`, `purchase-order/vendor/purchase-order-vendor-mailinator.steps.js` |
+| Page | `pages/admin/projects/procurement/GoodsReceiptPage.js`, `InventoryPage.js`, `InventoryRequestPage.js` |
+
+**Admin project:** **kumar** only (same as Purchase Order — never BBB / AEC Solutions / Aditya).
+
+**TC-01:** Create PO from scratch — title **"New PO FOR Goods Receipt…"** — **Yopmail** vendor — manual line **Wires** qty **10** / Nos / rate **1000** → Compose → Send → success toast. Saves the PO title for TC-01A.
+
+**TC-01A:** Yopmail → open the saved PO → **View PO** → **Accept** → Admin list shows **Accepted**. Run after TC-01.
+
+**TC-01B:** Inventory → Create Group **"For Sample Testing"** → Goods Receipt from the accepted PO. Run after TC-01A.
+
+**TC-02:** Inventory → Create Group **"Request Items"** → request Product 1/2/3 (Approved) → Add to Group → verify in group.
+
+**TC-03 / TC-04:** Create/Accept PO via **Yopmail** (3 line items; same vendor path as TC-01) → Inventory GR → Goods Receipts Preview (TC-03) / Download (TC-04).
+
+**Run:**
+```bash
+npx.cmd cucumber-js --tags "@goods-receipt-tc01-tc04"
+npx.cmd cucumber-js --tags "@goods-receipt and @TC01"
+npx.cmd cucumber-js --tags "@goods-receipt and @TC01A"
+npx.cmd cucumber-js --tags "@goods-receipt and @TC01B"
+npx.cmd cucumber-js --tags "@goods-receipt and @TC02"
+npx.cmd cucumber-js --tags "@goods-receipt and @TC03"
+npx.cmd cucumber-js --tags "@goods-receipt and @TC04"
+```
+
+---
+
+## Customer Portal Login (`@customer` / `@customer-login`) — incremental TC file
+
+Mirror the **Vendor Login** pattern (`CustomerLogin_TestCases.feature`):
+
+| Layer | Path |
+|-------|------|
+| Feature | `features/customer/auth/CustomerLogin_TestCases.feature` |
+| Steps | `step-definitions/customer/auth/CustomerLoginStep.js` |
+| Pages | `pages/customer/auth/CustomerLoginPage.js`, `pages/customer/auth/CustomerPortalYopmailPage.js`, `pages/customer/profile/CustomerProfilePage.js`, `pages/admin/client/AdminClientPage.js` |
+
+**URL:** [Customer Portal staging](https://staging-bac9-intoaec1.wpcomstaging.com/cutomer-portal/) (`config/customerPortal.js` → `getCustomerPortalUrl()`, default `config/env.js` → `client`). Override with `CUSTOMER_PORTAL_URL` when needed.
+
+**Tags:** `@customer-tc01-tc06` runs **all** customer portal TCs (TC-01–TC-06). `@customer-all` / `@customer-portal` also run this file. `@customer` may match other customer-tagged features if added later. Scenarios use `@TS01` / `@TC01` … per test sheet.
+
+**TC-01** logs into the **Admin Portal**, opens project **vasanth**, navigates to the **Client** tab, captures that project's client email, opens the **Customer Portal**, requests OTP, reads the code from **Yopmail**, and verifies successful customer login. Yopmail snapshots the inbox **before** Get OTP so old OTP mails are ignored; the step refreshes until a **new** OTP email arrives.
+
+**TC-02** continues after customer login: **Account Settings → My Profile → Edit** — keep/update name **Hari**, update mobile/address/city/state/country/zipcode, save, verify on Customer Portal, then switch to **Admin Portal** and verify the same fields on the project **Client** tab.
+
+**TC-03** continues after customer login: **Files → My Files → Create Folder** (`My Folder`) → verify in list → **Admin Portal** → project **kumarorganization** → **Client** tab → client **Hari** → **Document** → **Client** section → verify folder.
+
+**TC-04** continues after customer login: **Files → My Files** → open existing **My Folder** → **Upload Folder** → **manually select folder, click Upload, then press ENTER in the terminal to resume** → verify inside **My Folder** → **Admin Portal** → project **kumarorganization** → **Document** → **Client** → open **My Folder** → verify uploaded folder and contents. Set `CUSTOMER_UPLOADED_FOLDER_NAME` if auto-detection cannot find the folder name.
+
+**TC-05** Admin login → project **kumarorganization** → client **Hari** → **capture registered email from Admin Client** → **open Yopmail inbox for that email** → Customer Portal login (paste captured email) → OTP → **Schedule Online Meeting** → verify **Lead Dashboard** + **Event** module.
+
+**TC-06** Same as TC-05 but **Offline Meeting** with location **Chennai, Tamil Nadu, India**, purpose **For Testing Process**, verify details before Confirm Booking, then verify **Lead Dashboard** + **Event** (offline tab).
+
+**Step cache:** `world.adminClientPage` + `getAdminClientPage(world)`; `world.customerLoginPage` + `getCustomerLoginPage(world)`; `world.customerProfilePage` + `getCustomerProfilePage(world)`; `world.customerMyFilesPage` + `getCustomerMyFilesPage(world)` in `CustomerFilesStep.js`; `world.customerScheduleMeetingPage` + `getCustomerScheduleMeetingPage(world)` in `CustomerMeetingStep.js`; `world.adminClientDocumentPage` + `getAdminClientDocumentPage(world)`; `world.adminClientMeetingPage` + `getAdminClientMeetingPage(world)`; `world.customerPortalPage` / `world.yopmailPage` for multi-tab OTP flow in `CustomerLoginStep.js`.
+
+**Run all customer portal TCs** (PowerShell: use `npx.cmd` / `npm.cmd` if `npx.ps1` is blocked by execution policy):
+```bash
+npx.cmd cucumber-js --tags "@customer-tc01-tc06"
+npx.cmd cucumber-js --tags "@customer-all"
+npm.cmd run test:customer:all
+```
+
+**Run this file only:**
+```bash
+npx.cmd cucumber-js --tags "@customer-portal"
+```
+
+**Run one TC:**
+```bash
+npx.cmd cucumber-js --tags "@customer-portal and @TC01"
+npx.cmd cucumber-js --tags "@customer-portal and @TC02"
+npx.cmd cucumber-js --tags "@customer-portal and @TC03"
+npx.cmd cucumber-js --tags "@customer-portal and @TC04"
+npx.cmd cucumber-js --tags "@customer-portal and @TC05"
+npx.cmd cucumber-js --tags "@customer-portal and @TC06"
+```
+
+---
+
+## Factory Management (`@factory-tc`) — incremental TC file
+
+Mirror the Warehouse pattern (`FactoryManagement_TestCases.feature`). Factory Management is an admin Resources module at `/factory-management`. Jobs are raised on a project **Manufacturing Order** tab, then accepted, produced, packed, and dispatched on the factory page.
+
+| Layer | Path |
+|-------|------|
+| Feature | `features/admin/resources/FactoryManagement/FactoryManagement_TestCases.feature` |
+| Steps | `step-definitions/admin/resources/FactoryManagement/FactoryManagementStep.js` |
+| Pages | `pages/admin/resources/FactoryManagement/FactoryManagementPage.js`, `ManufacturingOrderPage.js`, `FactoryWorkshopPage.js` |
+| Session | `pages/admin/resources/FactoryManagement/factoryTestContext.js` |
+
+**Tags:** `@factory-tc` runs this file. Scenarios use `@TS01`…`@TS11` and `@TC01`…`@TC38`. `@smoke` is the golden path (navigation, location, trade/stage, raise, accept/start, stock, pack/complete, dispatch). `@negative` covers validation.
+
+**URL:** `config/urls.js` → `factoryManagement` (from `config/env.js`). Do not hardcode the host.
+
+**Background:** login → close the post-login popup → Resources → Factory Management. A later TC reuses the workshop and job stored in `factoryTestContext.js`. A TC run alone creates any missing location, trade, stage, or job.
+
+**Step cache:** `world.factoryManagementPage`, `world.manufacturingOrderPage`, `world.factoryWorkshopPage`.
+
+**Run:**
+```bash
+npm.cmd run test:admin:resources:factory
+npx.cmd cucumber-js features/admin/resources/FactoryManagement/FactoryManagement_TestCases.feature --tags "@TS01 and @TC01"
+npm.cmd run test:admin:resources:factory:tc01
+```

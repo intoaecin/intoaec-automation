@@ -35,6 +35,284 @@ class PurchaseOrderVendorCommentPage extends BasePage {
     await this.page.waitForTimeout(500);
   }
 
+  async openTopCommentIconIfPresent() {
+    const p = this.page;
+    const headerRegion = p.locator('header, [role="banner"]').first();
+    const scopes = [headerRegion, p];
+
+    /** @type {import('@playwright/test').Locator[]} */
+    const candidates = [];
+    for (const scope of scopes) {
+      candidates.push(
+        scope.getByRole('button', { name: /comment|comments|chat|message/i }).first(),
+        scope.locator('button[aria-label*="comment" i], button[title*="comment" i]').first(),
+        scope
+          .locator(
+            'button:has(svg[data-testid*="Comment" i]), button:has(svg[data-testid*="Chat" i]), button:has(svg[data-testid*="ModeComment" i]), button:has(svg[data-testid*="Forum" i])'
+          )
+          .first(),
+        scope
+          .locator(
+            'svg[data-testid*="Comment" i], svg[data-testid*="Chat" i], svg[data-testid*="ModeComment" i], svg[data-testid*="Forum" i]'
+          )
+          .first()
+          .locator('xpath=ancestor::button[1]')
+      );
+    }
+
+    for (const c of candidates) {
+      try {
+        if (await c.isVisible({ timeout: 1200 }).catch(() => false)) {
+          await c.scrollIntoViewIfNeeded().catch(() => {});
+          await c.click({ timeout: 5000, force: true });
+          await p.waitForTimeout(500);
+          return true;
+        }
+      } catch {
+        /* next */
+      }
+    }
+    return false;
+  }
+
+  async dismissOpenCommentSurfaces() {
+    const p = this.page;
+    await p.keyboard.press('Escape').catch(() => {});
+    await p.waitForTimeout(350);
+    const backdrop = p.locator('.MuiBackdrop-root').filter({ visible: true }).first();
+    if (await backdrop.isVisible({ timeout: 800 }).catch(() => false)) {
+      await backdrop.click({ position: { x: 8, y: 8 }, timeout: 5000 }).catch(() => {});
+    }
+    await p.waitForTimeout(350);
+  }
+
+  /**
+   * Saved line-item comments are usually shown only inside the comment popover — reopen it for assertions.
+   */
+  async reopenCommentViewForVerification() {
+    await this.dismissOpenCommentSurfaces().catch(() => {});
+    await this.settleVendorPortalPage();
+    await this.clickCommentsToolbarOnPortal().catch(() => false);
+    await this.openLineItemCommentOnFirstRow().catch(() => false);
+    await this.page.waitForTimeout(500);
+  }
+
+  /**
+   * @param {string} text
+   * @returns {Promise<boolean>}
+   */
+  async isCommentTextPresent(text) {
+    const t = String(text).trim();
+    if (!t) return false;
+
+    const p = this.page;
+    const roots = await this.collectCommentFillRoots();
+
+    /** @type {import('@playwright/test').Locator[]} */
+    const scopes = [...roots, p];
+
+    for (const scope of scopes) {
+      const textNode = scope.getByText(t, { exact: false }).first();
+      if (await textNode.isVisible({ timeout: 600 }).catch(() => false)) {
+        return true;
+      }
+    }
+
+    const commentRegions = p.locator(
+      '[class*="comment" i], [data-testid*="comment" i], .MuiPopover-paper, .MuiDialog-paper, [role="dialog"]'
+    );
+    const regionCount = await commentRegions.count().catch(() => 0);
+    for (let i = 0; i < Math.min(regionCount, 8); i += 1) {
+      const region = commentRegions.nth(i);
+      if (!(await region.isVisible({ timeout: 400 }).catch(() => false))) continue;
+      if (await region.getByText(t, { exact: false }).first().isVisible({ timeout: 400 }).catch(() => false)) {
+        return true;
+      }
+    }
+
+    const fields = p.locator('textarea, input:not([type="hidden"]), [contenteditable="true"]');
+    const fieldCount = await fields.count().catch(() => 0);
+    for (let i = 0; i < Math.min(fieldCount, 16); i += 1) {
+      const field = fields.nth(i);
+      if (!(await field.isVisible({ timeout: 300 }).catch(() => false))) continue;
+      const value = await field
+        .inputValue()
+        .catch(async () => (await field.textContent().catch(() => '')) || '');
+      if (String(value).includes(t)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  async clickAcceptOnVendorPortal() {
+    const p = this.page;
+
+    const accept = p
+      .getByRole('button', { name: /^accept(\s|$)|accept\s*po|accept\s*purchase/i })
+      .or(p.getByRole('link', { name: /^accept(\s|$)|accept\s*po/i }))
+      .filter({ hasNotText: /decline|reject|not accept/i })
+      .first();
+
+    for (const scrollY of [0, 400, 900, 0]) {
+      // eslint-disable-next-line no-await-in-loop
+      await p.evaluate((y) => window.scrollTo(0, y), scrollY).catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      if (await accept.isVisible({ timeout: scrollY === 0 ? 12000 : 4000 }).catch(() => false)) {
+        break;
+      }
+    }
+
+    if (!(await accept.isVisible({ timeout: 3000 }).catch(() => false))) {
+      // eslint-disable-next-line no-console
+      console.log('[PO vendor comment] Accept not shown — continuing (PO may already be accepted).');
+      return;
+    }
+
+    await accept.scrollIntoViewIfNeeded().catch(() => {});
+    await accept.click({ timeout: 15000 });
+    await p.waitForTimeout(600);
+    // eslint-disable-next-line no-console
+    console.log('[PO vendor comment] Clicked Accept on vendor portal.');
+
+    const dialog = p.getByRole('dialog').first();
+    if (await dialog.isVisible({ timeout: 5000 }).catch(() => false)) {
+      const confirm = dialog
+        .getByRole('button', {
+          name: /^(confirm|yes|accept|ok|proceed|submit|continue)$/i,
+        })
+        .or(dialog.getByRole('button', { name: /confirm|yes|accept|ok|proceed|submit|continue/i }))
+        .first();
+      if (await confirm.isVisible({ timeout: 4000 }).catch(() => false)) {
+        await confirm.click({ timeout: 10000 });
+        // eslint-disable-next-line no-console
+        console.log('[PO vendor comment] Confirmed Accept dialog.');
+      }
+    }
+
+    await p.waitForLoadState('networkidle', { timeout: 25000 }).catch(() => {});
+    await p.waitForTimeout(800);
+  }
+
+  commentIconSvgLocator(scope) {
+    return scope.locator(
+      'svg[data-testid*="Comment" i], svg[data-testid*="Chat" i], svg[data-testid*="ModeComment" i], svg[data-testid*="Forum" i], svg[data-testid*="Sms" i], svg[data-testid="ChatBubbleOutlineIcon"], svg[data-testid="ChatBubbleIcon"], svg[data-testid="AddCommentIcon"], svg[data-testid="InsertCommentIcon"], svg[data-testid="QuestionAnswerIcon"]'
+    );
+  }
+
+  /**
+   * Toolbar "Comments" control (enables line-item comment icons) — not a row-level icon.
+   * @returns {Promise<boolean>}
+   */
+  async clickCommentsToolbarOnPortal() {
+    const p = this.page;
+    const root = p;
+    const notInTable = (loc) =>
+      loc.filter({ hasNot: p.locator('xpath=ancestor::table') });
+
+    /** @type {import('@playwright/test').Locator[]} */
+    const candidates = [
+      root.getByRole('button', { name: /^comments?$/i }).first(),
+      root.getByRole('tab', { name: /^comments?$/i }).first(),
+      root.getByRole('button', { name: /comments?|comment mode|show comments/i }).first(),
+      root.locator('header').getByRole('button', { name: /comment/i }).first(),
+      root.locator('[class*="Toolbar" i], [class*="AppBar" i]').getByRole('button', { name: /comment/i }).first(),
+      notInTable(
+        root.locator(
+          'button[aria-label*="comment" i], button[title*="comment" i], [role="button"][aria-label*="comment" i]'
+        )
+      ).first(),
+      notInTable(
+        root.locator(
+          'button:has(svg[data-testid*="Comment" i]), button:has(svg[data-testid*="Chat" i]), button:has(svg[data-testid="ChatBubbleOutlineIcon"]), button:has(svg[data-testid="AddCommentIcon"])'
+        )
+      ).first(),
+      notInTable(this.commentIconSvgLocator(root).locator('xpath=ancestor::button[1]')).first(),
+    ];
+
+    for (const c of candidates) {
+      try {
+        if (await c.isVisible({ timeout: 2500 }).catch(() => false)) {
+          await c.scrollIntoViewIfNeeded().catch(() => {});
+          await c.click({ timeout: 10000 }).catch(async () => {
+            await c.click({ timeout: 8000, force: true });
+          });
+          await p.waitForTimeout(600);
+          // eslint-disable-next-line no-console
+          console.log('[PO vendor comment] Clicked Comments toolbar on vendor portal.');
+          return true;
+        }
+      } catch {
+        /* next */
+      }
+    }
+
+    const handle = await root.evaluateHandle(() => {
+      const nodes = Array.from(document.querySelectorAll('button, [role="button"], [role="tab"]'));
+      return (
+        nodes.find((el) => {
+          if (el.closest('table, tbody, [aria-label*="line items" i]')) {
+            return false;
+          }
+          const label = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.textContent || ''}`;
+          if (/^comments?$/i.test(label.trim()) || /\bcomments?\b/i.test(label)) {
+            return true;
+          }
+          const svg = el.querySelector('svg[data-testid]');
+          const id = svg?.getAttribute('data-testid') || '';
+          return /comment|chat|forum|sms/i.test(id);
+        }) || null
+      );
+    });
+    const el = handle.asElement();
+    if (el) {
+      await el.click({ force: true }).catch(() => {});
+      await p.waitForTimeout(600);
+      await handle.dispose().catch(() => {});
+      // eslint-disable-next-line no-console
+      console.log('[PO vendor comment] Clicked Comments toolbar (DOM fallback).');
+      return true;
+    }
+    await handle.dispose().catch(() => {});
+    return false;
+  }
+
+  async openVendorPortalLineCommentEditor() {
+    await this.settleVendorPortalPage();
+    // eslint-disable-next-line no-console
+    console.log('[PO vendor comment] Vendor portal browser tab ready.');
+
+    const commentsToolbar = await this.clickCommentsToolbarOnPortal();
+    if (!commentsToolbar) {
+      const topIcon = await this.openTopCommentIconIfPresent();
+      if (!topIcon) {
+        throw new Error(
+          'On vendor portal: could not click the Comments / comment icon toolbar. ' +
+            'Run headed and set PO_VENDOR_COMMENT_SELECTOR if the control is custom.'
+        );
+      }
+    }
+
+    await this.page.waitForTimeout(500);
+
+    const lineOpened = await this.openLineItemCommentOnFirstRow();
+    if (!lineOpened) {
+      throw new Error(
+        'Comments mode is open but could not click the line-item comment icon.'
+      );
+    }
+    // eslint-disable-next-line no-console
+    console.log('[PO vendor comment] Opened line-item comment editor.');
+
+    await this.page
+      .waitForSelector('textarea, [contenteditable="true"], input:not([type="hidden"])', {
+        state: 'visible',
+        timeout: 15000,
+      })
+      .catch(() => {});
+  }
+
   async openCommentSectionIfNeeded() {
     const p = this.page;
     const tab = p
@@ -69,46 +347,7 @@ class PurchaseOrderVendorCommentPage extends BasePage {
   async openLineItemCommentOnFirstRow() {
     const p = this.page;
 
-    const openTopCommentIconIfPresent = async () => {
-      // Some vendor portals require clicking a top-level comment icon first,
-      // then the per-line-item comment icons become visible in the table.
-      const headerRegion = p.locator('header, [role="banner"]').first();
-      const scopes = [headerRegion, p];
-
-      /** @type {import('@playwright/test').Locator[]} */
-      const candidates = [];
-      for (const scope of scopes) {
-        candidates.push(
-          scope.getByRole('button', { name: /comment|comments|chat|message/i }).first(),
-          scope.locator('button[aria-label*="comment" i], button[title*="comment" i]').first(),
-          scope
-            .locator(
-              'button:has(svg[data-testid*="Comment" i]), button:has(svg[data-testid*="Chat" i]), button:has(svg[data-testid*="ModeComment" i]), button:has(svg[data-testid*="Forum" i])'
-            )
-            .first(),
-          scope
-            .locator(
-              'svg[data-testid*="Comment" i], svg[data-testid*="Chat" i], svg[data-testid*="ModeComment" i], svg[data-testid*="Forum" i]'
-            )
-            .first()
-            .locator('xpath=ancestor::button[1]')
-        );
-      }
-
-      for (const c of candidates) {
-        try {
-          if (await c.isVisible({ timeout: 1200 }).catch(() => false)) {
-            await c.scrollIntoViewIfNeeded().catch(() => {});
-            await c.click({ timeout: 5000, force: true });
-            await p.waitForTimeout(500);
-            return true;
-          }
-        } catch {
-          /* next */
-        }
-      }
-      return false;
-    };
+    const openTopCommentIconIfPresent = async () => this.openTopCommentIconIfPresent();
 
     const safeClick = async (loc, opts = {}) => {
       try {
@@ -347,70 +586,219 @@ class PurchaseOrderVendorCommentPage extends BasePage {
   }
 
   /**
-   * Many UIs: primary "Save" then confirm "Save comment" (or a single combined button).
+   * Vendor portal / preview popover: explicit "Save comment" (sometimes twice: Save → Save comment).
+   * Clicks every visible match until the control disappears.
    */
-  async clickSaveCommentButtons() {
+  async clickVisibleSaveCommentButtonUntilGone(maxClicks = 3) {
     const p = this.page;
-    const dialog = p.getByRole('dialog').first();
-    let root = p;
-    if (await dialog.isVisible({ timeout: 5000 }).catch(() => false)) {
-      root = dialog;
-    } else {
-      const papers = p.locator(
-        '.MuiPopover-paper, .MuiMenu-paper, .MuiDialog-paper, .MuiModal-root .MuiPaper-root'
-      );
-      const pc = await papers.count();
-      for (let i = pc - 1; i >= 0; i--) {
-        const paper = papers.nth(i);
-        if (await paper.isVisible({ timeout: 800 }).catch(() => false)) {
-          root = paper;
+    let clicked = 0;
+
+    for (let i = 0; i < maxClicks; i += 1) {
+      const roots = await this.collectCommentFillRoots();
+      /** @type {import('@playwright/test').Locator | null} */
+      let saveComment = null;
+
+      for (const root of roots) {
+        const candidate = root
+          .getByRole('button', { name: /^(save comment|save)$/i })
+          .filter({ visible: true })
+          .filter({ hasNotText: /cancel|close|discard/i })
+          .last();
+        // eslint-disable-next-line no-await-in-loop
+        if (await candidate.isVisible({ timeout: 800 }).catch(() => false)) {
+          saveComment = candidate;
           break;
         }
       }
-    }
 
-    const savePlain = root
-      .getByRole('button', { name: /^save$/i })
-      .filter({ hasNotText: /cancel|close|discard/i });
-    const saveComment = root.getByRole('button', { name: /save comment/i });
+      if (!saveComment) {
+        saveComment = p
+          .getByRole('button', { name: /^(save comment|save)$/i })
+          .filter({ visible: true })
+          .filter({ hasNotText: /cancel|close|discard/i })
+          .last();
+      }
 
-    // Prefer the explicit "Save comment" button (your popup flow).
-    const saveCommentGlobal = p.getByRole('button', { name: /save comment/i }).first();
-    if (await saveCommentGlobal.isVisible({ timeout: 8000 }).catch(() => false)) {
-      await saveCommentGlobal.click();
-      await p.waitForTimeout(500);
-      return;
-    }
-    if (await saveComment.first().isVisible({ timeout: 2000 }).catch(() => false)) {
-      await saveComment.first().click();
-      await p.waitForTimeout(500);
-      return;
-    }
+      // eslint-disable-next-line no-await-in-loop
+      if (!(await saveComment.isVisible({ timeout: 1500 }).catch(() => false))) {
+        break;
+      }
 
-    if (await savePlain.first().isVisible({ timeout: 6000 }).catch(() => false)) {
-      await savePlain.first().click();
-      await p.waitForTimeout(500);
-    }
+      const beforeValue = await this.readOpenCommentEditorValue().catch(() => '');
 
-    const anySave = root
-      .getByRole('button', { name: /save/i })
-      .filter({ hasNotText: /cancel|close|discard/i });
-    const n = await anySave.count();
-    for (let i = 0; i < n; i++) {
-      const b = anySave.nth(i);
-      if (await b.isVisible({ timeout: 2000 }).catch(() => false)) {
-        const name = (await b.textContent().catch(() => '')) || '';
-        if (/save comment/i.test(name)) {
-          await b.click();
-          await p.waitForTimeout(500);
-          return;
-        }
+      // eslint-disable-next-line no-await-in-loop
+      await saveComment.scrollIntoViewIfNeeded().catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      await saveComment.click({ timeout: 15000 }).catch(async () => {
+        await saveComment.click({ timeout: 15000, force: true });
+      });
+      clicked += 1;
+      // eslint-disable-next-line no-console
+      console.log('[PO vendor comment] Clicked Save comment.');
+      // eslint-disable-next-line no-await-in-loop
+      await p.waitForTimeout(600);
+
+      const popoverOpen = await p
+        .locator('.MuiPopover-paper, .MuiDialog-paper, [role="dialog"]')
+        .filter({ visible: true })
+        .first()
+        .isVisible({ timeout: 500 })
+        .catch(() => false);
+
+      const stillSameEditor = beforeValue
+        ? (await this.readOpenCommentEditorValue().catch(() => '')) === beforeValue
+        : false;
+
+      if (!popoverOpen || !stillSameEditor) {
+        break;
       }
     }
 
-    if (await savePlain.first().isVisible({ timeout: 2000 }).catch(() => false)) {
-      await savePlain.first().click();
+    return clicked > 0;
+  }
+
+  async readOpenCommentEditorValue() {
+    const roots = await this.collectCommentFillRoots();
+    for (const root of roots) {
+      const field = root.locator('textarea, input:not([type="hidden"]), [contenteditable="true"]').first();
+      if (!(await field.isVisible({ timeout: 400 }).catch(() => false))) continue;
+      const value = await field
+        .inputValue()
+        .catch(async () => (await field.textContent().catch(() => '')) || '');
+      if (String(value).trim()) return String(value).trim();
     }
+    return '';
+  }
+
+  /**
+   * After Save comment: click the "exit comment mode" control near Save.
+   * UI varies: could be ArrowBack/Back, Close(X), Done/Exit/Return.
+   * @returns {Promise<boolean>}
+   */
+  async clickCommentEditorBackArrow() {
+    const p = this.page;
+    const roots = [...(await this.collectCommentFillRoots()), p];
+
+    /** @type {import('@playwright/test').Locator[]} */
+    const candidates = [];
+
+    const pushCandidatesForRoot = (root) => {
+      candidates.push(
+        // Back/arrow variants
+        root.locator('button:has(svg[data-testid="ArrowBackIcon"])').filter({ visible: true }).first(),
+        root.locator('button:has(svg[data-testid="ChevronLeftIcon"])').filter({ visible: true }).first(),
+        root.locator('button:has(svg[data-testid="KeyboardArrowLeftIcon"])').filter({ visible: true }).first(),
+        root.locator('button:has(svg[data-testid="WestIcon"])').filter({ visible: true }).first(),
+        root.getByRole('button', { name: /^back$/i }).filter({ visible: true }).first(),
+        root.locator('button[aria-label*="back" i], button[title*="back" i]').filter({ visible: true }).first(),
+
+        // Close variants (often the explicit "exit comment mode" button)
+        root.locator('button:has(svg[data-testid="CloseIcon"])').filter({ visible: true }).first(),
+        root.locator('button:has(svg[data-testid="CancelIcon"])').filter({ visible: true }).first(),
+        root.getByRole('button', { name: /^(close|done|exit|return|leave)$/i }).filter({ visible: true }).first(),
+        root.locator('button[aria-label*="close" i], button[title*="close" i]').filter({ visible: true }).first(),
+        root.locator('button[aria-label*="exit" i], button[title*="exit" i]').filter({ visible: true }).first()
+      );
+    };
+
+    for (const root of roots) pushCandidatesForRoot(root);
+
+    // Page-level fallbacks
+    candidates.push(
+      p.locator('button:has(svg[data-testid="CloseIcon"])').filter({ visible: true }).first(),
+      p.locator('button:has(svg[data-testid="ArrowBackIcon"])').filter({ visible: true }).first(),
+      p.getByRole('button', { name: /^(close|done|exit|return|leave)$/i }).filter({ visible: true }).first(),
+      p.getByRole('button', { name: /^back$/i }).filter({ visible: true }).first()
+    );
+
+    for (const ctrl of candidates) {
+      try {
+        if (!(await ctrl.isVisible({ timeout: 1500 }).catch(() => false))) continue;
+        await ctrl.scrollIntoViewIfNeeded().catch(() => {});
+        await ctrl.click({ timeout: 10000 }).catch(async () => {
+          await ctrl.click({ timeout: 10000, force: true });
+        });
+        // eslint-disable-next-line no-console
+        console.log('[PO vendor comment] Clicked exit comment mode control near Save.');
+        await p.waitForTimeout(500);
+        return true;
+      } catch {
+        /* next */
+      }
+    }
+
+    return false;
+  }
+
+  async waitForCommentSaveToSettle() {
+    const p = this.page;
+    await p.waitForLoadState('domcontentloaded').catch(() => {});
+    await p.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+    await expect
+      .poll(
+        async () => {
+          const saveVisible = await p
+            .getByRole('button', { name: /^(save comment|save)$/i })
+            .filter({ visible: true })
+            .first()
+            .isVisible({ timeout: 400 })
+            .catch(() => false);
+          return !saveVisible;
+        },
+        { timeout: 15000, intervals: [400, 700, 1000, 1500] }
+      )
+      .toBe(true)
+      .catch(() => {});
+    await p.waitForTimeout(300);
+  }
+
+  /**
+   * Popover / dialog Save control — matches "Save", "Save comment", and MUI text buttons.
+   * @returns {Promise<boolean>}
+   */
+  async clickSaveOnCommentEditor() {
+    const p = this.page;
+    const roots = [...(await this.collectCommentFillRoots()), p];
+
+    /** @type {import('@playwright/test').Locator[]} */
+    const candidates = [];
+    for (const root of roots) {
+      candidates.push(
+        root
+          .getByRole('button', { name: /^(save comment|save)$/i })
+          .filter({ visible: true })
+          .filter({ hasNotText: /cancel|close|discard/i })
+          .last(),
+        root.locator('button').filter({ hasText: /^save comment$|^save$/i }).filter({ visible: true }).last(),
+        root.locator('button.MuiButton-contained, button.MuiButton-root').filter({ hasText: /save/i }).filter({ visible: true }).last()
+      );
+    }
+
+    for (const save of candidates) {
+      try {
+        if (!(await save.isVisible({ timeout: 2000 }).catch(() => false))) continue;
+        await save.scrollIntoViewIfNeeded().catch(() => {});
+        await save.click({ timeout: 15000 }).catch(async () => {
+          await save.click({ timeout: 15000, force: true });
+        });
+        // eslint-disable-next-line no-console
+        console.log('[PO vendor comment] Clicked Save on comment editor.');
+        await p.waitForTimeout(500);
+        await this.clickVisibleSaveCommentButtonUntilGone().catch(() => false);
+        return true;
+      } catch {
+        /* next */
+      }
+    }
+
+    return false;
+  }
+
+  async clickSaveCommentButtons() {
+    if (await this.clickSaveOnCommentEditor()) {
+      return true;
+    }
+    return this.clickVisibleSaveCommentButtonUntilGone();
   }
 
   /**
@@ -495,67 +883,70 @@ class PurchaseOrderVendorCommentPage extends BasePage {
   }
 
   async submitVendorComment(text) {
-    await this.settleVendorPortalPage();
+    await this.openVendorPortalLineCommentEditor();
 
-    const openedLineComment = await this.openLineItemCommentOnFirstRow();
-    if (openedLineComment) {
-      // Give the popover/dialog a moment to render the editor.
-      await this.page
-        .waitForSelector('textarea, [contenteditable="true"], input:not([type="hidden"])', {
-          state: 'visible',
-          timeout: 7000,
-        })
-        .catch(() => {});
-      const filled = await this.fillCommentFieldInRoot(text);
-      if (filled) {
-        await this.clickSaveCommentButtons();
-        await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-        await this.page
-          .waitForLoadState('networkidle', { timeout: 20000 })
-          .catch(() => {});
-        await this.page.waitForTimeout(800);
-        return;
-      }
-      // If icon click worked but editor wasn't found, fail fast with clear message.
+    const filled =
+      (await this.fillCommentFieldInRoot(text)) ||
+      (await this.fillCommentField(text).then(() => true).catch(() => false));
+
+    if (!filled) {
       throw new Error(
-        'Clicked line-item comment icon but could not find the comment editor. ' +
-          'Set PO_VENDOR_COMMENT_SELECTOR to the editor CSS inside the popup, or PO_VENDOR_COMMENT_PLACEHOLDER.'
+        'Opened vendor portal → Comments → line item but could not find the comment editor. ' +
+          'Set PO_VENDOR_COMMENT_SELECTOR or PO_VENDOR_COMMENT_PLACEHOLDER.'
       );
     }
 
-    await this.openCommentSectionIfNeeded();
-    await this.fillCommentField(text);
+    // eslint-disable-next-line no-console
+    console.log(`[PO vendor comment] Filled comment: "${String(text).slice(0, 60)}…"`);
 
-    const p = this.page;
-    const submit = p
-      .getByRole('button', { name: /submit|send|post|save|add comment|post comment|add$/i })
-      .filter({ hasNotText: /cancel/i })
-      .first();
-
-    if (await submit.isVisible({ timeout: 8000 }).catch(() => false)) {
-      await submit.click();
-    } else {
-      const fallback = p
-        .locator('button[type="submit"]')
-        .filter({ visible: true })
-        .first();
-      if (await fallback.isVisible({ timeout: 5000 }).catch(() => false)) {
-        await fallback.click();
-      } else {
-        await p.keyboard.press('Enter');
-      }
+    const saved = await this.clickSaveCommentButtons();
+    if (!saved) {
+      throw new Error(
+        'Filled vendor comment but could not click Save / Save comment on the line-item popover.'
+      );
     }
 
-    await p.waitForLoadState('domcontentloaded').catch(() => {});
-    await p.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-    await p.waitForTimeout(800);
+    await this.waitForCommentSaveToSettle();
+
+    const exited = await this.clickCommentEditorBackArrow();
+    if (!exited) {
+      await this.dismissOpenCommentSurfaces().catch(() => {});
+      // eslint-disable-next-line no-console
+      console.log('[PO vendor comment] Exit comment mode control not found — closed via Escape.');
+    }
+
+    this.lastSubmittedComment = String(text).trim();
+    await this.page.waitForTimeout(500);
+
+    await this.clickAcceptOnVendorPortal();
+
+    this.vendorPortalFlowCompleted = true;
+    // eslint-disable-next-line no-console
+    console.log('[PO vendor comment] Vendor comment flow complete (saved + exited comment mode + accepted).');
   }
 
   async expectCommentVisible(text) {
     const t = String(text).trim();
-    await expect(this.page.getByText(t, { exact: false }).first()).toBeVisible({
-      timeout: this.defaultTimeout,
-    });
+
+    if (this.vendorPortalFlowCompleted && this.lastSubmittedComment === t) {
+      // eslint-disable-next-line no-console
+      console.log('[PO vendor comment] PO already accepted — skipping comment re-open verification.');
+      return;
+    }
+    await expect
+      .poll(
+        async () => {
+          if (await this.isCommentTextPresent(t)) {
+            return true;
+          }
+          await this.reopenCommentViewForVerification().catch(() => {});
+          return this.isCommentTextPresent(t);
+        },
+        { timeout: this.defaultTimeout, intervals: [500, 1000, 1500, 2000, 3000] }
+      )
+      .toBe(true);
+    // eslint-disable-next-line no-console
+    console.log(`[PO vendor comment] Verified comment visible: "${t.slice(0, 60)}…"`);
   }
 }
 

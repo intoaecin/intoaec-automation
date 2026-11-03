@@ -1,9 +1,2 @@
-const BasePage = require('../../../../BasePage');
-
-class BudgetingPage extends BasePage {
-    constructor(page) {
-        super(page);
-    }
-}
-
-module.exports = BudgetingPage;
+/** @deprecated Use pages/admin/projects/management/Budgeting/BudgetingPage.js */
+module.exports = require('./Budgeting/BudgetingPage');

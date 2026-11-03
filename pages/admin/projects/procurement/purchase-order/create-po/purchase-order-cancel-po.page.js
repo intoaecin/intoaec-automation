@@ -1,92 +1,130 @@
 const PurchaseOrderCreatePoPage = require('./purchase-order-create-po.page');
 const { expect } = require('@playwright/test');
 
-/** PO list → kebab → Cancel (after compose flows have closed). */
+/** PO list → ⋮ menu → Cancel / Reject. */
 class PurchaseOrderCancelPoPage extends PurchaseOrderCreatePoPage {
-  openKebabMenuPaper() {
+  cancelMenuItemLocator() {
     return this.page
-      .locator('.MuiPopover-root .MuiPaper-root')
+      .getByRole('menuitem')
+      .filter({ hasText: /\b(cancel|reject|decline)\b/i })
       .filter({ visible: true })
-      .last();
-  }
-
-  cancelMenuItem() {
-    return this.openKebabMenuPaper()
-      .getByRole('menuitem', { name: /^cancel$/i })
-      .or(this.page.getByRole('menuitem', { name: /^cancel$/i }))
       .first();
   }
 
+  openKebabMenuPaper() {
+    return this.page
+      .locator('.MuiPopover-root, .MuiMenu-root')
+      .filter({ visible: true })
+      .locator('.MuiPaper-root')
+      .last();
+  }
+
+  locatorCancelSuccessToast() {
+    return this.page
+      .locator('.Toastify__toast, .Toastify__toast-body, [role="alert"]')
+      .filter({
+        hasText:
+          /rejected successfully|cancelled successfully|canceled successfully|purchase order rejected|po rejected|declined successfully/i,
+      })
+      .first();
+  }
+
+  async preparePurchaseOrderListForCardMenu() {
+    await this.dismissVisibleToastNotifications();
+    await this.dismissOpenMenusAndPopovers();
+    await expect(this.page.getByText(/po no/i).first()).toBeVisible({
+      timeout: this.defaultTimeout,
+    });
+    await this.dismissListSkeletons();
+  }
+
   async openThreeDotMenuOnFirstPurchaseOrderCardForCancel() {
-    await this.dismissVisibleToastNotifications();
-    await this.waitForPurchaseOrderListReadyAfterComposeEmailSent();
-    await this.dismissVisibleToastNotifications();
+    await this.preparePurchaseOrderListForCardMenu();
 
-    await expect(
-      this.page.locator('.MuiModal-root').filter({ visible: true })
-    )
-      .toHaveCount(0, { timeout: 20000 })
-      .catch(() => {});
+    const card = this.firstPoCard();
+    await card.scrollIntoViewIfNeeded();
+    await this.ensurePoCardRowExpanded(card);
 
-    for (let attempt = 0; attempt < 6; attempt++) {
-      await this.dismissOpenMenusAndPopovers();
-      await this.dismissVisibleToastNotifications();
+    const kebab = this.kebabButtonOnPoCard(card);
+    await expect(kebab).toBeVisible({ timeout: 30000 });
+    await kebab.scrollIntoViewIfNeeded();
 
-      const card = this.firstPoCard();
-      await card.scrollIntoViewIfNeeded();
-      await this.page.waitForTimeout(attempt === 0 ? 500 : 700);
-
-      const kebab = this.kebabButtonOnPoCard(card);
-      await expect(kebab).toBeVisible({ timeout: 20000 });
-      await kebab.scrollIntoViewIfNeeded();
-
-      const force = attempt >= 1;
-      try {
-        await kebab.click({ timeout: 12000, force });
-      } catch {
-        await kebab.click({ timeout: 8000, force: true });
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (attempt > 0) {
+        await this.dismissOpenMenusAndPopovers();
       }
 
-      if (
-        await this.cancelMenuItem()
-          .isVisible({ timeout: 7000 })
-          .catch(() => false)
-      ) {
-        await expect(this.cancelMenuItem()).toBeVisible({ timeout: 5000 });
+      await kebab.click({ timeout: 15000, force: attempt >= 1 }).catch(async () => {
+        await kebab.click({ timeout: 15000, force: true });
+      });
+      await this.page.waitForTimeout(300);
+
+      if (await this.cancelMenuItemLocator().isVisible({ timeout: 3000 }).catch(() => false)) {
+        await expect(this.cancelMenuItemLocator()).toBeVisible({ timeout: 10000 });
         return;
-      }
-
-      const box = await kebab.boundingBox();
-      if (box) {
-        await this.page.mouse.click(
-          Math.round(box.x + box.width / 2),
-          Math.round(box.y + box.height / 2)
-        );
-        if (
-          await this.cancelMenuItem()
-            .isVisible({ timeout: 5000 })
-            .catch(() => false)
-        ) {
-          await expect(this.cancelMenuItem()).toBeVisible({ timeout: 5000 });
-          return;
-        }
       }
     }
 
-    await expect(this.cancelMenuItem()).toBeVisible({ timeout: 15000 });
+    await expect(this.cancelMenuItemLocator()).toBeVisible({
+      timeout: 30000,
+      message:
+        'Cancel/Reject was not visible after opening the three-dot menu on the first PO card.',
+    });
+  }
+
+  async confirmCancelIfDialogAppears() {
+    const dialog = this.page.getByRole('dialog').filter({ visible: true }).last();
+    if (!(await dialog.isVisible({ timeout: 2500 }).catch(() => false))) {
+      return;
+    }
+
+    const confirmButtons = [
+      dialog
+        .getByRole('button', {
+          name: /^(yes|ok|confirm|reject|decline|proceed|continue|submit)$/i,
+        })
+        .first(),
+      dialog
+        .getByRole('button')
+        .filter({ hasText: /confirm|yes|ok|reject|decline|submit|continue/i })
+        .first(),
+    ];
+
+    for (const button of confirmButtons) {
+      if (await button.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await button.click({ timeout: 10000, force: true });
+        await dialog.waitFor({ state: 'hidden', timeout: 45000 }).catch(() => {});
+        return;
+      }
+    }
   }
 
   async clickCancelInPurchaseOrderCardMenu() {
-    await this.cancelMenuItem().click();
+    let cancelItem = this.cancelMenuItemLocator();
+    if (!(await cancelItem.isVisible({ timeout: 3000 }).catch(() => false))) {
+      await this.openThreeDotMenuOnFirstPurchaseOrderCardForCancel();
+      cancelItem = this.cancelMenuItemLocator();
+    }
+
+    await expect(cancelItem).toBeVisible({ timeout: 15000 });
+    await cancelItem.click({ timeout: 15000, force: true });
+
+    await this.confirmCancelIfDialogAppears();
     await this.waitForNetworkSettled();
   }
 
   async expectPurchaseOrderCancelSuccessToast() {
-    const toastBody = this.page
-      .locator('.Toastify__toast-body[role="alert"]')
-      .filter({ hasText: /rejected successfully/i })
-      .first();
-    await expect(toastBody).toBeVisible({ timeout: this.defaultTimeout });
+    const toast = this.locatorCancelSuccessToast();
+    await expect
+      .poll(
+        async () => toast.isVisible({ timeout: 600 }).catch(() => false),
+        {
+          timeout: this.defaultTimeout,
+          intervals: [300, 600, 1000, 1500],
+          message: 'Expected PO cancel/reject success toast',
+        }
+      )
+      .toBe(true);
   }
 }
 

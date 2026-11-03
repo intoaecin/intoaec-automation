@@ -41,7 +41,25 @@ class ProposalPage extends BasePage {
 
   async waitForStableUi() {
     await this.page.waitForLoadState('domcontentloaded');
-    await this.page.waitForTimeout(400);
+    await this.page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+  }
+
+  /** Any control that proves the client/project profile has rendered its proposal entry points. */
+  async waitForProposalEntryPoint() {
+    const entryPoints = [
+      this.chooseProposalButton,
+      this.sentProposalSection,
+      this.proposalTab,
+      this.proposalTabButton,
+      this.proposalNavLink,
+      this.proposalModuleGridItem,
+      this.proposalModuleCard,
+      this.designEstimatesHeading,
+    ];
+    await expect(async () => {
+      const visible = await Promise.all(entryPoints.map((locator) => locator.isVisible().catch(() => false)));
+      expect(visible.some(Boolean), 'No Proposal entry point is visible on the profile').toBeTruthy();
+    }).toPass({ timeout: this.defaultTimeout, intervals: [500, 1000, 2000] });
   }
 
   async clickWhenVisible(primary, fallback) {
@@ -63,7 +81,7 @@ class ProposalPage extends BasePage {
   async openProposalTab() {
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
     await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-    await this.waitForStableUi();
+    await this.waitForProposalEntryPoint();
 
     const alreadyOnProposal =
       (await this.chooseProposalButton.isVisible().catch(() => false)) ||
@@ -133,7 +151,57 @@ class ProposalPage extends BasePage {
   }
 
   getChooseProposalDialog() {
-    return this.page.locator('[role="dialog"], .modal.show, .offcanvas.show').filter({ hasText: /choose proposal/i }).first();
+    return this.page
+      .locator('[role="dialog"], .modal.show, .offcanvas.show')
+      .filter({ hasText: /choose proposal|select proposal template/i })
+      .first();
+  }
+
+  /** "Select Proposal Template" dialog: Default/Custom tabs + Template autocomplete backed by FETCH_PROPOSAL_TEMPLATES. */
+  async selectFirstTemplateFromTemplateDialog(dialog) {
+    for (const templateType of ['Default', 'Custom']) {
+      const tab = dialog.locator(`#proposal-${templateType.toLowerCase()}-tab`);
+      if ((await tab.getAttribute('aria-selected')) !== 'true') {
+        await tab.click();
+        await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: this.defaultTimeout });
+      }
+
+      const typePattern = new RegExp(`"proposalTemplateType"\\s*:\\s*"${templateType}"`, 'i');
+      const templatesResponse = this.page
+        .waitForResponse(
+          (response) => {
+            const postData = response.request().postData() || '';
+            return (
+              response.request().method() === 'POST' &&
+              /"eventType"\s*:\s*"FETCH_PROPOSAL_TEMPLATES"/.test(postData) &&
+              typePattern.test(postData)
+            );
+          },
+          { timeout: this.defaultTimeout }
+        )
+        .then((response) => response.json())
+        .catch(() => null);
+      await dialog.getByRole('button', { name: 'Reload options' }).click();
+      const payload = await templatesResponse;
+      if (payload?.body?.totalCount === 0) {
+        console.log(`[Proposal] No ${templateType} proposal templates for this account`);
+        continue;
+      }
+
+      await dialog.getByRole('button', { name: 'Open' }).click();
+      const templateOption = this.page.getByRole('option').filter({ hasNotText: /add new proposal/i }).first();
+      await expect(templateOption).toBeVisible({ timeout: this.defaultTimeout });
+      const templateName = ((await templateOption.innerText()) || '').trim();
+      await templateOption.click();
+      await expect(dialog.getByRole('combobox')).toHaveValue(templateName, { timeout: this.defaultTimeout });
+      console.log(`[Proposal] Chose ${templateType} proposal template: ${templateName}`);
+      return;
+    }
+
+    throw new Error(
+      '[Proposal] No Default or Custom proposal templates exist for this account (FETCH_PROPOSAL_TEMPLATES returned 0). ' +
+        'Add one under Templates → Proposal.'
+    );
   }
 
   async selectDialogOptionByName(selectLocator, optionNamePattern) {
@@ -157,9 +225,39 @@ class ProposalPage extends BasePage {
     await this.waitForStableUi();
   }
 
+  async selectProposalCategory(categoryName) {
+    const dialog = this.getChooseProposalDialog();
+    await expect(dialog).toBeVisible({ timeout: this.defaultTimeout });
+
+    const categorySelect = dialog.locator('.MuiSelect-select, [role="combobox"]').first();
+    await expect(categorySelect).toBeVisible({ timeout: this.defaultTimeout });
+    const selected = ((await categorySelect.innerText().catch(() => '')) || '').trim();
+    if (new RegExp(`^${String(categoryName || '').trim()}$`, 'i').test(selected)) {
+      return;
+    }
+
+    await categorySelect.click();
+
+    const escaped = String(categoryName || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const dataValue = String(categoryName || '').trim().toUpperCase();
+    const option = this.page
+      .locator(`[role="option"][data-value="${dataValue}"]`)
+      .or(dataValue === 'ALL' ? this.page.locator('[role="option"][data-value="ALL"]') : this.page.locator('[role="option"]').filter({ hasText: new RegExp(`^\\s*${escaped}\\s*$`, 'i') }))
+      .or(this.page.getByRole('option', { name: new RegExp(escaped, 'i') }))
+      .first();
+    await expect(option).toBeVisible({ timeout: 30000 });
+    await option.click();
+    await expect(option).toBeHidden({ timeout: 30000 });
+  }
+
   async selectDefaultProposalOption() {
     const dialog = this.getChooseProposalDialog();
     await expect(dialog).toBeVisible({ timeout: this.defaultTimeout });
+
+    if (await dialog.locator('#proposal-default-tab').isVisible().catch(() => false)) {
+      await this.selectFirstTemplateFromTemplateDialog(dialog);
+      return;
+    }
 
     await this.chooseDefaultProposalCategory(dialog);
 
@@ -182,7 +280,7 @@ class ProposalPage extends BasePage {
       await this.openChooseProposalModal();
     }
     await this.selectDefaultProposalOption();
-    const proceed = this.page.getByRole('button', { name: /proceed|send|confirm|add/i }).first();
+    const proceed = this.getChooseProposalDialog().getByRole('button', { name: /proceed|send|confirm|add/i }).first();
     await expect(proceed).toBeVisible({ timeout: this.defaultTimeout });
     await expect(proceed).toBeEnabled({ timeout: this.defaultTimeout });
     await proceed.click();

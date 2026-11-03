@@ -31,8 +31,23 @@ When(
   'I send email from RFQ compose dialog',
   { timeout: 360000 },
   async function () {
+    const testData = require('../../../../../../utils/testData');
     const rfq = getRfqComposePage(this);
-    await rfq.sendEmailFromRfqComposeModal();
+    const preferEmail = String(
+      this.vendorRfqLoginEmail || rfq.lastAddedVendorEmail || testData.vendor?.rfqUser?.email || ''
+    ).trim();
+    await rfq.sendEmailFromRfqComposeModal({ preferEmail });
+    // Never replace the Add-Vendor email with Admin (aadhi) from compose CC.
+    const adminEmail = String(testData.admin?.validUser?.email || '').trim().toLowerCase();
+    const locked = String(this.vendorRfqLoginEmail || preferEmail || '').trim().toLowerCase();
+    const fromCompose = String(rfq.lastAddedVendorEmail || '').trim().toLowerCase();
+    if (locked && locked !== adminEmail) {
+      this.vendorRfqLoginEmail = locked;
+      rfq.lastAddedVendorEmail = locked;
+    } else if (fromCompose && fromCompose !== adminEmail) {
+      this.vendorRfqLoginEmail = fromCompose;
+    }
+    console.log(`[RFQ] Stored vendor portal login email: ${this.vendorRfqLoginEmail}`);
   }
 );
 

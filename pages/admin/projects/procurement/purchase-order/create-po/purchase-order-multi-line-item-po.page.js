@@ -137,32 +137,7 @@ class PurchaseOrderMultiLineItemPoPage extends PurchaseOrderCreatePoPage {
     await qtyInput.blur();
     await this.waitForNetworkSettled();
 
-    await dataRow.scrollIntoViewIfNeeded();
-    const unitCtl = await this.getPoLineRowUnitSelectLocator(dataRow);
-    if (!unitCtl) {
-      throw new Error(
-        'PO multi-line: unit control not found on last row (expected MUI select or combobox).'
-      );
-    }
-    await unitCtl.click({ timeout: 20000 });
-
-    const escaped = String(unitLabel).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const option = this.page
-      .getByRole('option', { name: new RegExp(escaped, 'i') })
-      .first();
-    await expect(option).toBeVisible({ timeout: 25000 });
-    await option.click();
-
-    await this.page
-      .locator('[role="listbox"]')
-      .waitFor({ state: 'hidden', timeout: 20000 })
-      .catch(() => {});
-
-    await expect(unitCtl).toHaveAttribute('aria-expanded', 'false', {
-      timeout: 15000,
-    }).catch(() => {});
-
-    await this.dismissOpenMenusAndPopovers();
+    await this.selectPoLineRowUnit(dataRow, unitLabel);
 
     const rateInput = dataRow.locator('td').nth(3).locator('input').first();
     await expect(rateInput).toBeVisible({ timeout: 20000 });

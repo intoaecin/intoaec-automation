@@ -1,34 +1,11 @@
 // pages/BasePage.js
+const path = require('path');
+const readline = require('readline');
+const { captureScreenshot, getScreenshotDir } = require('../support/screenshots');
+
 class BasePage {
   constructor(page) {
     this.page = page;
-  }
-
-  getLatestOpenPageFromContext() {
-    try {
-      const context = this.page?.context?.();
-      if (!context) {
-        return null;
-      }
-      const pages = context.pages().filter((p) => !p.isClosed());
-      return pages.length ? pages[pages.length - 1] : null;
-    } catch {
-      return null;
-    }
-  }
-
-  async ensureActivePage() {
-    if (this.page && !this.page.isClosed()) {
-      return this.page;
-    }
-
-    const recovered = this.getLatestOpenPageFromContext();
-    if (recovered) {
-      this.page = recovered;
-      return this.page;
-    }
-
-    throw new Error('No active browser page is available for this step.');
   }
 
   async goto(url) {
@@ -40,7 +17,7 @@ class BasePage {
   }
 
   async takeScreenshot(name) {
-    await this.page.screenshot({ path: `screenshots/${name}.png` });
+    await captureScreenshot(this.page, path.join(getScreenshotDir(), `${name}.png`));
   }
 
   async getCurrentURL() {
@@ -51,22 +28,57 @@ class BasePage {
     return await this.page.locator(selector).isVisible();
   }
 
-  /**
-   * Block until the user presses Enter in the terminal (same pattern as PO flows).
-   * Use when a headed run needs a manual gate after Explorer upload, etc.
-   */
-  async waitForEnterInTerminal(promptText) {
-    const readline = require('readline');
+  async waitForEnterInTerminal(message = 'Press ENTER in the terminal to continue.') {
+    console.log('');
+    console.log(`[Manual Step] ${message}`);
+    console.log('[Manual Step] Waiting for ENTER...');
+
+    if (!process.stdin.isTTY) {
+      throw new Error(
+        `[Manual Step] No interactive terminal — cannot wait for ENTER.\n` +
+          `Run this test in a normal terminal (PowerShell/CMD), complete the manual action, then press ENTER.\n` +
+          `Or set NOTE_ATTACHMENT_AUTO=1 for automatic attachment upload.`
+      );
+    }
+
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
     });
+
     await new Promise((resolve) => {
-      rl.question(`${promptText}\n`, () => {
+      rl.question('Press ENTER when ready > ', () => {
         rl.close();
-        resolve(undefined);
+        resolve();
       });
     });
+
+    console.log('[Manual Step] Continuing...');
+  }
+
+  async promptForTextInTerminal(message, defaultValue = '') {
+    console.log(`[Manual Step] ${message}`);
+
+    if (!process.stdin.isTTY) {
+      const value = String(defaultValue || '').trim();
+      console.log(`[Manual Step] No interactive terminal — using "${value || '(empty)'}"`);
+      return value;
+    }
+
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    const suffix = defaultValue ? ` [${defaultValue}]` : '';
+    const answer = await new Promise((resolve) => {
+      rl.question(`${message}${suffix}: `, (value) => {
+        rl.close();
+        resolve(value);
+      });
+    });
+
+    return String(answer || defaultValue || '').trim();
   }
 }
 

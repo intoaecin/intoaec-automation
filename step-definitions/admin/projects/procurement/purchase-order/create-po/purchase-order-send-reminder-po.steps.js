@@ -39,18 +39,9 @@ Then(
 
 When(
   'I click send email in the purchase order compose dialog',
-  { timeout: 180000 },
+  { timeout: 120000 },
   async function () {
     const po = getPurchaseOrderSendReminderPoPage(this);
     await po.clickSendEmailInPurchaseOrderComposeDialog();
-  }
-);
-
-Then(
-  'I should see the purchase order reminder email sent toast',
-  { timeout: 180000 },
-  async function () {
-    const po = getPurchaseOrderSendReminderPoPage(this);
-    await po.expectPurchaseOrderReminderEmailSentToast();
   }
 );
