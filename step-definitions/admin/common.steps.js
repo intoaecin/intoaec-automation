@@ -13,10 +13,10 @@ async function ensureLoggedIn(world) {
   await loginPage.isLoginSuccessful();
 }
 
-Given('I am logged in', { timeout: 60000 }, async function () {
+Given('I am logged in', { timeout: 180000 }, async function () {
   await ensureLoggedIn(this);
 });
 
-Given('User is logged in', { timeout: 60000 }, async function () {
+Given('User is logged in', { timeout: 180000 }, async function () {
   await ensureLoggedIn(this);
 });

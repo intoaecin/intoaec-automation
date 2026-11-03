@@ -1,19 +1,25 @@
 // pages/admin/projects/managements/timetracking/TimeTrackingPage.js
 const BasePage = require('../../../../BasePage');
 const { expect } = require('@playwright/test');
+const ProjectNavigationPage = require('../../ProjectNavigationPage');
 
 class TimeTrackingPage extends BasePage {
   constructor(page) {
     super(page);
     this.defaultTimeout = 120000;
+    this.projectNav = new ProjectNavigationPage(page);
 
     // --- Navigation ---
-    // Sidebar nav item for Clients/Projects
-    this.clientsTab = page.getByLabel('Clients/Projects').first();
+    // Sidebar label is i18n "Projects" (see ProjectNavigationPage)
+    this.clientsTab = page.getByRole('button', { name: /^(clients\s*\/\s*projects|projects|proyectos)$/i }).first();
     // First client name cell in the table
-    this.firstClientRow = page.locator('th[scope="row"] span.text-dark').first();
-    // Time Tracking menu card – a <p> tag inside a MuiBox card tile
-    this.timeTrackingLink = page.locator('p.MuiTypography-body1:has-text("Time Tracking")').first();
+    this.firstClientRow = page.locator('tbody tr').first().locator('th[scope="row"], th').first();
+    // Project module / sidebar: "Time Tracking" or "Time Sheet" (i18n)
+    this.timeTrackingLink = page
+      .locator('p.MuiTypography-body1, span, a, button')
+      .filter({ hasText: /time\s*(tracking|sheet)/i })
+      .filter({ visible: true })
+      .first();
 
     // --- Create Timesheet Drawer ---
     // The "Create" button that opens the drawer (top-right in the list view)
@@ -234,18 +240,38 @@ class TimeTrackingPage extends BasePage {
   }
 
   async goToClients() {
-    await expect(this.clientsTab).toBeVisible({ timeout: this.defaultTimeout });
-    await this.clientsTab.click();
+    this.projectNav.page = this.page;
+    await this.projectNav.navigateToProjects();
   }
 
   async selectFirstClient() {
-    await expect(this.firstClientRow).toBeVisible({ timeout: this.defaultTimeout });
-    await this.firstClientRow.click();
+    this.projectNav.page = this.page;
+    await this.projectNav.clickFirstProject();
   }
 
   async openTimeTracking() {
+    // Prefer deep-link when already on a project profile
+    try {
+      const url = new URL(this.page.url());
+      if (url.pathname.includes('/client/profile') || url.searchParams.has('projectId')) {
+        url.searchParams.set('tab', 'TimeTracking');
+        await this.page.goto(url.toString(), { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+        await this.page.waitForTimeout(1500).catch(() => {});
+        const createVisible = await this.createButton.isVisible({ timeout: 5000 }).catch(() => false);
+        if (createVisible) return;
+      }
+    } catch {
+      // ignore
+    }
+
+    if (await this.timeTrackingLink.isVisible({ timeout: 10000 }).catch(() => false)) {
+      await this.timeTrackingLink.click({ force: true });
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      return;
+    }
+
     await expect(this.timeTrackingLink).toBeVisible({ timeout: this.defaultTimeout });
-    await this.timeTrackingLink.click();
+    await this.timeTrackingLink.click({ force: true });
   }
 
   async clickCreate() {
