@@ -13,7 +13,7 @@ module.exports = {
     'Paragraph with symbols: é à ñ <tag> & "quotes" 🎉',
   unsupportedAttachmentFile: path.join(fixturesDir, 'unsupported-note-attachment.exe'),
   validTitleSample(suffix) {
-    return `Valid Title ${suffix}`;
+    return `VT-${suffix}`.slice(0, 20);
   },
   validParagraphSample(suffix) {
     return `Valid paragraph content ${suffix}`;
@@ -22,6 +22,6 @@ module.exports = {
     return 'T'.repeat(maxLength + 25);
   },
   paragraphExceedingLimit(maxLength) {
-    return 'P'.repeat(maxLength + 50);
+    return 'P'.repeat(maxLength + 25);
   },
 };

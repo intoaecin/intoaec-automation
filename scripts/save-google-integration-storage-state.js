@@ -10,7 +10,7 @@
  */
 const { chromium } = require('playwright');
 const LoginPage = require('../pages/admin/auth/LoginPage');
-const GoogleIntegrationPage = require('../pages/admin/crm/lead-profile/event/GoogleIntegrationPage');
+const GoogleIntegrationPage = require('../pages/admin/crm/event/GoogleIntegrationPage');
 const GoogleIntegrationStorage = require('../support/googleIntegrationStorage');
 const testData = require('../utils/testData');
 

@@ -1,4 +1,4 @@
-@regression @rfq @estimate-to-rfq @start-from-estimate @positive
+@regression @rfq @estimate-to-rfq @start-from-estimate @positive @ashraf-modules
 Feature: RFQ - start from estimate
 
   Background:

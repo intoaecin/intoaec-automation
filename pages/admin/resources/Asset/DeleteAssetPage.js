@@ -9,7 +9,10 @@ class DeleteAssetPage extends AssetPage {
     await this.navigateToManageAssets();
     await this.startCreateFlow();
     await this.fillAssetForm();
-    await this.attachDocumentManuallyAndWait();
+    // Prefer ASSET_SKIP_ATTACHMENT=1 or ASSET_ATTACHMENT_AUTO=1 for unattended runs
+    if (!this.shouldSkipAttachment()) {
+      await this.attachDocumentManuallyAndWait();
+    }
     await this.submitCreateForm();
     await this.verifyAssetCreatedSuccessfully();
   }

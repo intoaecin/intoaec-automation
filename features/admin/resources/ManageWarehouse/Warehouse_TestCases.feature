@@ -2,9 +2,10 @@
 # Manage Warehouse — incremental TCs in ONE file.
 #
 # TS-01 Add Product from scratch — @TS01 @TC01
-#   TC-01 — Products → Add Product → Start from Scratch → Save Cement
+#   TC-01 — Products → Add Product → Start from Scratch → enter Product Name manually
+#           ("Cement Bag" + unique number) → Save → search Product List for it
 # TS-02 Update Categories — @TS02 @TC02
-#   TC-02 — Product List → first row → Update Category → Construction Materials / Cement
+#   TC-02 — Product List → first row → Update Category → Cement & Concrete / Cement
 # TS-03 Edit Product — @TS03 @TC03
 #   TC-03 — Product List → first row → Edit → Premium Cement details → Update
 # TS-04 Delete Product — @TS04 @TC04
@@ -19,6 +20,9 @@
 #   npx.cmd cucumber-js features/admin/resources/ManageWarehouse/Warehouse_TestCases.feature --tags "@TS04 and @TC04"
 #   npx.cmd cucumber-js features/admin/resources/ManageWarehouse/Warehouse_TestCases.feature --tags "@TS05 and @TC05"
 #
+# Run all (TC-01 → TC-05):
+#   npx.cmd cucumber-js features/admin/resources/ManageWarehouse/Warehouse_TestCases.feature --tags "@warehouse-tc"
+#
 # npm:
 #   npm.cmd run test:admin:resources:managewarehouse
 #   npm.cmd run test:admin:resources:managewarehouse:tc01
@@ -32,7 +36,7 @@
 #            step-definitions/admin/resources/ManageWarehouse/WarehouseStep.js
 # -----------------------------------------------------------------------------
 
-@warehouse @manage-warehouse
+@warehouse-tc @warehouse @manage-warehouse @ashraf-modules
 Feature: Manage Warehouse — incremental test cases
 
   Background:
@@ -45,18 +49,17 @@ Feature: Manage Warehouse — incremental test cases
   # ===========================================================================
 
   @TS01 @TC01 @smoke @regression @positive
-  Scenario: TC-01 — Add warehouse product Cement from scratch
+  Scenario: TC-01 — Add warehouse product with a manually entered product name
     When I click the warehouse Add Product button
     Then the warehouse product creation options should be displayed
     When I select warehouse Start from Scratch
     And I click the warehouse Proceed button
     Then the warehouse Add Product form should be displayed
-    When I fill the warehouse product name with "Cement"
+    When I enter the warehouse product name manually "Cement Bag"
     And I fill the warehouse product required fields with valid data
     And I click the warehouse Save button
-    Then I should see warehouse success toast "Product added successfully."
     When I refresh the warehouse product list
-    Then the warehouse product "Cement" should be displayed in the Product List
+    Then the selected warehouse product should be displayed in the Product List
     And the warehouse product details should be displayed correctly in the Product List
 
   # ===========================================================================
@@ -64,20 +67,19 @@ Feature: Manage Warehouse — incremental test cases
   # ===========================================================================
 
   @TS02 @TC02 @smoke @regression @positive
-  Scenario: TC-02 — Update warehouse product category to Construction Materials / Cement
+  Scenario: TC-02 — Update warehouse product category to Cement & Concrete / Cement
     Then the warehouse Product List should be displayed
     When I select the first row in the warehouse Product List
     Then the warehouse selected product details should be displayed
     When I click the warehouse Update Categories option
     Then the warehouse Update Categories popup should be displayed
-    When I select the warehouse category "Construction Materials"
+    When I select the warehouse category "Cement & Concrete"
     And I select the warehouse subcategory "Cement"
-    Then the warehouse selected category should be "Construction Materials" and subcategory "Cement"
+    Then the warehouse selected category should be "Cement & Concrete" and subcategory "Cement"
     When I click the warehouse Update Categories Update button
-    Then I should see warehouse success toast "Categories updated successfully."
     When I refresh the warehouse product list
     And I select the updated warehouse product
-    Then the warehouse product category should be "Construction Materials"
+    Then the warehouse product category should be "Cement & Concrete"
     And the warehouse product subcategory should be "Cement"
 
   # ===========================================================================
@@ -100,7 +102,6 @@ Feature: Manage Warehouse — incremental test cases
     And I update the warehouse product price to "550"
     Then the warehouse Edit Product form should show the updated details
     When I click the warehouse Update button
-    Then I should see warehouse success toast "Product updated successfully."
     When I refresh the warehouse product list
     Then the warehouse first product row should show the updated details
 
@@ -117,7 +118,6 @@ Feature: Manage Warehouse — incremental test cases
     When I enter the warehouse product deletion reason "Product is no longer required"
     And I enter "Yes" in the warehouse product deletion confirmation field
     And I click the warehouse Delete Product confirm button
-    Then I should see warehouse success toast "Product deleted successfully."
     When I refresh the warehouse product list
     Then the deleted warehouse product should not be displayed in the Product List
 

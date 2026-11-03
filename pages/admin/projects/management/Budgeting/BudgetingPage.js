@@ -350,6 +350,10 @@ class BudgetingPage extends BasePage {
     }
     return this.parseMoney(match[1]);
   }
+<<<<<<< HEAD
+=======
+
+>>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   /**
    * Actual Budget card: Unallocated label sits next to "$remaining / $total".
    * Inspector: span "Unallocated" → sibling box → span "$3,050 / $3,050"
@@ -1182,6 +1186,7 @@ class BudgetingPage extends BasePage {
     }
   }
 
+<<<<<<< HEAD
   async setScheduleActualBudget(name, amount) {
     await this.focusBudgetingScheduleTable();
     const row = this.scheduleRow(name);
@@ -1232,6 +1237,8 @@ class BudgetingPage extends BasePage {
 
   }
 
+=======
+>>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   async _budgetTableColumnIndex(labelRe) {
     const headers = this.budgetSchedulesTable().locator('thead th, thead td');
     const count = await headers.count();

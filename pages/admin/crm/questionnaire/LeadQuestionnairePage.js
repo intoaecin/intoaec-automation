@@ -207,8 +207,38 @@ class LeadQuestionnairePage extends QuestionnairePage {
     await expect(this.answerByOwnButton).toBeEnabled({ timeout: this.defaultTimeout });
     await this.answerByOwnButton.click();
     await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-    await this.setPreviewZoom(70);
+    await this.setPreviewZoom(100);
     this.answerQuestionnairePageCount = 0;
+  }
+
+  async answerRadioOption(formScope, radio) {
+    await radio.evaluate((el) => {
+      el.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const label = el.closest('label');
+      const input = (label && label.querySelector('input[type="radio"]')) || el;
+      if (input.checked) return;
+      // Click the FormControlLabel so MUI/React onChange sets options[].isSelected in content.
+      const clickTarget =
+        (label && label.querySelector('.MuiFormControlLabel-label')) || label || input;
+      clickTarget.click();
+    });
+
+    if (await radio.isChecked().catch(() => false)) return;
+
+    const checked = await radio
+      .check({ timeout: 1500 })
+      .then(() => true)
+      .catch(() => false);
+    if (checked || (await radio.isChecked().catch(() => false))) return;
+
+    const value = String((await radio.getAttribute('value').catch(() => '')) || '').trim();
+    if (value) {
+      await formScope.getByText(value, { exact: true }).first().evaluate((el) => el.click());
+    }
+
+    if (!(await radio.isChecked().catch(() => false))) {
+      throw new Error('[LeadQuestionnairePage] Could not select radio option');
+    }
   }
 
   async fillAllMandatoryQuestionnaireQuestions() {
@@ -256,7 +286,7 @@ class LeadQuestionnairePage extends QuestionnairePage {
     for (let i = 0; i < radioGroupCount; i += 1) {
       const firstRadio = radioGroups.nth(i).getByRole('radio').first();
       if (await firstRadio.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await firstRadio.check().catch(() => firstRadio.click());
+        await this.answerRadioOption(formScope, firstRadio);
       }
     }
 
@@ -277,10 +307,20 @@ class LeadQuestionnairePage extends QuestionnairePage {
     const answeredRadioGroups = new Set();
     for (let i = 0; i < radioCount; i += 1) {
       const radio = standaloneRadios.nth(i);
-      const groupName = (await radio.getAttribute('name').catch(() => null)) || `radio-${i}`;
+      // Quality Control radios share name="controlled-radio-buttons-group"; key by radiogroup index.
+      const groupName = await radio
+        .evaluate((el, index) => {
+          const group = el.closest('[role="radiogroup"]');
+          if (group) {
+            const groups = Array.from(document.querySelectorAll('[role="radiogroup"]'));
+            return `radiogroup-${groups.indexOf(group)}`;
+          }
+          return el.getAttribute('name') || `radio-${index}`;
+        }, i)
+        .catch(() => `radio-${i}`);
       if (answeredRadioGroups.has(groupName)) continue;
 
-      await radio.check().catch(() => radio.click());
+      await this.answerRadioOption(formScope, radio);
       answeredRadioGroups.add(groupName);
     }
 

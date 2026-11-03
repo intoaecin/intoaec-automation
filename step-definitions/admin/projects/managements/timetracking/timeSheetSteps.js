@@ -36,6 +36,12 @@ When('I fill mandatory fields for timesheet', async function () {
   await timeTrackingPage.fillMandatoryFields(undefined, undefined, undefined, pastDays);
 });
 
+When('I select a linked shift on the timesheet form', { timeout: 120000 }, async function () {
+  ensureTimeTrackingPage(this);
+  const shiftName = this.lastCreatedShiftName || this.workerContext?.lastShiftName || '';
+  await timeTrackingPage.selectLinkedShift(shiftName);
+});
+
 When('I wait {int} seconds for manual attachment upload', { timeout: 180000 }, async function (seconds) {
   await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 });
@@ -94,4 +100,36 @@ When('I save the timesheet changes', { timeout: 120000 }, async function () {
 Then('I verify the timesheet is updated successfully', { timeout: 120000 }, async function () {
   ensureTimeTrackingPage(this);
   await timeTrackingPage.verifyTimesheetUpdatedSuccessfully();
+});
+
+Then('I should see the created timesheet in the time sheet list', { timeout: 150000 }, async function () {
+  if (!this.timeTrackingPage) {
+    this.timeTrackingPage = new TimeTrackingPage(this.page);
+  }
+  await this.timeTrackingPage.expectCreatedTimesheetInList();
+});
+
+When('I capture time sheet filter criteria from the first list row', { timeout: 120000 }, async function () {
+  ensureTimeTrackingPage(this);
+  await timeTrackingPage.captureTimesheetFilterCriteriaFromFirstRow();
+});
+
+When('I click the time sheet Filter option', { timeout: 120000 }, async function () {
+  ensureTimeTrackingPage(this);
+  await timeTrackingPage.clickTimesheetFilterOption();
+});
+
+When('I select the captured time sheet filter criteria', { timeout: 120000 }, async function () {
+  ensureTimeTrackingPage(this);
+  await timeTrackingPage.selectCapturedTimesheetFilterCriteria();
+});
+
+When('I apply the time sheet filter', { timeout: 120000 }, async function () {
+  ensureTimeTrackingPage(this);
+  await timeTrackingPage.applyTimesheetFilter();
+});
+
+Then('I should see only time sheets matching the selected filter criteria', { timeout: 120000 }, async function () {
+  ensureTimeTrackingPage(this);
+  await timeTrackingPage.expectTimesheetListMatchesFilterCriteria();
 });

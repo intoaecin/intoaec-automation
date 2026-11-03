@@ -98,7 +98,7 @@ After({ tags: '@note' }, async function () {
   if (!this.page || this.page.isClosed()) return;
 
   try {
-    const EditNotePage = require('../pages/admin/common/Note/EditNotePage');
+    const EditNotePage = require('../pages/admin/crm/Note/EditNotePage');
     const notePage = this.editNotePage || new EditNotePage(this.page);
     await notePage.dismissOpenMenus();
     await notePage.closeNoteFormIfOpen();
@@ -148,7 +148,8 @@ function waitForEnterToKeepBrowser() {
   });
 }
 
-AfterAll({ timeout: 24 * 60 * 60 * 1000 }, async function () {
+AfterAll({ timeout: 60000 }, async function () {
+  // Do not wait for terminal ENTER unless KEEP_BROWSER=true (avoids "loop until input").
   if (shouldKeepBrowserOpen()) {
     await waitForEnterToKeepBrowser();
   }

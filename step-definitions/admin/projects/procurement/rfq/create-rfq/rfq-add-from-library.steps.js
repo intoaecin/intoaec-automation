@@ -36,6 +36,15 @@ When(
 );
 
 When(
+  'I select the first {int} rows in the RFQ library grid',
+  { timeout: 180000 },
+  async function (count) {
+    const rfq = getRfqAddFromLibraryPage(this);
+    await rfq.selectFirstNRowsInRfqLibraryGrid(count);
+  }
+);
+
+When(
   'I click add in the RFQ library drawer',
   { timeout: 180000 },
   async function () {
