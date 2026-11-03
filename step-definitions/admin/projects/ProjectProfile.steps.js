@@ -10,8 +10,9 @@ function getSchedulePage(page) {
 
 When('I navigate to the Projects page', { timeout: 120000 }, async function () {
   const projectProfilePage = new ProjectProfilePage(this.page);
-  if (await projectProfilePage.isInsideProjectProfile()) {
-    console.log('Already on project profile — skipping Projects navigation');
+  if (await projectProfilePage.isProjectWorkspaceOpen()) {
+    await projectProfilePage.ensureClassicProjectUi();
+    console.log('Already on project workspace — classic UI ensured; skipping Projects list nav');
     return;
   }
   const projectNavigationPage = new ProjectNavigationPage(this.page);
@@ -20,11 +21,6 @@ When('I navigate to the Projects page', { timeout: 120000 }, async function () {
 });
 
 When('I click on the first project in the list', { timeout: 120000 }, async function () {
-  const projectProfilePage = new ProjectProfilePage(this.page);
-  if (await projectProfilePage.isInsideProjectProfile()) {
-    console.log('Already on project profile — skipping project selection');
-    return;
-  }
   const projectNavigationPage = new ProjectNavigationPage(this.page);
   await projectNavigationPage.clickFirstProject();
   console.log('Opened first client/project from Clients/Projects list');

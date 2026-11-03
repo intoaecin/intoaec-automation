@@ -16,6 +16,11 @@ When('I wait for estimate module to load', { timeout: 120000 }, async function (
   await estimatePage.waitForModuleToLoad();
 });
 
+When('I complete the estimate create from scratch and send as estimate journey', { timeout: 360000 }, async function () {
+  const estimatePage = getEstimatePage(this);
+  await estimatePage.completeCreateFromScratchAndSendAsEstimateJourney();
+});
+
 When('I click Create Estimate', { timeout: 120000 }, async function () {
   const estimatePage = getEstimatePage(this);
   await estimatePage.clickCreateEstimate();

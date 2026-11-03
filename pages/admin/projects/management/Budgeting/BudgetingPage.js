@@ -349,6 +349,7 @@ class BudgetingPage extends BasePage {
       throw new Error(`Could not read Actual Budget Unallocated values from: ${text}`);
     }
     return this.parseMoney(match[1]);
+  }
   /**
    * Actual Budget card: Unallocated label sits next to "$remaining / $total".
    * Inspector: span "Unallocated" → sibling box → span "$3,050 / $3,050"
@@ -1227,6 +1228,10 @@ class BudgetingPage extends BasePage {
           if (i >= 3) break;
         }
       }
+    }
+
+  }
+
   async _budgetTableColumnIndex(labelRe) {
     const headers = this.budgetSchedulesTable().locator('thead th, thead td');
     const count = await headers.count();

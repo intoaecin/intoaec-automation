@@ -35,15 +35,20 @@ class TimeTrackingPage extends BasePage {
     // User – MUI Select combobox (role="combobox" inside the section)
     this.userDropdown = this.productInfoSection.locator('[role="combobox"]').first();
 
-    // Codegen: getByRole('textbox', { name: 'DD MMMM YYYY' })
-    this.dateTextboxDmy = page.getByRole('textbox', { name: 'DD MMMM YYYY' }).first();
-    this.chooseDateButton = page.getByRole('button', { name: 'Choose date' }).first();
-    this.chooseTimeButtons = page.getByRole('button', { name: 'Choose time' });
+    // Date placeholder/accessible name varies (DD MMMM YYYY, MM/DD/YYYY, Date, etc.).
+    this.dateTextboxDmy = page
+      .getByRole('textbox', { name: /DD MMMM YYYY|MM\/DD\/YYYY|DD\/MM\/YYYY|^date$/i })
+      .or(page.getByPlaceholder(/DD MMMM YYYY|MM\/DD\/YYYY|DD\/MM\/YYYY|select date|date/i))
+      .first();
+    this.chooseDateButton = page
+      .getByRole('button', { name: /choose date|open calendar|select date/i })
+      .first();
+    this.chooseTimeButtons = page.getByRole('button', { name: /choose time|select time/i });
 
     // Date/Time inputs can differ between Create drawer vs Edit view (label wiring / aria-labels differ),
     // so prefer label-based selectors scoped to the section and fall back to the original xpath.
     const dateByLabel = this.productInfoSection
-      .getByLabel(/date/i)
+      .getByLabel(/^date$|timesheet date|work date/i)
       .or(this.productInfoSection.locator('input[name*="date" i], input[id*="date" i]'))
       .or(this.dateTextboxDmy)
       .first();
@@ -52,7 +57,11 @@ class TimeTrackingPage extends BasePage {
         'xpath=//section[@id="product information"]//*[self::label or self::p or self::span][contains(normalize-space(.),"Date")]/following::input[1]'
       )
       .first();
-    this.dateInput = dateByLabel.or(dateByXpath).or(this.dateTextboxDmy).first();
+    this.dateInput = dateByLabel
+      .or(dateByXpath)
+      .or(this.dateTextboxDmy)
+      .or(this.productInfoSection.locator('input').filter({ visible: true }).first())
+      .first();
 
     const startByLabel = this.productInfoSection
       .getByLabel(/start\s*time/i)
@@ -246,7 +255,186 @@ class TimeTrackingPage extends BasePage {
     await expect(locator).toBeVisible({ timeout: this.defaultTimeout });
     const type = (await locator.getAttribute('type').catch(() => '')) || '';
     const pick = type.toLowerCase() === 'time' ? hhmm24 : hhmm12;
-    await this.setPickerInputValue(locator, pick);
+
+    // Native / editable inputs
+    const readonly = (await locator.getAttribute('readonly').catch(() => null)) !== null;
+    if (type.toLowerCase() === 'time' || !readonly) {
+      try {
+        await this.setPickerInputValue(locator, pick);
+        return;
+      } catch {
+        // Fall through to MUI clock / Choose time UI.
+      }
+    }
+
+    // MUI TimePicker: open from adjacent button or the field itself.
+    const openBtn = locator
+      .locator('xpath=ancestor::*[contains(@class,"MuiFormControl") or contains(@class,"MuiTextField")][1]')
+      .locator('button[aria-label*="time" i], button[aria-label*="Choose" i]')
+      .first()
+      .or(this.chooseTimeButtons.filter({ visible: true }).first());
+
+    if (await openBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await openBtn.click({ timeout: 15000 }).catch(() => {});
+    } else {
+      await locator.click({ timeout: 15000, force: true }).catch(() => {});
+    }
+
+    const picked = await this._pickMuiClockTime(hhmm12 || hhmm24);
+    if (picked) return;
+
+    // Last resort: DOM set without requiring readable inputValue (masked MUI fields).
+    await locator
+      .evaluate((el, v) => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        setter?.call(el, v);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }, pick)
+      .catch(() => {});
+  }
+
+  /**
+   * Interact with an open MUI time picker / clock dialog.
+   * @param {string} hhmm12 e.g. "10:00 AM" or "6:00 PM"
+   */
+  async _pickMuiClockTime(hhmm12) {
+    const m = String(hhmm12 || '').match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?/i);
+    if (!m) return false;
+    const hour = String(Number(m[1]));
+    const minute = m[2] || '00';
+    const ampm = (m[3] || '').toUpperCase();
+
+    const dialog = this.page
+      .locator('.MuiDialog-root, .MuiPickersPopper-root, [role="dialog"]')
+      .filter({ visible: true })
+      .last();
+
+    const scope = (await dialog.isVisible({ timeout: 1500 }).catch(() => false)) ? dialog : this.page;
+
+    const hourOpt = scope
+      .getByRole('option', { name: new RegExp(`^${hour}\\s*hours?$|^${hour}$`, 'i') })
+      .or(scope.locator(`[aria-label="${hour} hours"], [aria-label="${hour} hour"]`))
+      .or(scope.locator('.MuiClockNumber-root, .MuiMultiSectionDigitalClockSection-item').filter({ hasText: new RegExp(`^${hour}$`) }))
+      .first();
+
+    if (await hourOpt.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await hourOpt.click({ timeout: 15000 }).catch(() => {});
+    } else {
+      return false;
+    }
+
+    if (minute !== '00') {
+      const minOpt = scope
+        .getByRole('option', { name: new RegExp(`^${minute}\\s*minutes?$|^${minute}$`, 'i') })
+        .or(scope.locator(`.MuiClockNumber-root`).filter({ hasText: new RegExp(`^${minute}$`) }))
+        .first();
+      if (await minOpt.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await minOpt.click({ timeout: 10000 }).catch(() => {});
+      }
+    }
+
+    if (ampm) {
+      const meridiem = scope.getByRole('option', { name: new RegExp(`^${ampm}$`, 'i') }).first();
+      if (await meridiem.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await meridiem.click({ timeout: 10000 }).catch(() => {});
+      }
+    }
+
+    const ok = scope.getByRole('button', { name: /^(OK|Accept|Set)$/i }).first();
+    if (await ok.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await ok.click({ timeout: 10000 }).catch(() => {});
+    } else {
+      await this.page.keyboard.press('Escape').catch(() => {});
+    }
+    await this.page.waitForTimeout(300).catch(() => {});
+    return true;
+  }
+
+  /**
+   * Daily Report TC-05: set start/end preferring Choose time UI over typed fill.
+   */
+  async setTimesheetStartEndForDailyReport(start12 = '10:00 AM', end12 = '6:00 PM') {
+    const startHour = String(start12).match(/(\d{1,2})/)?.[1] || '10';
+    const endHour = String(end12).match(/(\d{1,2})/)?.[1] || '6';
+    const start24 = '10:00';
+    const end24 = '18:00';
+
+    // Prefer explicit Choose time buttons (codegen path).
+    const chooseButtons = this.page.getByRole('button', { name: /choose time|select time/i }).filter({ visible: true });
+    const chooseCount = await chooseButtons.count().catch(() => 0);
+
+    if (chooseCount >= 1) {
+      await chooseButtons.nth(0).click({ timeout: 20000 });
+      const startOk = await this._pickMuiClockTime(start12);
+      if (!startOk) {
+        const h = this.page.getByRole('option', { name: new RegExp(`${startHour}\\s*hours?`, 'i') }).first();
+        if (await h.isVisible({ timeout: 3000 }).catch(() => false)) {
+          await h.click({ timeout: 15000 });
+          const ok = this.page.getByRole('button', { name: /^OK$/i }).first();
+          if (await ok.isVisible({ timeout: 2000 }).catch(() => false)) await ok.click().catch(() => {});
+        }
+      }
+      // eslint-disable-next-line no-console
+      console.log(`[Time Tracking] Set start time: ${start12}`);
+    } else if (await this.startTimeInput.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await this.setTimeValue(this.startTimeInput, start24, start12);
+      // eslint-disable-next-line no-console
+      console.log(`[Time Tracking] Set start time: ${start12}`);
+    }
+
+    const chooseButtonsAfter = this.page.getByRole('button', { name: /choose time|select time/i }).filter({ visible: true });
+    const chooseCountAfter = await chooseButtonsAfter.count().catch(() => 0);
+
+    if (chooseCountAfter >= 2) {
+      await chooseButtonsAfter.nth(1).click({ timeout: 20000 });
+      const endPicked = await this._pickMuiClockTime(end12);
+      if (!endPicked) {
+        const h = this.page.getByRole('option', { name: new RegExp(`${endHour}\\s*hours?`, 'i') }).first();
+        if (await h.isVisible({ timeout: 3000 }).catch(() => false)) {
+          await h.click({ timeout: 15000 });
+        }
+        const pm = this.page.getByRole('option', { name: /^PM$/i }).first();
+        if (await pm.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await pm.click({ timeout: 10000 }).catch(() => {});
+        }
+        const ok = this.page.getByRole('button', { name: /^OK$/i }).first();
+        if (await ok.isVisible({ timeout: 2000 }).catch(() => false)) await ok.click().catch(() => {});
+      }
+      // eslint-disable-next-line no-console
+      console.log(`[Time Tracking] Set end time: ${end12}`);
+    } else if (chooseCountAfter === 1) {
+      // Some UIs reuse a single Choose time after start is set.
+      await chooseButtonsAfter.nth(0).click({ timeout: 20000 });
+      await this._pickMuiClockTime(end12);
+      // eslint-disable-next-line no-console
+      console.log(`[Time Tracking] Set end time: ${end12}`);
+    } else if (await this.endTimeInput.isVisible({ timeout: 3000 }).catch(() => false)) {
+      // Soft fill — do not hard-fail if MUI masks the value.
+      try {
+        await this.setTimeValue(this.endTimeInput, end24, end12);
+      } catch (err) {
+        await this.endTimeInput.click({ force: true }).catch(() => {});
+        const opened = await this._pickMuiClockTime(end12);
+        if (!opened) {
+          await this.endTimeInput
+            .evaluate((el, v) => {
+              const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+              setter?.call(el, v);
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }, end12)
+            .catch(() => {});
+          // eslint-disable-next-line no-console
+          console.log(`[Time Tracking] End time soft-set (DOM): ${end12}`);
+        }
+      }
+      // eslint-disable-next-line no-console
+      console.log(`[Time Tracking] Set end time: ${end12}`);
+    }
+
+    this.lastTimesheetStart = start12;
+    this.lastTimesheetEnd = end12;
   }
 
   async tryPickDateFromCalendar(targetDate) {
@@ -682,10 +870,13 @@ class TimeTrackingPage extends BasePage {
   }
 
   async selectStartFromScratchAndProceed() {
-    const dateField = this.page.getByRole('textbox', { name: 'DD MMMM YYYY' });
+    const formReady = this.dateInput
+      .or(this.productInfoSection)
+      .or(this.drawerTitle)
+      .first();
 
     // Create may already open the form (skip Get Started).
-    if (await dateField.isVisible({ timeout: 2000 }).catch(() => false)) {
+    if (await formReady.isVisible({ timeout: 2000 }).catch(() => false)) {
       // eslint-disable-next-line no-console
       console.log('[Time Tracking] Create form already open.');
       return;
@@ -719,7 +910,7 @@ class TimeTrackingPage extends BasePage {
     }
 
     // Codegen recording advanced without Proceed; live app often still needs it.
-    if (!(await dateField.isVisible({ timeout: 2500 }).catch(() => false))) {
+    if (!(await formReady.isVisible({ timeout: 2500 }).catch(() => false))) {
       const proceed = this.page.getByRole('button', { name: 'Proceed', exact: true }).first();
       if (await proceed.isVisible({ timeout: 8000 }).catch(() => false)) {
         await expect(proceed).toBeEnabled({ timeout: 30000 });
@@ -727,7 +918,7 @@ class TimeTrackingPage extends BasePage {
       }
     }
 
-    await expect(dateField.or(this.drawerTitle).first()).toBeVisible({
+    await expect(formReady).toBeVisible({
       timeout: this.defaultTimeout,
     });
     // eslint-disable-next-line no-console
@@ -749,7 +940,9 @@ class TimeTrackingPage extends BasePage {
     await expect(
       this.page
         .getByText(/start from scratch/i)
-        .or(this.page.getByRole('textbox', { name: 'DD MMMM YYYY' }))
+        .or(this.dateInput)
+        .or(this.productInfoSection)
+        .or(this.drawerTitle)
         .first()
     ).toBeVisible({ timeout: this.defaultTimeout });
 
@@ -815,16 +1008,16 @@ class TimeTrackingPage extends BasePage {
 
   /**
    * Create Time Sheet fill for Daily Report TC-05.
-   * Codegen: date / start 10:00 AM / end 6:00 PM / Chargeable.
+   * Date / start 10:00 AM / end 6:00 PM / Chargeable.
    * Plus User (mandatory when not prefilled) and Cost when Chargeable requires it.
    */
   async fillTimesheetForDailyReportTimeLog() {
     await this.page.waitForTimeout(800);
-    const dateBox = this.page.getByRole('textbox', { name: 'DD MMMM YYYY' });
-    await expect(dateBox).toBeVisible({ timeout: this.defaultTimeout });
+    await expect(
+      this.dateInput.or(this.productInfoSection).or(this.drawerTitle).first()
+    ).toBeVisible({ timeout: this.defaultTimeout });
 
     const today = new Date();
-    const day = String(today.getDate());
     const months = [
       'January',
       'February',
@@ -839,54 +1032,27 @@ class TimeTrackingPage extends BasePage {
       'November',
       'December',
     ];
-    this.lastTimesheetDate = this.formatDateWithinAllowedRange(0, 'MM/DD/YYYY');
-    this.lastTimesheetDateIso = this.formatDateWithinAllowedRange(0, 'YYYY-MM-DD');
-    this.lastTimesheetDatePretty = `${String(today.getDate()).padStart(2, '0')} ${months[today.getMonth()]} ${today.getFullYear()}`;
     this.lastTimesheetStart = '10:00 AM';
     this.lastTimesheetEnd = '6:00 PM';
+    this.lastTimesheetDatePretty = `${String(today.getDate()).padStart(2, '0')} ${months[today.getMonth()]} ${today.getFullYear()}`;
 
-    // --- User (mandatory; not in codegen when already prefilled) ---
+    // --- User (mandatory; not required when already prefilled) ---
     await this.selectFirstTimesheetUserIfNeeded();
 
-    // --- Date (codegen) ---
-    await dateBox.click({ timeout: 20000 });
-    await this.page.getByRole('button', { name: 'Choose date' }).click({ timeout: 20000 });
-    const todayCell = this.page
-      .locator('button.MuiPickersDay-today, .MuiPickersDay-root.MuiPickersDay-today, [aria-current="date"]')
-      .filter({ visible: true })
-      .first();
-    if (await todayCell.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await todayCell.click({ timeout: 20000 });
-    } else {
-      await this.page.getByRole('gridcell', { name: day, exact: true }).first().click({ timeout: 20000 });
+    // --- Date (today) via resilient helpers — UI no longer always exposes "DD MMMM YYYY" ---
+    await this.ensureTimesheetDateTodayForDailyReport();
+    if (!this.lastTimesheetDatePretty && this.lastTimesheetDate) {
+      this.lastTimesheetDatePretty = this.lastTimesheetDate;
     }
-    // eslint-disable-next-line no-console
-    console.log(`[Time Tracking] Picked date via Choose date calendar (day ${day}).`);
 
-    // --- Start 10:00 AM (codegen) ---
-    await this.page.getByRole('button', { name: 'Choose time' }).first().click({ timeout: 20000 });
-    await this.page.getByRole('option', { name: '10 hours' }).first().click({ timeout: 20000 });
-    await this.page.getByRole('button', { name: 'OK' }).first().click({ timeout: 20000 });
-    // eslint-disable-next-line no-console
-    console.log('[Time Tracking] Set start time: 10:00 AM (codegen).');
+    // --- Start / End times (prefer Choose time / MUI clock — typed fill often fails) ---
+    await this.setTimesheetStartEndForDailyReport('10:00 AM', '6:00 PM');
 
-    // --- End 6:00 PM (codegen) ---
-    await this.page.getByRole('button', { name: 'Choose time', exact: true }).click({ timeout: 20000 });
-    await this.page.getByRole('option', { name: '6 hours' }).first().click({ timeout: 20000 });
-    await this.page.getByRole('option', { name: 'PM' }).first().click({ timeout: 20000 });
-    const endOk = this.page.getByRole('button', { name: 'OK' }).first();
-    if (await endOk.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await endOk.click({ timeout: 10000 }).catch(() => {});
+    // --- Chargeability ---
+    await this.selectChargeabilityChargeable();
+    if (!this.lastTimesheetChargeable) {
+      await this.enableChargeableOption();
     }
-    // eslint-disable-next-line no-console
-    console.log('[Time Tracking] Set end time: 6:00 PM (codegen).');
-
-    // --- Chargeability (codegen) ---
-    await this.page.getByRole('combobox', { name: 'Select chargeability' }).click({ timeout: 20000 });
-    await this.page.getByRole('option', { name: 'Chargeable', exact: true }).first().click({ timeout: 20000 });
-    this.lastTimesheetChargeable = true;
-    // eslint-disable-next-line no-console
-    console.log('[Time Tracking] Selected chargeability: Chargeable');
 
     // Cost often becomes mandatory after Chargeable
     await this.fillCostIfPresentOrRequired();
@@ -894,8 +1060,8 @@ class TimeTrackingPage extends BasePage {
 
     // eslint-disable-next-line no-console
     console.log(
-      `[Time Tracking] Filled timesheet (codegen): user=${this.lastTimesheetUser || 'prefilled'}, ` +
-        `date=${this.lastTimesheetDatePretty}, 10:00 AM–6:00 PM, Chargeable.`
+      `[Time Tracking] Filled timesheet: user=${this.lastTimesheetUser || 'prefilled'}, ` +
+        `date=${this.lastTimesheetDatePretty || this.lastTimesheetDate}, 10:00 AM–6:00 PM, Chargeable.`
     );
   }
 

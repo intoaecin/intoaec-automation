@@ -41,7 +41,8 @@ class IndentPage extends PurchaseOrderCreatePoPage {
   }
 
   createIndentListButton() {
-    return this.page.getByRole('button', { name: /create indent/i });
+    const profile = new ProjectProfilePage(this.page);
+    return profile.createIndentListControl();
   }
 
   indentTitleInput() {

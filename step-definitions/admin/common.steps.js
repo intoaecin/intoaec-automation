@@ -5,7 +5,7 @@ const testData = require('../../utils/testData');
 
 async function ensureLoggedIn(world) {
   const loginPage = new LoginPage(world.page);
-  const headerReady = await loginPage.appHeader.isVisible({ timeout: 3000 }).catch(() => false);
+  const headerReady = await loginPage.appHeader.isVisible({ timeout: 800 }).catch(() => false);
   if (headerReady) {
     return;
   }
@@ -17,16 +17,15 @@ async function ensureLoggedIn(world) {
 
 Given('I am logged in', { timeout: 120000 }, async function () {
   const loginPage = new LoginPage(this.page);
-  const headerReady = await loginPage.appHeader.isVisible({ timeout: 3000 }).catch(() => false);
+  const headerReady = await loginPage.appHeader.isVisible({ timeout: 800 }).catch(() => false);
   if (headerReady) {
     console.log('Already logged in — continuing in same tab');
-    const loginPage = new LoginPage(this.page);
     await loginPage.waitForPostLoginShell();
     return;
   }
   await ensureLoggedIn(this);
   const loginChrome = loginPage.appHeader.or(loginPage.appShell).first();
-  await loginChrome.waitFor({ state: 'visible', timeout: 60000 });
+  await loginChrome.waitFor({ state: 'visible', timeout: 20000 });
 });
 
 Given('User is logged in', { timeout: 120000 }, async function () {

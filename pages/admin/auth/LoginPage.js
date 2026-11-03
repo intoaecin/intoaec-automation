@@ -1,21 +1,32 @@
 // pages/admin/auth/LoginPage.js
 const BasePage = require('../../BasePage');
+const { expect } = require('@playwright/test');
 const env = require('../../../config/env');
 
 class LoginPage extends BasePage {
   constructor(page) {
     super(page);
     this.emailInput = page
-      .locator('input[type="email"], input[name="email"], input[name="username"]')
-      .or(page.getByPlaceholder(/email|username/i))
+      .getByPlaceholder(/email|username/i)
       .or(page.getByLabel(/email|username/i))
+      .or(page.getByRole('textbox', { name: /email|username/i }))
+      .or(page.locator('input[type="email"], input[name="email"], input[name="username"]'))
+      .filter({ visible: true })
       .first();
-    this.passwordInput = page.locator('input[type="password"]').first();
+    this.passwordInput = page
+      .getByPlaceholder(/password/i)
+      .or(page.getByLabel(/^password$/i))
+      .or(page.locator('input[type="password"]'))
+      .filter({ visible: true })
+      .first();
     this.loginButton = page
-      .getByRole('button', { name: /^(login|log in|sign in)$/i })
-      .or(page.locator('button:has-text("Login")'))
+      .getByRole('button', { name: /^(sign in|log in|login)$/i })
+      .or(page.locator('button[type="submit"]').filter({ hasNotText: /google|microsoft|sso/i }))
+      .or(page.locator('button').filter({ hasText: /^(sign in|log in|login)$/i }))
       .first();
-    this.errorMessage = page.getByText('Invalid username or password').first();
+    this.errorMessage = page
+      .getByText(/invalid username or password|incorrect email or password|invalid credentials/i)
+      .first();
     this.appHeader = page
       .getByLabel(/account settings|profile settings/i)
       .or(page.getByRole('button', { name: /account settings|profile settings/i }))
@@ -24,48 +35,62 @@ class LoginPage extends BasePage {
       .getByRole('button', { name: /^resources$/i })
       .or(page.getByRole('button', { name: /^dashboard$/i }))
       .or(page.getByRole('link', { name: /^dashboard$/i }))
+      .or(page.getByRole('button', { name: /clients\/projects/i }))
       .first();
   }
 
+  _isAuthenticatedUrl(url = this.page.url()) {
+    const href = String(url || '');
+    if (/signIn/i.test(href)) return false;
+    return /\/dashboard|\/client|projectId=/i.test(href);
+  }
+
   async _isAppReady() {
-    if (await this.appHeader.isVisible({ timeout: 2500 }).catch(() => false)) {
-      return true;
-    }
-    return this.appShell.isVisible({ timeout: 2500 }).catch(() => false);
+    if (this._isAuthenticatedUrl()) return true;
+    const [header, shell] = await Promise.all([
+      this.appHeader.isVisible({ timeout: 800 }).catch(() => false),
+      this.appShell.isVisible({ timeout: 800 }).catch(() => false),
+    ]);
+    return !!(header || shell);
   }
 
   async _isSignInVisible() {
-    return this.passwordInput.isVisible({ timeout: 5000 }).catch(() => false);
+    return this.passwordInput.isVisible({ timeout: 800 }).catch(() => false);
   }
 
   async goto() {
-    await this.page.goto(env.admin, {
-      waitUntil: 'domcontentloaded',
-      timeout: 60000,
-    });
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-    if (await this._isAppReady()) {
-      return;
-    }
-    if (await this._isSignInVisible()) {
-      return;
-    }
     await this.page.goto(`${env.admin}/auth/signIn`, {
       waitUntil: 'domcontentloaded',
-      timeout: 60000,
+      timeout: 30000,
     });
-    await this.passwordInput.waitFor({ state: 'visible', timeout: 30000 });
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    if (this._isAuthenticatedUrl() || (await this._isAppReady())) {
+      return;
+    }
+    await this.emailInput.waitFor({ state: 'visible', timeout: 20000 });
+    await this.passwordInput.waitFor({ state: 'visible', timeout: 10000 });
+    await this.loginButton.waitFor({ state: 'visible', timeout: 10000 });
+  }
+
+  async _submitLogin() {
+    await this.loginButton.click({ timeout: 8000 }).catch(async () => {
+      await this.loginButton.click({ timeout: 8000, force: true });
+    });
   }
 
   async _fillStable(locator, value) {
-    await locator.waitFor({ state: 'visible', timeout: 30000 });
-    for (let i = 0; i < 3; i++) {
-      await locator.click({ timeout: 10000 });
-      await locator.fill('');
-      await locator.fill(value);
-      const current = await locator.inputValue().catch(() => '');
-      if (current === value) return;
-      await this.page.waitForTimeout(250);
+    const text = String(value);
+    await locator.waitFor({ state: 'visible', timeout: 15000 });
+    await locator.click({ timeout: 8000, force: true });
+    await locator.fill('');
+    await locator.pressSequentially(text, { delay: 20 });
+    let current = await locator.inputValue().catch(() => '');
+    if (current !== text) {
+      await locator.fill(text, { force: true });
+      current = await locator.inputValue().catch(() => '');
+    }
+    if (current !== text) {
+      throw new Error(`Login field did not keep the typed value (${current.length} of ${text.length} characters).`);
     }
   }
 
@@ -73,71 +98,50 @@ class LoginPage extends BasePage {
     if (await this._isAppReady()) {
       return;
     }
-    await this.emailInput.waitFor({ state: 'visible', timeout: 30000 });
-    await this.passwordInput.waitFor({ state: 'visible', timeout: 30000 });
-
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      await this._fillStable(this.emailInput, email);
-      await this._fillStable(this.passwordInput, password);
-
-      await this.loginButton.waitFor({ state: 'visible', timeout: 15000 });
-      const enabled = await this.loginButton.isEnabled().catch(() => true);
-      if (!enabled) {
-        await this.page.waitForTimeout(500);
-      }
-
-      await this.loginButton.click({ timeout: 15000 });
-      const ok = await this.isLoginSuccessful();
-      if (ok || (await this._isAppReady())) {
-        return;
-      }
-      console.log(`[Login] Attempt ${attempt} still on ${this.page.url()}`);
-
-      // Already past sign-in (session landed on the app) — wait for chrome instead of retyping credentials.
-      const signedIn =
-        !String(this.page.url()).includes('signIn') && !(await this._isSignInVisible());
-      if (signedIn) {
-        await this.appHeader
-          .or(this.appShell)
-          .first()
-          .waitFor({ state: 'visible', timeout: 60000 });
-        return;
-      }
+    if (!(await this._isSignInVisible())) {
+      await this.page
+        .waitForURL((url) => this._isAuthenticatedUrl(url), { timeout: 20000 })
+        .catch(() => {});
+      return;
     }
 
-    const err = await this.errorMessage.isVisible({ timeout: 1500 }).catch(() => false);
+    await this._fillStable(this.emailInput, email);
+    await this._fillStable(this.passwordInput, password);
+    await expect(this.loginButton).toBeEnabled({ timeout: 10000 });
+    // eslint-disable-next-line no-console
+    console.log(`[Login] Signing in as ${email}`);
+    await this._submitLogin();
+
+    const ok = await this.isLoginSuccessful();
+    if (ok || (await this._isAppReady()) || this._isAuthenticatedUrl()) {
+      return;
+    }
+
+    const err = await this.errorMessage.isVisible({ timeout: 800 }).catch(() => false);
     throw new Error(
-      `Login did not leave the sign-in page within the expected time. URL: ${this.page.url()}${
-        err ? ' (invalid credentials)' : ''
+      `Login did not leave the sign-in page. URL: ${this.page.url()}${
+        err ? ' (app showed invalid credentials — check utils/testData.js password)' : ''
       }`
     );
   }
 
   async isLoginSuccessful() {
-    let success = await new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(false), 45000);
-      const done = (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      };
-      this.page
-        .waitForURL((url) => !String(url).includes('signIn'), { timeout: 45000 })
-        .then(() => done(true))
-        .catch(() => {});
-      this.appHeader
-        .waitFor({ state: 'visible', timeout: 45000 })
-        .then(() => done(true))
-        .catch(() => {});
-    });
-    if (!success && !String(this.page.url()).includes('signIn')) {
-      success = true;
+    const leftSignIn = await this.page
+      .waitForURL((url) => this._isAuthenticatedUrl(url) || !String(url).includes('signIn'), {
+        timeout: 20000,
+      })
+      .then(() => true)
+      .catch(() => false);
+
+    if (this._isAuthenticatedUrl()) {
+      await this.appHeader.or(this.appShell).first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+      return true;
     }
-    if (!success) {
+    if (!leftSignIn && (await this._isSignInVisible())) {
       return false;
     }
-    const chrome = this.appHeader.or(this.appShell).first();
-    await chrome.waitFor({ state: 'visible', timeout: 60000 }).catch(() => {});
-    return this._isAppReady();
+    await this.appHeader.or(this.appShell).first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+    return this._isAppReady() || this._isAuthenticatedUrl();
   }
 
   /** Navigate to sign-in; log in only when the app still shows the sign-in screen (cookies may skip it). */
@@ -155,19 +159,13 @@ class LoginPage extends BasePage {
   async waitForPostLoginShell() {
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
     await Promise.race([
-      this.page
-        .getByLabel(/clients\/projects/i)
-        .first()
-        .waitFor({ state: 'visible', timeout: 60000 }),
+      this.appHeader.waitFor({ state: 'visible', timeout: 20000 }),
+      this.appShell.waitFor({ state: 'visible', timeout: 20000 }),
       this.page
         .getByRole('button', { name: /clients\/projects/i })
         .first()
-        .waitFor({ state: 'visible', timeout: 60000 }),
-      this.page
-        .getByPlaceholder(/search client name or project name/i)
-        .first()
-        .waitFor({ state: 'visible', timeout: 60000 }),
-      this.page.waitForURL((url) => !url.toString().includes('signIn'), { timeout: 60000 }),
+        .waitFor({ state: 'visible', timeout: 20000 }),
+      this.page.waitForURL((url) => !url.toString().includes('signIn'), { timeout: 20000 }),
     ]).catch(() => {});
   }
 
