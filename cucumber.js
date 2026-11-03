@@ -249,7 +249,6 @@ module.exports = {
     publishQuiet: true,
     tags: '@vendor-portal',
   },
-<<<<<<< HEAD
   /** Estimate — incremental TCs */
   estimate: {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
@@ -427,7 +426,7 @@ module.exports = {
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
     ],
     tags: '@TS15 and @TC15',
-=======
+  },
   'vendor-all': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
     format: ['progress', 'html:reports/cucumber-report.html'],
@@ -475,6 +474,5 @@ module.exports = {
     format: ['progress', 'html:reports/cucumber-report.html'],
     publishQuiet: true,
     tags: '@customer-portal and @TC03',
->>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   },
 };

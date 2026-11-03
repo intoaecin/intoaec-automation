@@ -18,6 +18,13 @@ class ProjectNavigationPage extends BasePage {
     this.projectRows = page.locator('tbody tr');
   }
 
+  async dismissOverlays() {
+    for (let i = 0; i < 3; i += 1) {
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.waitForTimeout(200).catch(() => {});
+    }
+  }
+
   async tryClick(locator, timeout = 5000) {
     if (!(await locator.isVisible({ timeout }).catch(() => false))) {
       return false;
@@ -103,77 +110,6 @@ class ProjectNavigationPage extends BasePage {
   }
 
   async openClientsProjectsList() {
-<<<<<<< HEAD
-    if (await this._namedClientOrProjectCell().first().isVisible({ timeout: 400 }).catch(() => false)) {
-      // eslint-disable-next-line no-console
-      console.log('[nav] Clients/Projects list already visible');
-      return;
-    }
-
-    // eslint-disable-next-line no-console
-    console.log('[nav] Opening Clients/Projects list URL');
-    await this._gotoClientsProjectsListByUrl();
-    await expect(this._namedClientOrProjectCell().first()).toBeVisible({ timeout: 15000 });
-    // eslint-disable-next-line no-console
-    console.log(`[nav] Clients/Projects list ready. URL=${this.page.url()}`);
-  }
-
-  _clientsProjectsNavCandidates() {
-    const sidebar = this._sidebarScopes().first();
-    return [
-      this.page
-        .getByLabel('Clients/Projects')
-        .getByRole('button', { name: /clients\/projects/i })
-        .first(),
-      this.projectsLink,
-      this.page
-        .getByLabel('Clients/Projects')
-        .getByRole('link', { name: /clients\/projects/i })
-        .first(),
-      this.page.getByRole('link', { name: /clients\/projects/i }).first(),
-      this.page.getByRole('button', { name: /clients\/projects/i }).first(),
-      sidebar.getByRole('button', { name: /clients\/projects/i }).first(),
-      sidebar.getByRole('link', { name: /clients\/projects/i }).first(),
-    ];
-  }
-
-  async _anyClientsProjectsNavVisible(timeout = 1500) {
-    for (const candidate of this._clientsProjectsNavCandidates()) {
-      if (await candidate.isVisible({ timeout }).catch(() => false)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  async _waitForClientsProjectsNav(timeout = 60000) {
-    await expect
-      .poll(
-        async () => {
-          if (await this._isClientsProjectsListVisible()) return true;
-          return this._anyClientsProjectsNavVisible(800);
-        },
-        { timeout, intervals: [500, 1000, 2000, 3000] }
-      )
-      .toBe(true);
-  }
-
-  async _gotoClientsProjectsListByUrl() {
-    const base = String(env.admin || '').replace(/\/$/, '');
-    await this.page.goto(`${base}/client?isActive=true`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 45000,
-    });
-  }
-
-  async _waitForProjectProfile(timeout = 15000) {
-    const profile = this._profilePage();
-    try {
-      await expect(async () => {
-        expect(await profile.isProjectWorkspaceOpen()).toBeTruthy();
-      }).toPass({ timeout, intervals: [400, 800, 1500] });
-      await profile.ensureClassicProjectUi();
-=======
     const env = require('../../../config/env');
     const adminBase = String(env.admin || '').replace(/\/$/, '');
     const clientsUrl = `${adminBase}/client?isActive=true`;
@@ -231,7 +167,6 @@ class ProjectNavigationPage extends BasePage {
       await expect(async () => {
         expect(await profile.isInsideProjectProfile()).toBeTruthy();
       }).toPass({ timeout: 15000, intervals: [500, 1000, 2000, 3000] });
->>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
       return true;
     } catch {
       return false;
@@ -383,7 +318,6 @@ class ProjectNavigationPage extends BasePage {
     await this.openClientsProjectsList();
   }
 
-<<<<<<< HEAD
   _clientNameCells() {
     return this.page.locator('th[scope="row"] span.text-dark').filter({ visible: true });
   }
@@ -524,7 +458,8 @@ class ProjectNavigationPage extends BasePage {
       }
     }
     return false;
-=======
+  }
+
   /**
    * Always open the Active Clients list (never skip when already inside a project profile).
    * Target: {admin}/client?isActive=true  e.g. https://app.aecplayhouse.com/client?isActive=true
@@ -536,42 +471,10 @@ class ProjectNavigationPage extends BasePage {
       throw new Error(`Expected Active Clients list (/client?isActive=true) but was on: ${url}`);
     }
     console.log(`[Admin] Active Clients list ready: ${url}`);
->>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   }
 
   async clickFirstProject() {
     const profile = this._profilePage();
-<<<<<<< HEAD
-    if (this._hasProjectIdInUrl() || (await profile.isProjectWorkspaceOpen())) {
-      await profile.ensureClassicProjectUi();
-      // eslint-disable-next-line no-console
-      console.log('[nav] Already on project workspace — New UI turned OFF if it was on');
-      return;
-    }
-
-    await this.openClientsProjectsList();
-
-    if (this._hasProjectIdInUrl() || (await profile.isProjectWorkspaceOpen())) {
-      await profile.ensureClassicProjectUi();
-      return;
-    }
-
-    const urlBefore = this.page.url();
-    const nameCountBefore = await this._namedClientOrProjectCell().count().catch(() => 0);
-
-    await this._clickFirstClientName();
-    if (this._hasProjectIdInUrl() || (await this._waitForProjectProfile(2500))) {
-      return;
-    }
-
-    await this._clickFirstProjectUnderClient(nameCountBefore, urlBefore);
-    if (this._hasProjectIdInUrl() || (await this._waitForProjectProfile(2500))) {
-      return;
-    }
-
-    // eslint-disable-next-line no-console
-    console.log(`[nav] First client/project did not open hub. URL=${this.page.url()}`);
-=======
 
     // Always land on Active Clients list first so we do not reuse another project's profile.
     await this.openClientsProjectsList();
@@ -1252,7 +1155,6 @@ class ProjectNavigationPage extends BasePage {
     throw new Error(
       `Could not find project "${wanted}" in Active/All/Inactive Clients lists (${adminBase}/client)`
     );
->>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   }
 
   async openRfqFromClientMenu() {

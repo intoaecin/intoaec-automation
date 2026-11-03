@@ -167,17 +167,6 @@ class ProjectProfilePage extends BasePage {
 
   /** True when the classic project profile hub is open (any main section heading). */
   async isInsideProjectProfile() {
-<<<<<<< HEAD
-    const nameRe =
-      /^(Project Management|Procurement|Design & Estimates|Financial|Communication & Docs)$/;
-    return this.page
-      .getByRole('button', { name: nameRe })
-      .or(this.page.getByRole('tab', { name: nameRe }))
-      .filter({ visible: true })
-      .first()
-      .isVisible({ timeout: 400 })
-      .catch(() => false);
-=======
     const headings = [
       'Project Management',
       'Procurement',
@@ -195,7 +184,6 @@ class ProjectProfilePage extends BasePage {
       return true;
     }
     return false;
->>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   }
 
   /** Project is open (classic hub, UI-mode toggle, or project URL). */
@@ -849,7 +837,6 @@ class ProjectProfilePage extends BasePage {
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
   }
 
-<<<<<<< HEAD
   createIndentListControl() {
     return this.page
       .getByRole('button', { name: /create indent/i })
@@ -864,7 +851,8 @@ class ProjectProfilePage extends BasePage {
       /tab=RFQAndPO/i.test(href) &&
       (/subTab=Indent/i.test(href) || /subTab%3DIndent/i.test(href))
     );
-=======
+  }
+
   async clickRfqModuleCard(scope, text) {
     const createRfq = this.page.getByRole('button', { name: /create rfq/i }).first();
 
@@ -954,7 +942,6 @@ class ProjectProfilePage extends BasePage {
     }
     await rfqTab.click({ timeout: 10000, force: true }).catch(() => {});
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
->>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   }
 
   async clickIndentModuleCard(scope, text) {

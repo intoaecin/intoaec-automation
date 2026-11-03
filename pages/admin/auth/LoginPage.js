@@ -7,7 +7,6 @@ class LoginPage extends BasePage {
   constructor(page) {
     super(page);
     this.emailInput = page
-<<<<<<< HEAD
       .getByPlaceholder(/email|username/i)
       .or(page.getByLabel(/email|username/i))
       .or(page.getByRole('textbox', { name: /email|username/i }))
@@ -19,14 +18,6 @@ class LoginPage extends BasePage {
       .or(page.getByLabel(/^password$/i))
       .or(page.locator('input[type="password"]'))
       .filter({ visible: true })
-=======
-      .locator(
-        'input[type="email"], input[name="email" i], input[name="username" i], input[autocomplete="username"], input[autocomplete="email"]'
-      )
-      .or(page.getByPlaceholder(/email|username/i))
-      .or(page.getByLabel(/email|username|user name/i))
-      .or(page.locator('input[type="text"]').first())
->>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
       .first();
     this.loginButton = page
       .getByRole('button', { name: /^(sign in|log in|login)$/i })
@@ -49,45 +40,18 @@ class LoginPage extends BasePage {
       .first();
   }
 
-<<<<<<< HEAD
   _isAuthenticatedUrl(url = this.page.url()) {
     const href = String(url || '');
     if (/signIn/i.test(href)) return false;
     return /\/dashboard|\/client|projectId=/i.test(href);
   }
 
-  async _isAppReady() {
-    if (this._isAuthenticatedUrl()) return true;
-    const [header, shell] = await Promise.all([
-      this.appHeader.isVisible({ timeout: 800 }).catch(() => false),
-      this.appShell.isVisible({ timeout: 800 }).catch(() => false),
-    ]);
-    return !!(header || shell);
-  }
-
-  async _isSignInVisible() {
-    return this.passwordInput.isVisible({ timeout: 800 }).catch(() => false);
-  }
-
-  async goto() {
-    await this.page.goto(`${env.admin}/auth/signIn`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000,
-    });
-    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-    if (this._isAuthenticatedUrl() || (await this._isAppReady())) {
-      return;
-    }
-    await this.emailInput.waitFor({ state: 'visible', timeout: 20000 });
-    await this.passwordInput.waitFor({ state: 'visible', timeout: 10000 });
-    await this.loginButton.waitFor({ state: 'visible', timeout: 10000 });
-  }
-
   async _submitLogin() {
     await this.loginButton.click({ timeout: 8000 }).catch(async () => {
       await this.loginButton.click({ timeout: 8000, force: true });
     });
-=======
+  }
+
   _isAdminHost() {
     return /app\.(aecplayhouse|intoaec)/i.test(String(this.page.url() || ''));
   }
@@ -268,7 +232,6 @@ class LoginPage extends BasePage {
       .or(this.passwordInput)
       .first()
       .waitFor({ state: 'visible', timeout: 45000 });
->>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   }
 
   async _fillStable(locator, value) {
@@ -292,13 +255,6 @@ class LoginPage extends BasePage {
     if (await this._isAppReady()) {
       return;
     }
-<<<<<<< HEAD
-    if (!(await this._isSignInVisible())) {
-      await this.page
-        .waitForURL((url) => this._isAuthenticatedUrl(url), { timeout: 20000 })
-        .catch(() => {});
-      return;
-=======
     // Already inside the app (batch run reusing the session): do not try to fill
     // the sign-in form — its email locator matches the header Search box.
     if (
@@ -399,7 +355,6 @@ class LoginPage extends BasePage {
           return;
         }
       }
->>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
     }
 
     await this._fillStable(this.emailInput, email);
@@ -437,17 +392,12 @@ class LoginPage extends BasePage {
     if (!leftSignIn && (await this._isSignInVisible())) {
       return false;
     }
-<<<<<<< HEAD
-    await this.appHeader.or(this.appShell).first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
-    return this._isAppReady() || this._isAuthenticatedUrl();
-=======
 
     // Never use account switcher — leave it (or 404) and go straight to dashboard.
     await this._leaveAccountSwitcherOr404();
     await this._dismissPostLoginOverlay().catch(() => {});
     await this._waitForAppChrome(60000).catch(() => {});
     return this._isAppReady() || (this._isAdminHost() && !(await this._isSignInVisible()));
->>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   }
 
   /** If login lands on multi-account-switch / 404, go to dashboard only (no account pick). */
@@ -520,20 +470,6 @@ class LoginPage extends BasePage {
       return;
     }
 
-<<<<<<< HEAD
-  /** Wait until the post-login shell exposes navigation or the clients list. */
-  async waitForPostLoginShell() {
-    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-    await Promise.race([
-      this.appHeader.waitFor({ state: 'visible', timeout: 20000 }),
-      this.appShell.waitFor({ state: 'visible', timeout: 20000 }),
-      this.page
-        .getByRole('button', { name: /clients\/projects/i })
-        .first()
-        .waitFor({ state: 'visible', timeout: 20000 }),
-      this.page.waitForURL((url) => !url.toString().includes('signIn'), { timeout: 20000 }),
-    ]).catch(() => {});
-=======
     await this.login(wantedEmail, wantedPassword);
     await this._leaveAccountSwitcherOr404();
     await this._dismissPostLoginOverlay().catch(() => {});
@@ -550,7 +486,6 @@ class LoginPage extends BasePage {
     this.page[sessionKey] = wantedEmail;
     this.lastPasswordUsed = wantedPassword;
     console.log(`[Login] Signed in as ${wantedEmail} only — no account switch`);
->>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   }
 
   /** True when the app is already past the sign-in screen (reused session / same browser run). */
