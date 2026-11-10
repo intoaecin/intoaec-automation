@@ -747,10 +747,17 @@ class PurchaseOrderCreatePoPage extends BasePage {
     if (!sel) {
       return null;
     }
-    return (await sel.innerText())
+    const fromSelect = ((await sel.innerText().catch(() => '')) || '')
       .replace(/\u00a0/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+    if (fromSelect && !this.isPoLineUnitPlaceholderText(fromSelect)) {
+      return fromSelect;
+    }
+    const hiddenVal = (
+      (await row.locator('td').nth(2).locator('input').first().inputValue().catch(() => '')) || ''
+    ).trim();
+    return hiddenVal || fromSelect;
   }
 
   /**
@@ -804,6 +811,7 @@ class PurchaseOrderCreatePoPage extends BasePage {
 
     const existing = await this.getPoLineRowUnitDisplayText(row);
     if (!this.isPoLineUnitPlaceholderText(existing)) {
+      console.log(`[PO] Unit already set to "${existing}" — not changing it`);
       return;
     }
 
@@ -857,6 +865,7 @@ class PurchaseOrderCreatePoPage extends BasePage {
 
     const existing = await this.getPoLineRowUnitDisplayText(row);
     if (!this.isPoLineUnitPlaceholderText(existing)) {
+      console.log(`[PO] Unit already set to "${existing}" — not changing it`);
       return;
     }
 
@@ -2122,11 +2131,22 @@ class PurchaseOrderCreatePoPage extends BasePage {
     await expect(table).toBeVisible({ timeout: 30000 });
     const rows = table.locator('tbody tr').filter({ visible: true });
     const n = Math.min(await rows.count(), (this.lastPoSelectedProducts || []).length || 2);
+    let skipped = 0;
     for (let i = 0; i < n; i += 1) {
+      const row = rows.nth(i);
       // eslint-disable-next-line no-await-in-loop
-      await this.selectPoLineRowUnit(rows.nth(i), unit);
+      const existing = await this.getPoLineRowUnitDisplayText(row);
+      if (!this.isPoLineUnitPlaceholderText(existing)) {
+        skipped += 1;
+        console.log(`[PO] Row ${i + 1} already has unit "${existing}" — skipping`);
+        continue;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await this.selectPoLineRowUnit(row, unit);
     }
-    console.log(`[PO] Set unit "${unit}" on ${n} selected product row(s)`);
+    console.log(
+      `[PO] Unit pass done (${skipped}/${n} already filled, requested "${unit}" only for empty rows)`
+    );
   }
 
   /** Fill any remaining required fields (rates default when empty). */
@@ -2152,8 +2172,7 @@ class PurchaseOrderCreatePoPage extends BasePage {
       // eslint-disable-next-line no-await-in-loop
       await rateInput.blur().catch(() => {});
     }
-    await this.ensureAllPoLineItemUnitsFilled({ settleFirst: true }).catch(() => {});
-    console.log('[PO] Filled remaining required Purchase Order details');
+    console.log('[PO] Filled remaining required Purchase Order details (units left as already entered)');
   }
 
   async expectPurchaseOrderTitleVisibleOnList(title) {

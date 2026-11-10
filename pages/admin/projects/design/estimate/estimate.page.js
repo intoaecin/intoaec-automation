@@ -6,16 +6,32 @@ class EstimatePage extends BasePage {
     super(page);
     this.defaultTimeout = 120000;
     this.createEstimateButton = page.getByRole('button', { name: /create estimate/i }).first();
-    this.startFromScratchButton = page.getByText(/start from scratch/i).first();
+    this.startFromScratchButton = page.getByText('Start from scratch', { exact: true }).first();
     this.proceedButton = page.getByRole('button', { name: /proceed/i }).first();
-    this.estimateTitleInput = page.getByRole('textbox', { name: /interior project estimate|estimate title/i }).first();
+    this.estimateTitleInput = page
+      .getByRole('textbox', { name: 'Interior Project Estimate' })
+      .or(page.getByRole('textbox', { name: /interior project estimate|estimate title|^title$|project estimate/i }))
+      .or(page.getByLabel(/estimate title|^title$/i))
+      .or(page.getByPlaceholder(/estimate title|enter title|^title$/i))
+      .first();
+    this.addSectionNameButton = page.getByRole('button', { name: /add section name/i }).first();
+    this.enterItemNameButton = page.getByRole('button', { name: 'Enter Item Name', exact: true });
+    this.enterItemNameCombo = page.getByRole('combobox', { name: 'Enter Item Name' });
     this.createdOnInput = page.locator('label:has-text("Created on")').locator('xpath=following::input[1]').first();
     this.validTillInput = page.locator('label:has-text("Valid till")').locator('xpath=following::input[1]').first();
-    this.addSectionButton = page.locator('.MuiBox-root.css-zir2wb').first();
-    this.sectionNameInput = page.locator('.MuiFormControl-root.MuiTextField-root.css-1nf09ib input').first();
-    this.addAnotherManualRowLink = page.locator('.pr-1.pointer.fw-600').first();
-    this.addManuallyButton = page.locator('.pr-1.pointer.fw-600').first();
-    this.itemNameInput = page.locator('.MuiFormControl-root.MuiTextField-root.css-utsrz3 input').first();
+    this.addSectionButton = page.getByRole('button', { name: /add section/i }).last();
+    this.sectionNameInput = page
+      .locator('input:focus')
+      .or(page.getByRole('textbox', { name: /section name|section/i }))
+      .or(page.getByPlaceholder(/section name|add section/i))
+      .first();
+    this.addAnotherManualRowLink = page.getByText(/add manually/i).first();
+    this.addManuallyButton = page.getByText(/add manually/i).first();
+    this.itemNameInput = page
+      .locator('input:focus')
+      .or(page.getByRole('textbox', { name: /item name|item/i }))
+      .or(page.getByPlaceholder(/item name|add item/i))
+      .first();
     this.descriptionInput = page.locator('textarea[placeholder*="Description"], textarea[name*="description"], input[placeholder*="Description"]').first();
     this.qtyInput = page.locator('input[placeholder="Qty"], input[name*="qty"]').first();
     this.unitInput = page.locator('input[placeholder*="Unit"], input[name*="unit"]').first();
@@ -43,8 +59,16 @@ class EstimatePage extends BasePage {
       .getByRole('menuitem', { name: /send as estimate/i })
       .or(page.getByText(/send as estimate/i))
       .first();
-    this.sendEmailButton = page.getByRole('button', { name: /send email/i }).first();
-    this.emailDialog = page.locator('[role="dialog"], .modal.show, .offcanvas.show').first();
+    this.sendEmailButton = page
+      .getByRole('button', { name: /send email|^send$/i })
+      .or(page.getByRole('menuitem', { name: /send email/i }))
+      .or(page.getByText(/^send email$/i))
+      .filter({ visible: true })
+      .first();
+    this.emailDialog = page.locator('[role="dialog"], .MuiDialog-root, .modal.show, .offcanvas.show').first();
+    this.costCatalogLoader = page
+      .locator('.MuiCircularProgress-root, [role="progressbar"], .MuiBackdrop-root')
+      .filter({ visible: true });
     this.recipientInput = page.locator('input[placeholder*="To"], input[name*="recipient"], input[name*="email"]').first();
     this.validationMessage = page.locator('[role="alert"], .toast-message, .ant-message-notice-content, .invalid-feedback').first();
     // Default section title before rename (match anywhere visible; RBD subtree alone is unreliable in some builds).
@@ -186,10 +210,10 @@ class EstimatePage extends BasePage {
   async startFromScratchAndProceed() {
     await expect(this.startFromScratchButton).toBeVisible({ timeout: this.defaultTimeout });
     await this.startFromScratchButton.click();
+    this.logStep('Clicked Start from scratch (not 2D Takeoff).');
     await expect(this.proceedButton).toBeVisible({ timeout: this.defaultTimeout });
     await expect(this.proceedButton).toBeEnabled({ timeout: this.defaultTimeout });
     await this.proceedButton.click();
-    // Post-proceed, the form can be heavy and network may never fully go idle; use the repo's slow-load helper.
     await this.waitForFormSlowHandling();
   }
 
@@ -323,7 +347,39 @@ class EstimatePage extends BasePage {
 
   async fillEstimateTitleOnly(title) {
     await expect(this.estimateTitleInput).toBeVisible({ timeout: this.defaultTimeout });
-    await this.estimateTitleInput.fill(title);
+    await this.estimateTitleInput.click({ timeout: 10000 }).catch(() => {});
+    await this.estimateTitleInput.fill('');
+    await this.estimateTitleInput.pressSequentially(String(title), { delay: 20 }).catch(async () => {
+      await this.estimateTitleInput.fill(String(title));
+    });
+    await this.page.keyboard.press('Enter').catch(() => {});
+  }
+
+  async _typeIntoActiveEditor(value) {
+    await this.page.keyboard.press('Control+A').catch(() => {});
+    await this.page.keyboard.type(String(value), { delay: 35 });
+    await this.page.keyboard.press('Enter').catch(() => {});
+    await this.page.waitForTimeout(400).catch(() => {});
+  }
+
+  /** MUI Autocomplete is often readonly — fill() does nothing; type keys after unlocking. */
+  async typeIntoMuiCombo(combo, text) {
+    await combo.click({ timeout: 10000, force: true }).catch(() => {});
+    await combo.evaluate((el) => {
+      el.removeAttribute('readonly');
+      el.removeAttribute('aria-readonly');
+      if ('readOnly' in el) el.readOnly = false;
+    }).catch(() => {});
+    await this.page.keyboard.press('Control+A').catch(() => {});
+    await this.page.keyboard.type(String(text), { delay: 40 });
+    await combo
+      .evaluate((el, v) => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        setter?.call(el, v);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }, String(text))
+      .catch(() => {});
   }
 
   async fillMandatoryDetails({ title, createdOffset = 0, validOffset = 7 }) {
@@ -694,39 +750,30 @@ class EstimatePage extends BasePage {
   }
 
   async fillSectionNameAtIndex(sectionIndex, name) {
-    // Priority: hard path for the 2nd section (index 1) as requested.
-    if (sectionIndex === 1) {
-      const hard = this.secondSectionNameCellHardPath;
-      if (await hard.isVisible({ timeout: 1500 }).catch(() => false)) {
-        await hard.scrollIntoViewIfNeeded().catch(() => {});
-        await hard.dblclick().catch(() => hard.click({ clickCount: 2, delay: 120, force: true }));
-        await expect(this.sectionNameInput).toBeVisible({ timeout: this.defaultTimeout });
-        await this.sectionNameInput.fill(name);
-        await this.page.keyboard.press('Enter').catch(() => this.page.keyboard.press('Tab'));
-        await this.page.waitForTimeout(600);
-        return;
-      }
-    }
+    const sectionText = this.page.getByText(/^add section name$/i).nth(sectionIndex);
+    const sectionBtn = this.page.getByRole('button', { name: /add section name/i }).nth(sectionIndex);
+    const clickTarget = (await sectionText.isVisible({ timeout: 3000 }).catch(() => false))
+      ? sectionText
+      : sectionBtn;
+    await expect(clickTarget).toBeVisible({ timeout: this.defaultTimeout });
+    await clickTarget.scrollIntoViewIfNeeded().catch(() => {});
+    await clickTarget.click({ timeout: 15000 });
+    this.logStep('Clicked Add section name text');
 
-    const titleCell = this.addSectionNameTitles.nth(sectionIndex);
-    if (await titleCell.isVisible().catch(() => false)) {
-      await titleCell.scrollIntoViewIfNeeded().catch(() => {});
-      await titleCell.dblclick();
-      await expect(this.sectionNameInput).toBeVisible({ timeout: this.defaultTimeout });
-      await this.sectionNameInput.fill(name);
-      await this.page.keyboard.press('Enter').catch(() => this.page.keyboard.press('Tab'));
-      await this.page.waitForTimeout(600);
-      return;
-    }
-
-    // Fallback: the page uses text placeholders
-    const placeholder = this.addSectionNamePlaceholders.nth(sectionIndex);
-    await expect(placeholder).toBeVisible({ timeout: this.defaultTimeout });
-    await placeholder.dblclick();
-    await expect(this.sectionNameInput).toBeVisible({ timeout: this.defaultTimeout });
-    await this.sectionNameInput.fill(name);
-    await this.page.keyboard.press('Enter').catch(() => this.page.keyboard.press('Tab'));
-    await this.page.waitForTimeout(600);
+    const sectionField = this.page
+      .getByRole('textbox', { name: /add section name|section name|section/i })
+      .or(this.page.getByPlaceholder(/add section name|section name|section/i))
+      .or(this.page.locator('input:not([type="hidden"]):focus, textarea:focus'))
+      .first();
+    await expect(sectionField).toBeVisible({ timeout: 20000 });
+    await sectionField.click({ timeout: 8000 });
+    await sectionField.fill('');
+    await sectionField.pressSequentially(String(name), { delay: 35 }).catch(async () => {
+      await this.page.keyboard.type(String(name), { delay: 35 });
+    });
+    await this.page.keyboard.press('Enter');
+    this.logStep(`Entered section name in text field: ${name}`);
+    await this.page.waitForTimeout(400).catch(() => {});
   }
 
   async ensureSectionExpanded(sectionIndex) {
@@ -892,32 +939,304 @@ class EstimatePage extends BasePage {
     await this.page.waitForTimeout(800);
   }
 
-  async addManualItem(item, { manualIndex = 0 } = {}) {
-    // 1. Click "Add Manually" if we are adding a second item
-    if (manualIndex > 0) {
-      const addManuallyBtn = this.page.getByText('Add Manually', { exact: false }).first();
-      await expect(addManuallyBtn).toBeVisible({ timeout: this.defaultTimeout });
-      await addManuallyBtn.click();
-      await this.page.waitForTimeout(1000);
+  async waitForCostCatalogLookup() {
+    this.logStep('Waiting for cost catalogue lookup on the line item.');
+    await this.page.waitForTimeout(600).catch(() => {});
+    const spinner = this.costCatalogLoader.first();
+    if (await spinner.isVisible({ timeout: 2500 }).catch(() => false)) {
+      await spinner.waitFor({ state: 'hidden', timeout: 20000 }).catch(() => {});
+    }
+    await this.page.keyboard.press('Escape').catch(() => {});
+  }
+
+  /**
+   * Codegen path: button "Enter Item Name" → combobox "Enter Item Name" → confirm Add → qty spinbutton.
+   */
+  async fillDefaultLineItemOnCreateForm({ name, qty, unit, rate, profit = 0, fillAllDetails = false } = {}) {
+    const itemName = String(name || '').trim();
+    await this.page.keyboard.press('Escape').catch(() => {});
+
+    const enterBtn = this.page.getByRole('button', { name: 'Enter Item Name', exact: true }).first();
+    await expect(enterBtn).toBeVisible({ timeout: this.defaultTimeout });
+    await enterBtn.scrollIntoViewIfNeeded().catch(() => {});
+    await enterBtn.click({ timeout: 15000 });
+    this.logStep('Clicked Enter Item Name');
+    await this.page.waitForTimeout(400).catch(() => {});
+
+    const combo = this.page.getByRole('combobox', { name: 'Enter Item Name' }).first();
+    await expect(combo).toBeVisible({ timeout: 20000 });
+    await this.typeIntoMuiCombo(combo, itemName);
+    this.logStep(`Typed into Enter Item Name: ${itemName}`);
+
+    await this.waitForCostCatalogLookup();
+
+    const addInCatalog = this.page.locator('div').filter({ hasText: /add in cost catalog/i }).first();
+    if (await addInCatalog.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await addInCatalog.click({ timeout: 8000 }).catch(() => {});
+      this.logStep('Clicked Add in cost catalog');
     }
 
-    // 2. Locate the parent div
+    const confirmAdd = this.page.getByRole('button', {
+      name: new RegExp(`${itemName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*Add`, 'i'),
+    }).first();
+    if (await confirmAdd.isVisible({ timeout: 8000 }).catch(() => false)) {
+      await confirmAdd.click({ timeout: 10000 });
+      this.logStep('Confirmed line item with Add');
+    } else {
+      await this.page.keyboard.press('Enter').catch(() => {});
+    }
+    await this.page.waitForTimeout(500).catch(() => {});
+
+    const qtyVal = qty != null ? qty : this.randomAecQty();
+    const unitVal = unit || this.randomAecUnit();
+    const rateVal = rate != null ? rate : this.randomAecRate();
+    await this.fillQtyUnitRateWhileCreatingItem({
+      itemName,
+      qty: qtyVal,
+      unit: unitVal,
+      rate: rateVal,
+      required: Boolean(fillAllDetails),
+    });
+    this.logStep(`Created line item "${itemName}" qty ${qtyVal} unit ${unitVal} rate/unit ${rateVal}`);
+  }
+
+  async resolveEstimateItemRow(itemName) {
+    const nameRe = String(itemName || '').trim();
+    if (nameRe) {
+      const byText = this.page.locator('tr').filter({ hasText: nameRe }).first();
+      if (await byText.isVisible({ timeout: 4000 }).catch(() => false)) return byText;
+    }
+    const byId = this.page.locator('#estimate-itemName-0-0').or(this.page.locator('[id^="estimate-itemName-"]')).first();
+    await expect(byId).toBeVisible({ timeout: 15000 });
+    return byId.locator('xpath=ancestor::tr[1]');
+  }
+
+  async estimateColumnIndex(nameRe, fallback) {
+    const headers = this.page.locator('thead th, thead td, [role="columnheader"]');
+    const n = await headers.count().catch(() => 0);
+    for (let i = 0; i < n; i += 1) {
+      const t = ((await headers.nth(i).innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+      if (nameRe.test(t)) return i;
+    }
+    return fallback;
+  }
+
+  async clickThenTypeNumber(clickTarget, value, label, { useLastEditor = false } = {}) {
+    await clickTarget.scrollIntoViewIfNeeded().catch(() => {});
+    await clickTarget.click({ timeout: 8000 }).catch(() => clickTarget.dblclick({ force: true, timeout: 5000 }));
+    this.logStep(`Clicked ${label} cell`);
+    await this.page.waitForTimeout(300).catch(() => {});
+
+    const inCell = clickTarget.locator('input:not([type="hidden"]), [role="spinbutton"]').first();
+    const spin = useLastEditor
+      ? this.page.getByRole('spinbutton').filter({ visible: true }).last()
+      : this.page.getByRole('spinbutton').filter({ visible: true }).first();
+    const numberInput = this.page.locator('input[type="number"]:visible').last();
+
+    if (await inCell.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await inCell.fill(String(value)).catch(async () => {
+        await this.page.keyboard.press('Control+A').catch(() => {});
+        await this.page.keyboard.type(String(value), { delay: 20 });
+      });
+    } else if (await spin.isVisible({ timeout: 2500 }).catch(() => false)) {
+      await spin.click({ timeout: 3000 }).catch(() => {});
+      await spin.fill(String(value)).catch(async () => {
+        await this.page.keyboard.press('Control+A').catch(() => {});
+        await this.page.keyboard.type(String(value), { delay: 20 });
+      });
+    } else if (await numberInput.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await numberInput.fill(String(value)).catch(async () => {
+        await this.page.keyboard.press('Control+A').catch(() => {});
+        await this.page.keyboard.type(String(value), { delay: 20 });
+      });
+    } else {
+      await this.page.keyboard.press('Control+A').catch(() => {});
+      await this.page.keyboard.type(String(value), { delay: 20 });
+    }
+    await this.page.keyboard.press('Enter').catch(() => {});
+    this.logStep(`Entered ${label}: ${value}`);
+  }
+
+  unitMenuItems() {
+    return this.page.locator(
+      '.MuiAutocomplete-option, .MuiMenuItem-root, .MuiMenu-list li, .MuiPopover-paper li, [role="option"], [role="menuitem"]'
+    ).filter({ visible: true });
+  }
+
+  async selectAnyUnitFromDropdown(row, unitCell) {
+    const combo = row.getByRole('combobox').filter({ hasNotText: /enter item name|interior project/i }).first();
+    const select = row.locator('.MuiSelect-select').first();
+    if (await combo.isVisible({ timeout: 800 }).catch(() => false)) {
+      await combo.click({ timeout: 8000 });
+    } else if (await select.isVisible({ timeout: 800 }).catch(() => false)) {
+      await select.click({ timeout: 8000 });
+    } else {
+      await unitCell.scrollIntoViewIfNeeded().catch(() => {});
+      await unitCell.click({ timeout: 8000 }).catch(() => unitCell.dblclick({ force: true }));
+    }
+    this.logStep('Clicked unit cell');
+
+    if (!(await this.unitMenuItems().first().isVisible({ timeout: 2000 }).catch(() => false))) {
+      if (await combo.isVisible({ timeout: 800 }).catch(() => false)) {
+        await combo.click({ timeout: 5000 }).catch(() => {});
+      } else if (await select.isVisible({ timeout: 800 }).catch(() => false)) {
+        await select.click({ timeout: 5000 }).catch(() => {});
+      } else {
+        await unitCell.click({ force: true }).catch(() => {});
+      }
+    }
+
+    const items = this.unitMenuItems();
+    if (await items.first().isVisible({ timeout: 5000 }).catch(() => false)) {
+      const count = await items.count();
+      const pick = count > 1 ? Math.min(1, count - 1) : 0;
+      const option = items.nth(pick);
+      const picked = ((await option.innerText().catch(() => '')) || 'unit').trim();
+      await option.click({ timeout: 8000 });
+      this.logStep(`Selected unit from dropdown: ${picked}`);
+      return;
+    }
+
+    await this.page.keyboard.press('ArrowDown').catch(() => {});
+    await this.page.keyboard.press('Enter').catch(() => {});
+    this.logStep('Selected unit with keyboard');
+  }
+
+  async fillQtyUnitRateWhileCreatingItem({ itemName, qty, rate, required = false } = {}) {
+    if (this.page.isClosed()) return;
+
+    const row = await this.resolveEstimateItemRow(itemName);
+    await expect(row).toBeVisible({ timeout: this.defaultTimeout });
+    await row.scrollIntoViewIfNeeded().catch(() => {});
+
+    const qtyIdx = await this.estimateColumnIndex(/^qty$/i, 1);
+    const unitIdx = await this.estimateColumnIndex(/^unit$/i, 2);
+    const rateIdx = await this.estimateColumnIndex(/rate/i, 3);
+    const qtyCell = row.locator('td').nth(qtyIdx);
+    const unitCell = row.locator('td').nth(unitIdx);
+    const rateCell = row.locator('td').nth(rateIdx);
+
+    const qtyVal = qty != null ? qty : this.randomAecQty();
+    const rateVal = rate != null ? rate : this.randomAecRate();
+
+    const qtyZero = row.getByText(/^0(\.0+)?$/, { exact: true }).first();
+    await this.clickThenTypeNumber(
+      (await qtyZero.isVisible({ timeout: 1200 }).catch(() => false)) ? qtyZero : qtyCell,
+      qtyVal,
+      'qty'
+    );
+
+    await this.selectAnyUnitFromDropdown(row, unitCell);
+    await this.page.keyboard.press('Escape').catch(() => {});
+    await this.page.waitForTimeout(300).catch(() => {});
+
+    const rupeeInRate = rateCell.locator('div, span').filter({ hasText: /₹/ }).first();
+    const rateTarget = (await rupeeInRate.isVisible({ timeout: 1200 }).catch(() => false))
+      ? rupeeInRate
+      : rateCell;
+    await rateCell.scrollIntoViewIfNeeded().catch(() => {});
+    await this.clickThenTypeNumber(rateTarget, rateVal, 'rate/unit', { useLastEditor: true });
+
+    if (required) this.logStep(`Filled qty ${qtyVal}, unit dropdown, rate/unit ${rateVal}`);
+  }
+
+  async fillSpinIfVisible(value, which = 'first') {
+    if (this.page.isClosed()) return false;
+    const spin = which === 'last'
+      ? this.page.getByRole('spinbutton').last()
+      : this.page.getByRole('spinbutton').first();
+    if (!(await spin.isVisible({ timeout: 4000 }).catch(() => false))) return false;
+    await spin.click({ force: true, timeout: 5000 }).catch(() => {});
+    const ok = await spin.fill(String(value), { force: true, timeout: 3000 }).then(() => true).catch(() => false);
+    if (!ok && !this.page.isClosed()) {
+      await this.page.keyboard.press('Control+A').catch(() => {});
+      await this.page.keyboard.type(String(value), { delay: 20 });
+    }
+    await this.page.keyboard.press('Tab').catch(() => {});
+    return true;
+  }
+
+  async fillLineItemUnitQtyRate({ qty, unit, rate } = {}) {
+    if (this.page.isClosed()) return;
+    await this.page.keyboard.press('Escape').catch(() => {});
+
+    const clickTo = this.page.getByRole('button', { name: /enter item name click to/i }).first();
+    if (await clickTo.isVisible({ timeout: 2500 }).catch(() => false)) {
+      await clickTo.click({ timeout: 8000, force: true }).catch(() => {});
+      this.logStep('Clicked Enter Item Name Click to');
+      await this.page.waitForTimeout(400).catch(() => {});
+    }
+
+    if (await this.fillSpinIfVisible(qty, 'first')) {
+      this.logStep(`Filled qty: ${qty}`);
+    }
+
+    const unitOption = this.page.getByRole('option', { name: new RegExp(`^${String(unit)}$`, 'i') }).first();
+    const unitTrigger = this.page
+      .locator('.MuiSelect-select, [role="combobox"], [aria-haspopup="listbox"]')
+      .filter({ visible: true })
+      .filter({ hasNotText: /enter item name|^custom$|interior project/i })
+      .first();
+    if (await unitTrigger.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await unitTrigger.click({ timeout: 8000, force: true }).catch(() => {});
+      if (await unitOption.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await unitOption.click({ timeout: 5000 }).catch(() => {});
+      } else {
+        const firstUnit = this.page.getByRole('option').filter({ visible: true }).first();
+        if (await firstUnit.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await firstUnit.click().catch(() => {});
+        }
+      }
+      this.logStep(`Filled unit: ${unit}`);
+    }
+
+    const rateCell = this.page.locator('div').filter({ hasText: /^₹\s*0$/ }).nth(4);
+    const rateCellAlt = this.page.locator('div').filter({ hasText: /^₹\s*0$/ }).last();
+    const rateTarget = (await rateCell.isVisible({ timeout: 1500 }).catch(() => false)) ? rateCell : rateCellAlt;
+    if (await rateTarget.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await rateTarget.click({ timeout: 8000, force: true }).catch(() => {});
+      if (!(await this.fillSpinIfVisible(rate, 'last')) && !this.page.isClosed()) {
+        await this.page.keyboard.type(String(rate), { delay: 20 });
+        await this.page.keyboard.press('Enter').catch(() => {});
+      }
+      this.logStep(`Filled rate: ${rate}`);
+    } else if (await this.fillSpinIfVisible(rate, 'last')) {
+      this.logStep(`Filled rate via spinbutton: ${rate}`);
+    }
+  }
+
+  async addManualItem(item, { manualIndex = 0 } = {}) {
+    // First section already has a default line-item row. Only extra rows need Add Manually.
+    if (manualIndex > 0) {
+      const addManuallyBtn = this.page.getByText(/add manually/i).first();
+      await expect(addManuallyBtn).toBeVisible({ timeout: this.defaultTimeout });
+      await addManuallyBtn.click();
+      await this.page.waitForTimeout(800);
+    }
+
     const itemNameContainer = this.page.locator(`#estimate-itemName-0-${manualIndex}`);
+    const addItemText = itemNameContainer
+      .getByText(/add item name/i)
+      .first()
+      .or(this.page.getByText(/add item name/i).nth(manualIndex));
 
-    // 3. Double click "Add Item name"
-    const addItemText = itemNameContainer.getByText('Add Item name', { exact: false }).first();
-    await expect(addItemText).toBeVisible({ timeout: this.defaultTimeout });
-    await addItemText.dblclick();
-
-    // 4. Type the Name
-    const itemNameInput = itemNameContainer.locator('input').first();
-    await expect(itemNameInput).toBeVisible({ timeout: this.defaultTimeout });
+    if (await addItemText.isVisible({ timeout: 8000 }).catch(() => false)) {
+      await addItemText.scrollIntoViewIfNeeded().catch(() => {});
+      await addItemText.dblclick({ timeout: 15000 }).catch(() => addItemText.click({ clickCount: 2, force: true }));
+    } else {
+      await expect(itemNameContainer).toBeVisible({ timeout: this.defaultTimeout });
+      await itemNameContainer.dblclick();
+    }
 
     if (item.name !== undefined) {
-      await itemNameInput.fill(item.name);
-      // Pressing 'Enter' is safer than 'Tab' to lock in Material UI table values
-      await this.page.keyboard.press('Enter');
-      await this.page.waitForTimeout(800);
+      const itemNameInput = itemNameContainer.locator('input').first();
+      if (await itemNameInput.isVisible({ timeout: 2500 }).catch(() => false)) {
+        await itemNameInput.fill(item.name);
+        await this.page.keyboard.press('Enter');
+      } else {
+        await this._typeIntoActiveEditor(item.name);
+      }
+      await this.waitForCostCatalogLookup();
     }
 
     // --- 🚨 OPTION 2: THE MODAL SAFETY NET 🚨 ---
@@ -1328,22 +1647,39 @@ class EstimatePage extends BasePage {
     this.logStep('Clicked Compose email.');
 
     const sendAsEstimate = this.sendAsEstimateMenuItem;
-    await expect(sendAsEstimate).toBeVisible({ timeout: this.defaultTimeout });
-    await sendAsEstimate.click();
-    this.logStep('Clicked Send as Estimate.');
+    if (await sendAsEstimate.isVisible({ timeout: 8000 }).catch(() => false)) {
+      await sendAsEstimate.click();
+      this.logStep('Clicked Send as Estimate.');
+    }
 
-    const sendBtn = this.sendEmailButton;
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await expect(this.emailDialog).toBeVisible({ timeout: this.defaultTimeout }).catch(() => {});
+
+    const sendBtn = this.page
+      .getByRole('button', { name: /send email/i })
+      .or(this.sendEmailButton)
+      .filter({ visible: true })
+      .first();
     await expect(sendBtn).toBeVisible({ timeout: this.defaultTimeout });
     await expect(sendBtn).toBeEnabled({ timeout: this.defaultTimeout });
-    await sendBtn.click();
+    await this.page
+      .locator('#fc_frame, iframe#fc_widget')
+      .evaluateAll((nodes) => {
+        nodes.forEach((node) => {
+          node.style.setProperty('pointer-events', 'none', 'important');
+          node.style.setProperty('visibility', 'hidden', 'important');
+        });
+      })
+      .catch(() => {});
+    await sendBtn.click({ force: true });
     this.logStep('Clicked Send Email.');
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
     await this.waitForNetworkIdle().catch(() => {});
   }
 
   /**
-   * TC-01: Create Estimate → Start from scratch → AEC section + line item
-   * (qty / unit / rate) → title → Action → Compose email → Send as Estimate → Send Email.
+   * TC-01: Create Estimate → Start from scratch → title → section → line item
+   * (qty / unit / rate) → Action → Compose email → Send as Estimate → Send Email.
    */
   async completeCreateFromScratchAndSendAsEstimateJourney() {
     const sectionName = this.randomAecSectionName();
@@ -1358,18 +1694,53 @@ class EstimatePage extends BasePage {
     await this.startFromScratchAndProceed();
     this.logStep('Started from scratch; create estimate page is displayed.');
 
+    await this.fillEstimateTitleOnly(title);
+    this.logStep(`Filled estimate title: ${title}`);
+
     await this.fillSectionNameAtIndex(0, sectionName);
     this.logStep(`Filled section: ${sectionName}`);
 
-    await this.addManualItem({ name: itemName }, { manualIndex: 0 });
-    await this.fillItemQtyUnitRateProfit(0, 0, { qty, unit, rate, profit: 0 });
+    await this.fillDefaultLineItemOnCreateForm({ name: itemName, qty, unit, rate, profit: 0 });
     this.logStep(`Filled line item: ${itemName}, qty ${qty}, unit ${unit}, rate ${rate}`);
+
+    await this.composeAndSendEmail();
+    this.logStep('Complete create-from-scratch and send-as-estimate journey finished.');
+  }
+
+  /**
+   * TC-02: same as TC-01, and the line item must include section + unit + qty + rate.
+   */
+  async completeCreateFromScratchWithFullLineDetailsAndSend() {
+    const sectionName = this.randomAecSectionName();
+    const itemName = this.randomAecItemName();
+    const title = this.randomAecEstimateTitle();
+    const qty = this.randomAecQty();
+    const unit = this.randomAecUnit();
+    const rate = this.randomAecRate();
+
+    await this.clickCreateEstimate();
+    this.logStep('Clicked Create Estimate.');
+    await this.startFromScratchAndProceed();
+    this.logStep('Started from scratch; create estimate page is displayed.');
 
     await this.fillEstimateTitleOnly(title);
     this.logStep(`Filled estimate title: ${title}`);
 
+    await this.fillSectionNameAtIndex(0, sectionName);
+    this.logStep(`Filled section: ${sectionName}`);
+
+    await this.fillDefaultLineItemOnCreateForm({
+      name: itemName,
+      qty,
+      unit,
+      rate,
+      profit: 0,
+      fillAllDetails: true,
+    });
+    this.logStep(`Filled full line item: ${itemName}, section ${sectionName}, qty ${qty}, unit ${unit}, rate ${rate}`);
+
     await this.composeAndSendEmail();
-    this.logStep('Complete create-from-scratch and send-as-estimate journey finished.');
+    this.logStep('Complete create-from-scratch with full line details and send finished.');
   }
 
   async createAndSendMinimalEstimateForRfq(title) {

@@ -6,38 +6,36 @@ class ProjectProfilePage extends BasePage {
   constructor(page) {
     super(page);
     // Headings
-    this.designEstimatesHeading = page.getByRole('button', { name: 'Design & Estimates' });
+    this.designEstimatesHeading = page
+      .getByRole('button', { name: /plan\s*(and|&)\s*design|design\s*(&|and)\s*estimates|^design$/i })
+      .first();
     this.procurementHeading = page.getByRole('button', { name: 'Procurement' });
     this.financialHeading = page.getByRole('button', { name: 'Financial' });
     this.projectManagementHeading = page.getByRole('button', { name: 'Project Management' });
     this.communicationDocsHeading = page.getByRole('button', { name: 'Communication & Docs' });
-    // Pill control shown after opening a project (label: "Switch to Classic UI").
-    this.uiModeToggleLabel = page.getByText(/switch to (classic|new) ui/i).first();
-    this.uiModeToggleRoot = page
-      .locator('div, label, button, span')
-      .filter({ hasText: /switch to (classic|new) ui/i })
-      .filter({ visible: true })
-      .first();
-    this.uiModeToggle = this.uiModeToggleRoot
-      .locator('[role="switch"], input[type="checkbox"], .MuiSwitch-switchBase, .MuiSwitch-root')
-      .or(
-        page
-          .getByRole('switch', { name: /switch to (classic|new) ui/i })
-          .or(page.getByLabel(/switch to (classic|new) ui/i))
-          .or(page.getByRole('checkbox', { name: /switch to (classic|new) ui/i }))
-      )
-      .first();
+  }
+
+  _headingAliases(name) {
+    const raw = String(name || '').trim();
+    if (/plan\s*(and|&)\s*design|design\s*(&|and)\s*estimates|^design$/i.test(raw)) {
+      return ['Plan and Design', 'Plan & Design', 'Design & Estimates', 'Design', raw];
+    }
+    return [raw];
   }
 
   _visibleHeading(name) {
-    const exact = new RegExp(`^\\s*${String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
-    return this.page
-      .getByRole('tab', { name: exact })
-      .or(this.page.getByRole('button', { name: exact }))
-      .or(this.page.locator('.MuiTab-root, [role="tab"]').filter({ hasText: exact }))
-      .or(this.page.getByText(exact))
-      .filter({ visible: true })
-      .first();
+    const names = this._headingAliases(name);
+    let loc = null;
+    for (const label of names) {
+      const exact = new RegExp(`^\\s*${String(label).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+      const part = this.page
+        .getByRole('tab', { name: exact })
+        .or(this.page.getByRole('button', { name: exact }))
+        .or(this.page.locator('.MuiTab-root, [role="tab"]').filter({ hasText: exact }))
+        .or(this.page.getByText(exact));
+      loc = loc ? loc.or(part) : part;
+    }
+    return loc.filter({ visible: true }).first();
   }
 
   /**
@@ -167,20 +165,10 @@ class ProjectProfilePage extends BasePage {
 
   /** True when the classic project profile hub is open (any main section heading). */
   async isInsideProjectProfile() {
-<<<<<<< HEAD
-    const nameRe =
-      /^(Project Management|Procurement|Design & Estimates|Financial|Communication & Docs)$/;
-    return this.page
-      .getByRole('button', { name: nameRe })
-      .or(this.page.getByRole('tab', { name: nameRe }))
-      .filter({ visible: true })
-      .first()
-      .isVisible({ timeout: 400 })
-      .catch(() => false);
-=======
     const headings = [
       'Project Management',
       'Procurement',
+      'Plan and Design',
       'Design & Estimates',
       'Financial',
       'Communication & Docs',
@@ -195,88 +183,11 @@ class ProjectProfilePage extends BasePage {
       return true;
     }
     return false;
->>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   }
 
-  /** Project is open (classic hub, UI-mode toggle, or project URL). */
+  /** True when already inside a project profile (skip Clients/Projects list navigation). */
   async isProjectWorkspaceOpen() {
-    if (await this.isInsideProjectProfile()) return true;
-    if (await this.uiModeToggleLabel.isVisible({ timeout: 800 }).catch(() => false)) return true;
-    if (await this.uiModeToggle.isVisible({ timeout: 500 }).catch(() => false)) return true;
-    const href = this.page.url() || '';
-    if (/\/client\/?(\?|#|$)/i.test(href) && !/projectId=/i.test(href)) return false;
-    return /projectId=/i.test(href) || /\/project\//i.test(href);
-  }
-
-  async _isUiModeToggleOn() {
-    const toggle = this.uiModeToggle;
-    if (!(await toggle.isVisible({ timeout: 1500 }).catch(() => false))) {
-      return false;
-    }
-    const aria = await toggle.getAttribute('aria-checked').catch(() => null);
-    if (aria === 'true') return true;
-    if (aria === 'false') return false;
-    const input = this.uiModeToggleRoot
-      .locator('input[type="checkbox"]')
-      .or(toggle.locator('input[type="checkbox"]'))
-      .first();
-    if (await input.count().catch(() => 0)) {
-      const checked = await input.isChecked().catch(() => null);
-      if (checked !== null) return checked;
-    }
-    const className = (await toggle.getAttribute('class').catch(() => '')) || '';
-    if (/\bMui-checked\b/.test(className)) return true;
-    return toggle
-      .evaluate((el) => !!el.closest('.Mui-checked, .MuiSwitch-root.Mui-checked, .MuiSwitch-switchBase.Mui-checked'))
-      .catch(() => false);
-  }
-
-  /**
-   * After opening a project, "Switch to Classic UI" appears ON by default.
-   * Turn the toggle OFF, wait for the classic hub, then continue existing steps.
-   */
-  async ensureClassicProjectUi() {
-    const labelVisible = await this.uiModeToggleLabel.isVisible({ timeout: 1200 }).catch(() => false);
-    if (!labelVisible) {
-      if (await this.isInsideProjectProfile()) return;
-      if (!(await this.isProjectWorkspaceOpen())) return;
-    } else {
-      const on = await this._isUiModeToggleOn();
-      // Default is ON in the new UI; if state cannot be read, still click once to disable.
-      if (on || !(await this.isInsideProjectProfile())) {
-        const switchEl = this.uiModeToggle;
-        const clickTarget = (await switchEl.isVisible({ timeout: 2000 }).catch(() => false))
-          ? switchEl
-          : this.uiModeToggleRoot;
-        await expect(clickTarget).toBeVisible({ timeout: 15000 });
-        await clickTarget.scrollIntoViewIfNeeded().catch(() => {});
-        await clickTarget.click({ timeout: 15000 }).catch(async () => {
-          await clickTarget.click({ timeout: 10000, force: true });
-        });
-        // eslint-disable-next-line no-console
-        console.log('[nav] Disabled "Switch to Classic UI" toggle — waiting for classic project UI');
-        await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-        await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-      } else {
-        // eslint-disable-next-line no-console
-        console.log('[nav] "Switch to Classic UI" toggle already OFF');
-      }
-    }
-
-    if (await this.isInsideProjectProfile()) {
-      return;
-    }
-
-    if (!labelVisible && !(await this.isProjectWorkspaceOpen())) {
-      return;
-    }
-
-    await expect
-      .poll(async () => this.isInsideProjectProfile(), {
-        timeout: 60000,
-        intervals: [500, 1000, 2000],
-      })
-      .toBeTruthy();
+    return this.isInsideProjectProfile();
   }
 
   async clickModuleCard(name) {
@@ -324,11 +235,9 @@ class ProjectProfilePage extends BasePage {
       return;
     }
 
-    if ((name || '').trim().toLowerCase() === 'invoice') {
-      await this.clickInvoiceModuleCard(scope);
-      return;
-    }
-
+    // Targeted fallback for Estimate card: the UI has multiple "Estimate" text nodes
+    // and generic card/container matching can sometimes click the wrong module.
+    // This mirrors the stable selector observed in Playwright inspector for this app.
     if ((name || '').trim().toLowerCase() === 'estimate') {
       await this.clickEstimateModuleCard(scope);
       return;
@@ -413,128 +322,84 @@ class ProjectProfilePage extends BasePage {
   }
 
   /**
-   * Design & Estimates → Estimate tile (MuiGrid-item, not always a MuiCard).
+   * Project hub All view: Estimate tile sits under Plan and Design(s).
+   * Do not wait for a Design heading tab — click the tile in that section.
    */
   async clickEstimateModuleCard(scope) {
-    const createEstimate = this.page.getByRole('button', { name: /create estimate/i }).first();
-    if (
-      /tab=Estimate/i.test(this.page.url() || '') &&
-      (await createEstimate.isVisible({ timeout: 1500 }).catch(() => false))
-    ) {
+    const href = String(this.page.url() || '');
+    if (/tab=Estimate/i.test(href)) {
+      console.log('[ProjectProfile] Already on Estimate module');
       return;
     }
 
-    const heading = this._visibleHeading('Design & Estimates');
-    if (await heading.isVisible({ timeout: 4000 }).catch(() => false)) {
-      await heading.click({ timeout: 15000 }).catch(() => {});
-      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-    }
-
-    const gridItem = this.page
-      .locator('.MuiGrid-item')
-      .filter({ hasText: /^Estimates?$/i })
-      .first();
-    const tile = scope
-      .locator('.MuiGrid-item, .MuiCard-root, .MuiPaper-root, [role="button"], a, div.MuiBox-root')
-      .filter({ has: this.page.getByText(/^\s*Estimates?\s*$/i) })
+    const planDesignLabel = this.page
+      .getByText(/plan\s*(and|&)\s*designs?/i)
       .filter({ visible: true })
       .first();
-    const label = this.page
-      .locator('p, span, h6, button')
-      .filter({ hasText: /^\s*Estimates?\s*$/i })
+    if (await planDesignLabel.isVisible({ timeout: 8000 }).catch(() => false)) {
+      await planDesignLabel.scrollIntoViewIfNeeded().catch(() => {});
+      console.log('[ProjectProfile] Plan and Design section is visible — clicking Estimate under it');
+    }
+
+    const area = scope || this.page;
+    const section = this.page
+      .locator('div')
+      .filter({ has: this.page.getByText(/plan\s*(and|&)\s*designs?/i) })
+      .filter({ has: this.page.getByText(/^Estimate$/i) })
+      .last();
+
+    const estimateInSection = section
+      .locator('.MuiGrid-item, .MuiCard-root, [role="button"], a, button, p.MuiTypography-root')
+      .filter({ hasText: /^Estimate$/i })
+      .filter({ hasNotText: /takeoff|2\s*d/i })
+      .filter({ visible: true })
+      .first()
+      .or(section.getByText(/^Estimate$/i).filter({ visible: true }).first());
+
+    const estimateOnPage = area
+      .locator('p.MuiTypography-root')
+      .filter({ hasText: /^Estimate$/i })
+      .or(area.getByRole('button', { name: /^estimate$/i }))
+      .or(area.locator('.MuiGrid-item, .MuiCard-root, .MuiPaper-root').filter({ has: area.getByText(/^Estimate$/i) }))
+      .or(area.getByText(/^Estimate$/i))
       .filter({ visible: true })
       .first();
 
-    const candidates = [gridItem, tile, label];
-    for (const candidate of candidates) {
-      if (!(await candidate.isVisible({ timeout: 4000 }).catch(() => false))) continue;
-      const txt = ((await candidate.innerText().catch(() => '')) || '').trim();
-      if (/design\s*&\s*estimates/i.test(txt) && !/^estimates?$/im.test(txt.split('\n')[0] || '')) {
-        continue;
-      }
-      await candidate.scrollIntoViewIfNeeded().catch(() => {});
-      const clicked = await candidate
-        .click({ timeout: 20000 })
-        .then(() => true)
-        .catch(async () => {
-          await candidate.click({ timeout: 15000, force: true });
-          return true;
-        })
-        .catch(() => false);
-      if (!clicked) continue;
-      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-      if (
-        /tab=Estimate/i.test(this.page.url() || '') ||
-        (await createEstimate.isVisible({ timeout: 4000 }).catch(() => false))
-      ) {
-        return;
-      }
-    }
+    const target = (await estimateInSection.isVisible({ timeout: 4000 }).catch(() => false))
+      ? estimateInSection
+      : estimateOnPage;
 
-    const current = new URL(this.page.url());
-    const projectId = current.searchParams.get('projectId') || '';
-    const clientId = current.searchParams.get('clientId') || '';
-    if (!projectId) {
-      throw new Error(`Estimate module was not visible. URL=${this.page.url()}`);
-    }
-    const qs = new URLSearchParams({
-      projectId,
-      isActive: 'true',
-      tab: 'Estimate',
-      clientId,
+    await expect(target).toBeVisible({ timeout: 40000 });
+    await target.scrollIntoViewIfNeeded().catch(() => {});
+    await target.click({ timeout: 15000 }).catch(async () => {
+      await target.click({ timeout: 15000, force: true });
     });
-    await this.page.goto(`${current.origin}/client/profile?${qs.toString()}`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 45000,
-    });
-  }
+    console.log('[ProjectProfile] Clicked Estimate under Plan and Design');
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    await this.page.waitForTimeout(500).catch(() => {});
 
-  /**
-   * Money Matters Invoice is a tab (Invoice / Invoices), not always a hub card.
-   */
-  async clickInvoiceModuleCard(scope) {
-    const invoiceTab = this.page
-      .getByRole('tab', { name: /^invoices?$/i })
-      .or(this.page.getByRole('button', { name: /^invoices?$/i }))
-      .filter({ visible: true })
-      .first();
-    if (await invoiceTab.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await invoiceTab.click({ timeout: 15000 });
-      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-      return;
+    const projectMatch = href.match(/projectId=([^&]+)/i);
+    const clientMatch = href.match(/clientId=([^&]+)/i);
+    const onEstimate =
+      /tab=Estimate/i.test(this.page.url()) ||
+      (await this.page.getByRole('button', { name: /create\s*estimate/i }).isVisible({ timeout: 5000 }).catch(() => false));
+
+    if ((/takeoff/i.test(this.page.url()) || (!onEstimate && projectMatch)) && projectMatch) {
+      const base = href.split('?')[0];
+      const qs = [`projectId=${projectMatch[1]}`, 'isActive=true', 'tab=Estimate'];
+      if (clientMatch) qs.push(`clientId=${clientMatch[1]}`);
+      await this.page.goto(`${base}?${qs.join('&')}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     }
 
-    const card = scope
-      .locator(
-        '.MuiCard-root, .MuiPaper-root, [role="tab"], [role="button"], button, a, [role="link"], div.MuiBox-root'
+    await expect
+      .poll(
+        async () =>
+          /tab=Estimate/i.test(this.page.url()) ||
+          (await this.page.getByRole('button', { name: /create\s*estimate/i }).isVisible({ timeout: 500 }).catch(() => false)),
+        { timeout: 40000, intervals: [500, 1000, 2000] }
       )
-      .filter({ has: this.page.getByText(/^invoices?$/i) })
-      .filter({ visible: true })
-      .first();
-    if (await card.isVisible({ timeout: 4000 }).catch(() => false)) {
-      await card.scrollIntoViewIfNeeded().catch(() => {});
-      await card.click({ timeout: 15000 });
-      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-      return;
-    }
-
-    const current = new URL(this.page.url());
-    const projectId = current.searchParams.get('projectId') || '';
-    const clientId = current.searchParams.get('clientId') || '';
-    if (!projectId) {
-      throw new Error(`Invoice module was not visible. URL=${this.page.url()}`);
-    }
-    const qs = new URLSearchParams({
-      projectId,
-      isActive: '',
-      tab: 'Money Matters',
-      subTab: 'INVOICE',
-      clientId,
-    });
-    await this.page.goto(`${current.origin}/client/profile?${qs.toString()}`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 45000,
-    });
+      .toBe(true);
+    console.log(`[ProjectProfile] Opened Estimate module — ${this.page.url()}`);
   }
 
   /**
@@ -849,22 +714,6 @@ class ProjectProfilePage extends BasePage {
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
   }
 
-<<<<<<< HEAD
-  createIndentListControl() {
-    return this.page
-      .getByRole('button', { name: /create indent/i })
-      .or(this.page.getByRole('link', { name: /create indent/i }))
-      .or(this.page.locator('button').filter({ hasText: /create indent/i }))
-      .or(this.page.getByText(/create indent/i))
-      .first();
-  }
-
-  _isOnIndentListUrl(href = this.page.url()) {
-    return (
-      /tab=RFQAndPO/i.test(href) &&
-      (/subTab=Indent/i.test(href) || /subTab%3DIndent/i.test(href))
-    );
-=======
   async clickRfqModuleCard(scope, text) {
     const createRfq = this.page.getByRole('button', { name: /create rfq/i }).first();
 
@@ -954,30 +803,29 @@ class ProjectProfilePage extends BasePage {
     }
     await rfqTab.click({ timeout: 10000, force: true }).catch(() => {});
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
->>>>>>> 1a0684751e064ee5078461eebaa54a0cb16dacd0
   }
 
   async clickIndentModuleCard(scope, text) {
-    const createIndent = this.createIndentListControl();
+    const createIndent = this.page.getByRole('button', {
+      name: /create indent/i,
+    });
 
     if (await createIndent.isVisible({ timeout: 1500 }).catch(() => false)) {
       return;
     }
 
-    if (this._isOnIndentListUrl()) {
+    const href = this.page.url();
+    if (
+      /tab=RFQAndPO/i.test(href) &&
+      (/subTab=Indent/i.test(href) || /subTab%3DIndent/i.test(href))
+    ) {
       await this.activateIndentSubTabIfPresent();
-      if (await createIndent.isVisible({ timeout: 8000 }).catch(() => false)) {
+      if (await createIndent.isVisible({ timeout: 5000 }).catch(() => false)) {
         return;
       }
     }
 
-    const indentLabel = this.page
-      .locator('p.MuiTypography-root.MuiTypography-body1')
-      .filter({ hasText: /^Indent$/i })
-      .first();
-
     const candidates = [
-      indentLabel,
       this.page.locator('div').filter({ hasText: /^Indent$/i }).nth(1),
       scope.locator('div').filter({ hasText: /^Indent$/i }).nth(1),
       scope.getByRole('tab', { name: /^indent$/i }).first(),
@@ -1010,23 +858,16 @@ class ProjectProfilePage extends BasePage {
       await this.page
         .waitForLoadState('networkidle', { timeout: 15000 })
         .catch(() => {});
-      await this.activateIndentSubTabIfPresent().catch(() => {});
 
       if (await createIndent.isVisible({ timeout: 10000 }).catch(() => false)) {
         return;
       }
-      if (this._isOnIndentListUrl()) {
-        if (await createIndent.isVisible({ timeout: 5000 }).catch(() => false)) {
-          return;
-        }
-      }
     }
 
-    const hrefNow = this.page.url();
-    const projectMatch = hrefNow.match(/projectId=([^&]+)/i);
-    const clientMatch = hrefNow.match(/clientId=([^&]+)/i);
+    const projectMatch = href.match(/projectId=([^&]+)/i);
+    const clientMatch = href.match(/clientId=([^&]+)/i);
     if (projectMatch && clientMatch) {
-      const base = hrefNow.split('?')[0];
+      const base = href.split('?')[0];
       const indentUrl = `${base}?projectId=${projectMatch[1]}&isActive=true&tab=RFQAndPO&subTab=Indent&clientId=${clientMatch[1]}`;
       await this.page.goto(indentUrl, { waitUntil: 'domcontentloaded' });
       await this.page
@@ -1034,19 +875,7 @@ class ProjectProfilePage extends BasePage {
         .catch(() => {});
     }
 
-    await this.activateIndentSubTabIfPresent().catch(() => {});
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-
-    if (await createIndent.isVisible({ timeout: 20000 }).catch(() => false)) {
-      return;
-    }
-    if (this._isOnIndentListUrl()) {
-      return;
-    }
-
-    throw new Error(
-      `Could not open Indent module. URL: ${this.page.url()}`
-    );
+    await expect(createIndent).toBeVisible({ timeout: 60000 });
   }
 
   async activateIndentSubTabIfPresent() {

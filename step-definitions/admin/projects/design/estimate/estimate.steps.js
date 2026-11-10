@@ -21,6 +21,15 @@ When('I complete the estimate create from scratch and send as estimate journey',
   await estimatePage.completeCreateFromScratchAndSendAsEstimateJourney();
 });
 
+When(
+  'I complete the estimate create from scratch with full line item details and send as estimate',
+  { timeout: 360000 },
+  async function () {
+    const estimatePage = getEstimatePage(this);
+    await estimatePage.completeCreateFromScratchWithFullLineDetailsAndSend();
+  }
+);
+
 When('I click Create Estimate', { timeout: 120000 }, async function () {
   const estimatePage = getEstimatePage(this);
   await estimatePage.clickCreateEstimate();
