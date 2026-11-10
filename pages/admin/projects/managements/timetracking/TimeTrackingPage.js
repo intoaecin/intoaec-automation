@@ -41,20 +41,15 @@ class TimeTrackingPage extends BasePage {
     // User – MUI Select combobox (role="combobox" inside the section)
     this.userDropdown = this.productInfoSection.locator('[role="combobox"]').first();
 
-    // Date placeholder/accessible name varies (DD MMMM YYYY, MM/DD/YYYY, Date, etc.).
-    this.dateTextboxDmy = page
-      .getByRole('textbox', { name: /DD MMMM YYYY|MM\/DD\/YYYY|DD\/MM\/YYYY|^date$/i })
-      .or(page.getByPlaceholder(/DD MMMM YYYY|MM\/DD\/YYYY|DD\/MM\/YYYY|select date|date/i))
-      .first();
-    this.chooseDateButton = page
-      .getByRole('button', { name: /choose date|open calendar|select date/i })
-      .first();
-    this.chooseTimeButtons = page.getByRole('button', { name: /choose time|select time/i });
+    // Codegen: getByRole('textbox', { name: 'DD MMMM YYYY' })
+    this.dateTextboxDmy = page.getByRole('textbox', { name: 'DD MMMM YYYY' }).first();
+    this.chooseDateButton = page.getByRole('button', { name: 'Choose date' }).first();
+    this.chooseTimeButtons = page.getByRole('button', { name: 'Choose time' });
 
     // Date/Time inputs can differ between Create drawer vs Edit view (label wiring / aria-labels differ),
     // so prefer label-based selectors scoped to the section and fall back to the original xpath.
     const dateByLabel = this.productInfoSection
-      .getByLabel(/^date$|timesheet date|work date/i)
+      .getByLabel(/date/i)
       .or(this.productInfoSection.locator('input[name*="date" i], input[id*="date" i]'))
       .or(this.dateTextboxDmy)
       .first();
@@ -63,11 +58,7 @@ class TimeTrackingPage extends BasePage {
         'xpath=//section[@id="product information"]//*[self::label or self::p or self::span][contains(normalize-space(.),"Date")]/following::input[1]'
       )
       .first();
-    this.dateInput = dateByLabel
-      .or(dateByXpath)
-      .or(this.dateTextboxDmy)
-      .or(this.productInfoSection.locator('input').filter({ visible: true }).first())
-      .first();
+    this.dateInput = dateByLabel.or(dateByXpath).or(this.dateTextboxDmy).first();
 
     const startByLabel = this.productInfoSection
       .getByLabel(/start\s*time/i)
@@ -283,6 +274,7 @@ class TimeTrackingPage extends BasePage {
     }
     const type = (await locator.getAttribute('type').catch(() => '')) || '';
     const pick = type.toLowerCase() === 'time' ? hhmm24 : hhmm12;
+    await this.setPickerInputValue(locator, pick);
 
     // Native / editable inputs
     const readonly = (await locator.getAttribute('readonly').catch(() => null)) !== null;
@@ -1252,9 +1244,7 @@ class TimeTrackingPage extends BasePage {
     await expect(
       this.page
         .getByText(/start from scratch/i)
-        .or(this.dateInput)
-        .or(this.productInfoSection)
-        .or(this.drawerTitle)
+        .or(this.page.getByRole('textbox', { name: 'DD MMMM YYYY' }))
         .first()
     ).toBeVisible({ timeout: this.defaultTimeout });
 
@@ -1368,6 +1358,7 @@ class TimeTrackingPage extends BasePage {
     await this.waitForCreateTimesheetForm();
 
     const today = new Date();
+    const day = String(today.getDate());
     const months = [
       'January',
       'February',
@@ -1382,6 +1373,9 @@ class TimeTrackingPage extends BasePage {
       'November',
       'December',
     ];
+    this.lastTimesheetDate = this.formatDateWithinAllowedRange(0, 'MM/DD/YYYY');
+    this.lastTimesheetDateIso = this.formatDateWithinAllowedRange(0, 'YYYY-MM-DD');
+    this.lastTimesheetDatePretty = `${String(today.getDate()).padStart(2, '0')} ${months[today.getMonth()]} ${today.getFullYear()}`;
     this.lastTimesheetStart = '10:00 AM';
     this.lastTimesheetEnd = '6:00 PM';
     this.lastTimesheetDatePretty = `${String(today.getDate()).padStart(2, '0')} ${months[today.getMonth()]} ${today.getFullYear()}`;

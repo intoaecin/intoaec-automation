@@ -257,10 +257,7 @@ class ProjectNavigationPage extends BasePage {
   /** Leave Activity Tracker / deep link and open the project profile hub. */
   async returnToProjectProfile() {
     const profile = this._profilePage();
-    if (await profile.isProjectWorkspaceOpen()) {
-      await profile.ensureClassicProjectUi();
-      return true;
-    }
+    if (await profile.isInsideProjectProfile()) return true;
 
     if (await this._isActivityTrackerView()) {
       if (await this._clickModuleBackButton()) return true;

@@ -9,6 +9,8 @@ function fromEnv(name, fallback) {
 const testData = {
   admin: {
     validUser: {
+      email: fromEnv('ADMIN_EMAIL', 'mydheen020@yopmail.com'),
+      password: fromEnv('ADMIN_PASSWORD', 'Courage@10'),
       email: fromEnv('ADMIN_EMAIL', 'thara5568@yopmail.com'),
       password: fromEnv('ADMIN_PASSWORD', 'Simple@10'),
     },
@@ -68,8 +70,8 @@ const testData = {
   },
   client: {
     validUser: {
-      email: fromEnv('CLIENT_EMAIL', 'client@gmail.com'),
-      password: fromEnv('CLIENT_PASSWORD', 'Client@10'),
+      email: fromEnv('CLIENT_EMAIL', 'mydheen020@yopmail.com'),
+      password: fromEnv('CLIENT_PASSWORD', 'Courage@10'),
     },
     portalUser: {
       email: 'bhavani123@yopmail.com',

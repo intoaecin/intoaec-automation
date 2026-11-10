@@ -1,12 +1,17 @@
 // pages/admin/auth/LoginPage.js
 const BasePage = require('../../BasePage');
-const { expect } = require('@playwright/test');
 const env = require('../../../config/env');
 
 class LoginPage extends BasePage {
   constructor(page) {
     super(page);
     this.emailInput = page
+      .locator(
+        'input[type="email"], input[name="email" i], input[name="username" i], input[autocomplete="username"], input[autocomplete="email"]'
+      )
+      .or(page.getByPlaceholder(/email|username/i))
+      .or(page.getByLabel(/email|username|user name/i))
+      .or(page.locator('input[type="text"]').first())
       .getByPlaceholder(/email|username/i)
       .or(page.getByLabel(/email|username/i))
       .or(page.getByRole('textbox', { name: /email|username/i }))
@@ -19,14 +24,12 @@ class LoginPage extends BasePage {
       .or(page.locator('input[type="password"]'))
       .filter({ visible: true })
       .first();
+    this.passwordInput = page.locator('input[type="password"]').first();
     this.loginButton = page
-      .getByRole('button', { name: /^(sign in|log in|login)$/i })
-      .or(page.locator('button[type="submit"]').filter({ hasNotText: /google|microsoft|sso/i }))
-      .or(page.locator('button').filter({ hasText: /^(sign in|log in|login)$/i }))
+      .getByRole('button', { name: /^(login|log in|sign in)$/i })
+      .or(page.locator('button:has-text("Login")'))
       .first();
-    this.errorMessage = page
-      .getByText(/invalid username or password|incorrect email or password|invalid credentials/i)
-      .first();
+    this.errorMessage = page.getByText('Invalid username or password').first();
     this.appHeader = page
       .getByLabel(/account settings|profile settings/i)
       .or(page.getByRole('button', { name: /account settings|profile settings/i }))
@@ -235,18 +238,14 @@ class LoginPage extends BasePage {
   }
 
   async _fillStable(locator, value) {
-    const text = String(value);
-    await locator.waitFor({ state: 'visible', timeout: 15000 });
-    await locator.click({ timeout: 8000, force: true });
-    await locator.fill('');
-    await locator.pressSequentially(text, { delay: 20 });
-    let current = await locator.inputValue().catch(() => '');
-    if (current !== text) {
-      await locator.fill(text, { force: true });
-      current = await locator.inputValue().catch(() => '');
-    }
-    if (current !== text) {
-      throw new Error(`Login field did not keep the typed value (${current.length} of ${text.length} characters).`);
+    await locator.waitFor({ state: 'visible', timeout: 30000 });
+    for (let i = 0; i < 3; i++) {
+      await locator.click({ timeout: 10000 });
+      await locator.fill('');
+      await locator.fill(value);
+      const current = await locator.inputValue().catch(() => '');
+      if (current === value) return;
+      await this.page.waitForTimeout(250);
     }
   }
 
@@ -357,39 +356,34 @@ class LoginPage extends BasePage {
       }
     }
 
-    await this._fillStable(this.emailInput, email);
-    await this._fillStable(this.passwordInput, password);
-    await expect(this.loginButton).toBeEnabled({ timeout: 10000 });
-    // eslint-disable-next-line no-console
-    console.log(`[Login] Signing in as ${email}`);
-    await this._submitLogin();
-
-    const ok = await this.isLoginSuccessful();
-    if (ok || (await this._isAppReady()) || this._isAuthenticatedUrl()) {
-      return;
-    }
-
-    const err = await this.errorMessage.isVisible({ timeout: 800 }).catch(() => false);
+    const err = await this.errorMessage.isVisible({ timeout: 1500 }).catch(() => false);
     throw new Error(
-      `Login did not leave the sign-in page. URL: ${this.page.url()}${
-        err ? ' (app showed invalid credentials — check utils/testData.js password)' : ''
+      `Login did not leave the sign-in page within the expected time. URL: ${this.page.url()}${
+        err ? ' (invalid credentials)' : ''
       }`
     );
   }
 
   async isLoginSuccessful() {
-    const leftSignIn = await this.page
-      .waitForURL((url) => this._isAuthenticatedUrl(url) || !String(url).includes('signIn'), {
-        timeout: 20000,
-      })
-      .then(() => true)
-      .catch(() => false);
-
-    if (this._isAuthenticatedUrl()) {
-      await this.appHeader.or(this.appShell).first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
-      return true;
+    let success = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), 45000);
+      const done = (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      };
+      this.page
+        .waitForURL((url) => !String(url).includes('signIn'), { timeout: 45000 })
+        .then(() => done(true))
+        .catch(() => {});
+      this.appHeader
+        .waitFor({ state: 'visible', timeout: 45000 })
+        .then(() => done(true))
+        .catch(() => {});
+    });
+    if (!success && !String(this.page.url()).includes('signIn')) {
+      success = true;
     }
-    if (!leftSignIn && (await this._isSignInVisible())) {
+    if (!success) {
       return false;
     }
 

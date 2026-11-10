@@ -125,6 +125,7 @@
     "test:admin:projects:communication:clientreport:tc11": "npx cross-env STEP_DELAY_MS=0 cucumber-js --retry 0 features/admin/projects/communication/client-report/ClientReport_TestCases.feature --tags \"@TS01 and @TC11\"",
     "test:admin:projects:design:estimate": "npx cross-env HEADLESS=false KEEP_BROWSER=false STEP_DELAY_MS=0 cucumber-js --retry 0 --profile estimate",
     "test:admin:projects:design:estimate:tc01": "npx cross-env HEADLESS=false KEEP_BROWSER=false STEP_DELAY_MS=0 cucumber-js --retry 0 --profile estimate-tc01",
+    "test:admin:projects:design:estimate:tc02": "npx cross-env HEADLESS=false KEEP_BROWSER=false STEP_DELAY_MS=0 cucumber-js --retry 0 --profile estimate-tc02",
     "test:admin:projects:design:proposal": "npx cucumber-js features/admin/projects/design/Proposal.feature",
     "test:admin:projects:design:selections": "npx cucumber-js features/admin/projects/design/Selections.feature",
     "test:admin:projects:design:takeoff": "npx cucumber-js features/admin/projects/design/Takeoff.feature",

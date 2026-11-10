@@ -11,7 +11,7 @@ const ALLOWED_ADMIN = {
 };
 
 function resolveAdminCredentials() {
-  const email = String(testData.admin?.validUser?.email || '').trim().toLowerCase();
+  const email = String(testData.admin?.validUser?.email || '').trim();
   const password = String(testData.admin?.validUser?.password || '').trim();
   if (email !== ALLOWED_ADMIN.email.toLowerCase()) {
     throw new Error(
@@ -21,10 +21,10 @@ function resolveAdminCredentials() {
   if (/aadhi@/i.test(email)) {
     throw new Error('aadhi@yopmail.com is disabled for Admin automation');
   }
-  return {
-    email: ALLOWED_ADMIN.email,
-    password: password || ALLOWED_ADMIN.password,
-  };
+  if (!email || !password) {
+    throw new Error('Admin credentials missing. Set ADMIN_EMAIL and ADMIN_PASSWORD or utils/testData.js.');
+  }
+  return { email, password };
 }
 
 async function ensureLoggedIn(world) {
@@ -44,7 +44,7 @@ Given('I am logged in', { timeout: 180000 }, async function () {
     loginPage.lastLoginEmail = email;
 
     try {
-      console.log(`[Admin] Target portal: ${env.admin} (ONLY user: ${email})`);
+      console.log(`[Admin] Target portal: ${env.admin} (user: ${email})`);
 
       const pages = this.context?.pages?.() || [];
       for (const p of pages) {

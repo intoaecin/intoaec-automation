@@ -268,6 +268,16 @@ module.exports = {
     ],
     tags: '@TS01 and @TC01',
   },
+  /** Estimate TC-02 — full line item (section, unit, qty, rate) then send */
+  'estimate-tc02': {
+    require: ['support/**/*.js', 'step-definitions/**/*.js'],
+    format: ['progress', 'html:reports/cucumber-report.html'],
+    publishQuiet: true,
+    paths: [
+      'features/admin/projects/design/estimate/Estimate_TestCases.feature',
+    ],
+    tags: '@TS02 and @TC02',
+  },
   /** Invoice — all create TCs */
   invoice: {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
