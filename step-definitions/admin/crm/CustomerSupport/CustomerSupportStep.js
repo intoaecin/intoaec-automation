@@ -89,7 +89,7 @@ Object.assign(CUSTOMER_SUPPORT_TEST_CASE_LOG, {
   TC10: 'TC-10 — Newest first by default, Oldest first reverses order',
   TC11: 'TC-11 — Created date range filter',
   TC12: 'TC-12 — Card shows "Created on" and no Updated date',
-  TC13: 'TC-13 — Assignee/reporter info help + Internal contact fields',
+  TC13: 'TC-13 — Internal contact fields follow the Linked toggle',
   TC14: 'TC-14 — Invalid contact phone is rejected',
   TC15: 'TC-15 — Edit ticket title updates the card',
   TC16: 'TC-16 — Delete ticket removes the card',
@@ -148,6 +148,9 @@ When('I search support tickets for the {string} of the new ticket phone', async 
     'full number': mobile,
     'last 5 digits': mobile.slice(-5),
     'formatted number': formattedMobile,
+    // QA bug: typing with the + country code must filter as you type.
+    'country code prefix': `+91 ${mobile.slice(0, 5)}`,
+    'country code without spaces': `+91${mobile}`,
   };
   const term = terms[variant];
   if (!term) throw new Error(`Unknown phone search variant "${variant}"`);
@@ -240,10 +243,6 @@ When('I clear the customer support filters and search', async function () {
 
 Then('the new ticket card should show only the created date', async function () {
   await getCustomerSupportPage(this).expectCreatedOnLabelOnly(this.customerSupportTicket.title);
-});
-
-Then('the assignee and reporter help should explain both roles', async function () {
-  await getCustomerSupportPage(this).openAssigneeReporterHelp();
 });
 
 When('I turn the ticket Linked toggle off', async function () {

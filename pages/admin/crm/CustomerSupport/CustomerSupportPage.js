@@ -65,9 +65,6 @@ class CustomerSupportPage extends BasePage {
     this.offcanvasCloseButton = this.createOffcanvas
       .getByRole('button', { name: /^(close|cancel)$/i })
       .last();
-    this.assigneeReporterHelpButton = this.createOffcanvas
-      .getByRole('button', { name: /how assignees and reporter work/i })
-      .first();
 
     this.searchRegion = page.getByRole('search', { name: /search tickets/i }).first();
     this.searchInput = page.getByRole('textbox', { name: /search tickets/i }).first();
@@ -494,18 +491,7 @@ class CustomerSupportPage extends BasePage {
     this.logStep('Cleared filters');
   }
 
-  // ── Help + permissions ────────────────────────────────────────────────────
-
-  async openAssigneeReporterHelp() {
-    await expect(this.assigneeReporterHelpButton).toBeVisible({ timeout: this.uiTimeout });
-    await this.assigneeReporterHelpButton.click({ timeout: this.uiTimeout });
-    const popover = this.page.locator('.MuiPopover-paper').filter({ hasText: /assignees & reporter/i }).last();
-    await expect(popover).toBeVisible({ timeout: this.uiTimeout });
-    await expect(popover).toContainText(/reporter/i);
-    await expect(popover).toContainText(/automation/i);
-    await this.page.keyboard.press('Escape');
-    this.logStep('Assignee/reporter help explains both roles');
-  }
+  // ── Permissions ───────────────────────────────────────────────────────────
 
   async expectViewerRestrictions() {
     await expect(this.createTicketButton).toBeHidden({ timeout: this.uiTimeout });

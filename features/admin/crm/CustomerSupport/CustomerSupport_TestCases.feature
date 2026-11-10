@@ -10,7 +10,7 @@
 # TS-07 Search by phone             — @TS07 @TC07 @TC08 @TC09 (TC09 needs CS_LEAD_MOBILE)
 # TS-08 Sort + created date range   — @TS08 @TC10 @TC11
 # TS-09 Card "Created on" label     — @TS09 @TC12
-# TS-10 Help + contact validation   — @TS10 @TC13 @TC14
+# TS-10 Contact fields + validation — @TS10 @TC13 @TC14
 # TS-11 Edit / delete ticket        — @TS11 @TC15 @TC16
 # TS-12 Permissions                 — @TS12 @TC17 @TC18 (need CS_VIEWER_* / CS_CREATOR_*)
 #
@@ -105,6 +105,8 @@ Feature: Customer Support — incremental test cases
       | full number      |
       | last 5 digits    |
       | formatted number |
+      | country code prefix |
+      | country code without spaces |
 
   @TS07 @TC08 @regression @negative
   Scenario: TC-08 — Searching an unknown phone number shows the empty state
@@ -151,13 +153,12 @@ Feature: Customer Support — incremental test cases
     Then the new ticket card should show only the created date
 
   # ===========================================================================
-  # TS-10 — Offcanvas help + contact fields (@TS10 @TC13 / @TC14)
+  # TS-10 — Offcanvas contact fields (@TS10 @TC13 / @TC14)
   # ===========================================================================
 
   @TS10 @TC13 @regression @positive
-  Scenario: TC-13 — Assignee/reporter help and Internal contact fields
+  Scenario: TC-13 — Internal contact fields follow the Linked toggle
     When I open the customer support create ticket offcanvas
-    Then the assignee and reporter help should explain both roles
     When I turn the ticket Linked toggle off
     Then the Internal contact name and phone fields should be shown
     When I turn the ticket Linked toggle on
