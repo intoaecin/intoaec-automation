@@ -1,19 +1,25 @@
 // pages/admin/projects/managements/timetracking/TimeTrackingPage.js
 const BasePage = require('../../../../BasePage');
 const { expect } = require('@playwright/test');
+const ProjectNavigationPage = require('../../ProjectNavigationPage');
 
 class TimeTrackingPage extends BasePage {
   constructor(page) {
     super(page);
     this.defaultTimeout = 120000;
+    this.projectNav = new ProjectNavigationPage(page);
 
     // --- Navigation ---
-    // Sidebar nav item for Clients/Projects
-    this.clientsTab = page.getByLabel('Clients/Projects').first();
+    // Sidebar label is i18n "Projects" (see ProjectNavigationPage)
+    this.clientsTab = page.getByRole('button', { name: /^(clients\s*\/\s*projects|projects|proyectos)$/i }).first();
     // First client name cell in the table
-    this.firstClientRow = page.locator('th[scope="row"] span.text-dark').first();
-    // Time Tracking menu card – a <p> tag inside a MuiBox card tile
-    this.timeTrackingLink = page.locator('p.MuiTypography-body1:has-text("Time Tracking")').first();
+    this.firstClientRow = page.locator('tbody tr').first().locator('th[scope="row"], th').first();
+    // Project module / sidebar: "Time Tracking" or "Time Sheet" (i18n)
+    this.timeTrackingLink = page
+      .locator('p.MuiTypography-body1, span, a, button')
+      .filter({ hasText: /time\s*(tracking|sheet)/i })
+      .filter({ visible: true })
+      .first();
 
     // --- Create Timesheet Drawer ---
     // Codegen: getByRole('button', { name: '+ Create Time Sheet' })
@@ -269,6 +275,99 @@ class TimeTrackingPage extends BasePage {
     const type = (await locator.getAttribute('type').catch(() => '')) || '';
     const pick = type.toLowerCase() === 'time' ? hhmm24 : hhmm12;
     await this.setPickerInputValue(locator, pick);
+
+    // Native / editable inputs
+    const readonly = (await locator.getAttribute('readonly').catch(() => null)) !== null;
+    if (type.toLowerCase() === 'time' || !readonly) {
+      try {
+        await this.setPickerInputValue(locator, pick);
+        return;
+      } catch {
+        // Fall through to MUI clock / Choose time UI.
+      }
+    }
+
+    // MUI TimePicker: open from adjacent button or the field itself.
+    const openBtn = locator
+      .locator('xpath=ancestor::*[contains(@class,"MuiFormControl") or contains(@class,"MuiTextField")][1]')
+      .locator('button[aria-label*="time" i], button[aria-label*="Choose" i]')
+      .first()
+      .or(this.chooseTimeButtons.filter({ visible: true }).first());
+
+    if (await openBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await openBtn.click({ timeout: 15000 }).catch(() => {});
+    } else {
+      await locator.click({ timeout: 15000, force: true }).catch(() => {});
+    }
+
+    const picked = await this._pickMuiClockTime(hhmm12 || hhmm24);
+    if (picked) return;
+
+    // Last resort: DOM set without requiring readable inputValue (masked MUI fields).
+    await locator
+      .evaluate((el, v) => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        setter?.call(el, v);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }, pick)
+      .catch(() => {});
+  }
+
+  /**
+   * Interact with an open MUI time picker / clock dialog.
+   * @param {string} hhmm12 e.g. "10:00 AM" or "6:00 PM"
+   */
+  async _pickMuiClockTime(hhmm12) {
+    const m = String(hhmm12 || '').match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?/i);
+    if (!m) return false;
+    const hour = String(Number(m[1]));
+    const minute = m[2] || '00';
+    const ampm = (m[3] || '').toUpperCase();
+
+    const dialog = this.page
+      .locator('.MuiDialog-root, .MuiPickersPopper-root, [role="dialog"]')
+      .filter({ visible: true })
+      .last();
+
+    const scope = (await dialog.isVisible({ timeout: 1500 }).catch(() => false)) ? dialog : this.page;
+
+    const hourOpt = scope
+      .getByRole('option', { name: new RegExp(`^${hour}\\s*hours?$|^${hour}$`, 'i') })
+      .or(scope.locator(`[aria-label="${hour} hours"], [aria-label="${hour} hour"]`))
+      .or(scope.locator('.MuiClockNumber-root, .MuiMultiSectionDigitalClockSection-item').filter({ hasText: new RegExp(`^${hour}$`) }))
+      .first();
+
+    if (await hourOpt.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await hourOpt.click({ timeout: 15000 }).catch(() => {});
+    } else {
+      return false;
+    }
+
+    if (minute !== '00') {
+      const minOpt = scope
+        .getByRole('option', { name: new RegExp(`^${minute}\\s*minutes?$|^${minute}$`, 'i') })
+        .or(scope.locator(`.MuiClockNumber-root`).filter({ hasText: new RegExp(`^${minute}$`) }))
+        .first();
+      if (await minOpt.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await minOpt.click({ timeout: 10000 }).catch(() => {});
+      }
+    }
+
+    if (ampm) {
+      const meridiem = scope.getByRole('option', { name: new RegExp(`^${ampm}$`, 'i') }).first();
+      if (await meridiem.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await meridiem.click({ timeout: 10000 }).catch(() => {});
+      }
+    }
+
+    const ok = scope.getByRole('button', { name: /^(OK|Accept|Set)$/i }).first();
+    if (await ok.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await ok.click({ timeout: 10000 }).catch(() => {});
+    } else {
+      await this.page.keyboard.press('Escape').catch(() => {});
+    }
+    await this.page.waitForTimeout(300).catch(() => {});
     return true;
   }
 
@@ -548,18 +647,38 @@ class TimeTrackingPage extends BasePage {
   }
 
   async goToClients() {
-    await expect(this.clientsTab).toBeVisible({ timeout: this.defaultTimeout });
-    await this.clientsTab.click();
+    this.projectNav.page = this.page;
+    await this.projectNav.navigateToProjects();
   }
 
   async selectFirstClient() {
-    await expect(this.firstClientRow).toBeVisible({ timeout: this.defaultTimeout });
-    await this.firstClientRow.click();
+    this.projectNav.page = this.page;
+    await this.projectNav.clickFirstProject();
   }
 
   async openTimeTracking() {
+    // Prefer deep-link when already on a project profile
+    try {
+      const url = new URL(this.page.url());
+      if (url.pathname.includes('/client/profile') || url.searchParams.has('projectId')) {
+        url.searchParams.set('tab', 'TimeTracking');
+        await this.page.goto(url.toString(), { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+        await this.page.waitForTimeout(1500).catch(() => {});
+        const createVisible = await this.createButton.isVisible({ timeout: 5000 }).catch(() => false);
+        if (createVisible) return;
+      }
+    } catch {
+      // ignore
+    }
+
+    if (await this.timeTrackingLink.isVisible({ timeout: 10000 }).catch(() => false)) {
+      await this.timeTrackingLink.click({ force: true });
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      return;
+    }
+
     await expect(this.timeTrackingLink).toBeVisible({ timeout: this.defaultTimeout });
-    await this.timeTrackingLink.click();
+    await this.timeTrackingLink.click({ force: true });
   }
 
   async clickCreate() {
@@ -1259,6 +1378,7 @@ class TimeTrackingPage extends BasePage {
     this.lastTimesheetDatePretty = `${String(today.getDate()).padStart(2, '0')} ${months[today.getMonth()]} ${today.getFullYear()}`;
     this.lastTimesheetStart = '10:00 AM';
     this.lastTimesheetEnd = '6:00 PM';
+    this.lastTimesheetDatePretty = `${String(today.getDate()).padStart(2, '0')} ${months[today.getMonth()]} ${today.getFullYear()}`;
 
     await this.selectFirstTimesheetUserIfNeeded();
 

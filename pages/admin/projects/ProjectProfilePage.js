@@ -714,6 +714,22 @@ class ProjectProfilePage extends BasePage {
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
   }
 
+  createIndentListControl() {
+    return this.page
+      .getByRole('button', { name: /create indent/i })
+      .or(this.page.getByRole('link', { name: /create indent/i }))
+      .or(this.page.locator('button').filter({ hasText: /create indent/i }))
+      .or(this.page.getByText(/create indent/i))
+      .first();
+  }
+
+  _isOnIndentListUrl(href = this.page.url()) {
+    return (
+      /tab=RFQAndPO/i.test(href) &&
+      (/subTab=Indent/i.test(href) || /subTab%3DIndent/i.test(href))
+    );
+  }
+
   async clickRfqModuleCard(scope, text) {
     const createRfq = this.page.getByRole('button', { name: /create rfq/i }).first();
 

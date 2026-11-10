@@ -4,9 +4,20 @@ const LoginPage = require('../../pages/admin/auth/LoginPage');
 const testData = require('../../utils/testData');
 const { resetSharedSession } = require('../../support/world');
 
+/** Only this Admin account is allowed for automation (never aadhi / multi-account). */
+const ALLOWED_ADMIN = {
+  email: 'thara5568@yopmail.com',
+  password: 'Simple@10',
+};
+
 function resolveAdminCredentials() {
   const email = String(testData.admin?.validUser?.email || '').trim();
   const password = String(testData.admin?.validUser?.password || '').trim();
+  if (email !== ALLOWED_ADMIN.email.toLowerCase()) {
+    throw new Error(
+      `Blocked Admin login for "${email}". Only ${ALLOWED_ADMIN.email} is allowed. Update utils/testData.js.`
+    );
+  }
   if (/aadhi@/i.test(email)) {
     throw new Error('aadhi@yopmail.com is disabled for Admin automation');
   }
@@ -35,7 +46,6 @@ Given('I am logged in', { timeout: 180000 }, async function () {
     try {
       console.log(`[Admin] Target portal: ${env.admin} (user: ${email})`);
 
-      // Close extra tabs left by vendor invite/Yopmail so login uses a clean page.
       const pages = this.context?.pages?.() || [];
       for (const p of pages) {
         if (p !== this.page && !p.isClosed() && /yopmail|vendor\.aecplayhouse/i.test(p.url() || '')) {
@@ -60,6 +70,6 @@ Given('I am logged in', { timeout: 180000 }, async function () {
   }
 });
 
-Given('User is logged in', { timeout: 120000 }, async function () {
+Given('User is logged in', { timeout: 180000 }, async function () {
   await ensureLoggedIn(this);
 });

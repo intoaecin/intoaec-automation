@@ -12,6 +12,17 @@ class LoginPage extends BasePage {
       .or(page.getByPlaceholder(/email|username/i))
       .or(page.getByLabel(/email|username|user name/i))
       .or(page.locator('input[type="text"]').first())
+      .getByPlaceholder(/email|username/i)
+      .or(page.getByLabel(/email|username/i))
+      .or(page.getByRole('textbox', { name: /email|username/i }))
+      .or(page.locator('input[type="email"], input[name="email"], input[name="username"]'))
+      .filter({ visible: true })
+      .first();
+    this.passwordInput = page
+      .getByPlaceholder(/password/i)
+      .or(page.getByLabel(/^password$/i))
+      .or(page.locator('input[type="password"]'))
+      .filter({ visible: true })
       .first();
     this.passwordInput = page.locator('input[type="password"]').first();
     this.loginButton = page
@@ -30,6 +41,18 @@ class LoginPage extends BasePage {
       .or(page.getByRole('link', { name: /^dashboard$/i }))
       .or(page.getByRole('button', { name: /clients\/projects/i }))
       .first();
+  }
+
+  _isAuthenticatedUrl(url = this.page.url()) {
+    const href = String(url || '');
+    if (/signIn/i.test(href)) return false;
+    return /\/dashboard|\/client|projectId=/i.test(href);
+  }
+
+  async _submitLogin() {
+    await this.loginButton.click({ timeout: 8000 }).catch(async () => {
+      await this.loginButton.click({ timeout: 8000, force: true });
+    });
   }
 
   _isAdminHost() {
