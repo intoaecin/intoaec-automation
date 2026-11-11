@@ -9,8 +9,6 @@ function fromEnv(name, fallback) {
 const testData = {
   admin: {
     validUser: {
-      email: fromEnv('ADMIN_EMAIL', 'mydheen020@yopmail.com'),
-      password: fromEnv('ADMIN_PASSWORD', 'Courage@10'),
       email: fromEnv('ADMIN_EMAIL', 'thara5568@yopmail.com'),
       password: fromEnv('ADMIN_PASSWORD', 'Simple@10'),
     },
