@@ -30,8 +30,39 @@ const RFQ_REQUIRE = [
   'step-definitions/admin/projects/procurement/work-order/**/*.js',
   'step-definitions/admin/projects/design/estimate/estimate.steps.js',
 ];
+const fs = require('fs');
+const path = require('path');
+
 const FAST_FORMAT = ['progress'];
-const REPORT_FORMAT = ['progress', 'html:reports/cucumber-report.html'];
+
+/**
+ * Prefer reports/cucumber-report.html (used by npm run report:open).
+ * If Windows has that file locked (browser/editor), fall back to a unique name
+ * so cucumber can still start instead of failing with UNKNOWN/-4094 on open.
+ */
+function resolveReportFormat() {
+  const reportsDir = path.join(__dirname, 'reports');
+  const preferredName = 'cucumber-report.html';
+  const preferredAbs = path.join(reportsDir, preferredName);
+  const preferredRel = `reports/${preferredName}`;
+
+  try {
+    fs.mkdirSync(reportsDir, { recursive: true });
+    const fd = fs.openSync(preferredAbs, 'w');
+    fs.closeSync(fd);
+    return ['progress', `html:${preferredRel}`];
+  } catch (error) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fallbackRel = `reports/cucumber-report-${stamp}.html`;
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[report] ${preferredRel} is locked (${error.code || error.message}); writing ${fallbackRel}`
+    );
+    return ['progress', `html:${fallbackRel}`];
+  }
+}
+
+const REPORT_FORMAT = resolveReportFormat();
 
 function poProfile(tags) {
   const requireFiles =
@@ -69,7 +100,7 @@ module.exports = {
   /** Work Order TC-01 — compose send */
   'wo-tc01': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/work-order/create-wo/WorkOrder_TestCases.feature',
@@ -79,7 +110,7 @@ module.exports = {
   /** Work Order TC-02 — action menu Create */
   'wo-tc02': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/work-order/create-wo/WorkOrder_TestCases.feature',
@@ -89,7 +120,7 @@ module.exports = {
   /** Work Order TC-03 — compose send from library */
   'wo-tc03': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/work-order/create-wo/WorkOrder_TestCases.feature',
@@ -99,7 +130,7 @@ module.exports = {
   /** Work Order TC-04 — manual + terms template + Action Create */
   'wo-tc04': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/work-order/create-wo/WorkOrder_TestCases.feature',
@@ -109,7 +140,7 @@ module.exports = {
   /** Work Order TC-05 — manual + ship to address + Action Create */
   'wo-tc05': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/work-order/create-wo/WorkOrder_TestCases.feature',
@@ -119,7 +150,7 @@ module.exports = {
   /** Work Order TC-06 — ~20 manual line items + compose send */
   'wo-tc06': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/work-order/create-wo/WorkOrder_TestCases.feature',
@@ -129,7 +160,7 @@ module.exports = {
   /** Work Order TC-07 — compose send + list ⋮ Preview */
   'wo-tc07': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/work-order/create-wo/WorkOrder_TestCases.feature',
@@ -139,7 +170,7 @@ module.exports = {
   /** Work Order TC-08 — compose send qty 100 + Update progress completed qty 50 */
   'wo-tc08': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/work-order/create-wo/WorkOrder_TestCases.feature',
@@ -149,7 +180,7 @@ module.exports = {
   /** Work Order — all create TCs */
   wo: {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/work-order/create-wo/WorkOrder_TestCases.feature',
@@ -158,7 +189,7 @@ module.exports = {
   /** Indent TC-01 — Material Indent create */
   'indent-tc01': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
@@ -168,7 +199,7 @@ module.exports = {
   /** Indent TC-02 — Work Indent create */
   'indent-tc02': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
@@ -178,7 +209,7 @@ module.exports = {
   /** Indent TC-03 — Material Indent + Approver */
   'indent-tc03': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
@@ -188,7 +219,7 @@ module.exports = {
   /** Indent TC-04 — Material Indent create → Preview */
   'indent-tc04': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
@@ -198,7 +229,7 @@ module.exports = {
   /** Indent TC-05 — Material Indent create → Edit → Add Manually */
   'indent-tc05': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
@@ -208,7 +239,7 @@ module.exports = {
   /** Indent TC-06 — Convert Indent → PO → vendor → Compose email */
   'indent-tc06': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
@@ -218,7 +249,7 @@ module.exports = {
   /** Indent — all create TCs */
   indent: {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/procurement/indent/create-indent/Indent_TestCases.feature',
@@ -245,14 +276,14 @@ module.exports = {
   /** Vendor portal — all TCs including TC-11 (unique tag; does not include PO @vendor tests) */
   'vendor-portal': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     tags: '@vendor-portal',
   },
   /** Estimate — incremental TCs */
   estimate: {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/design/estimate/Estimate_TestCases.feature',
@@ -261,7 +292,7 @@ module.exports = {
   /** Estimate TC-01 */
   'estimate-tc01': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/design/estimate/Estimate_TestCases.feature',
@@ -271,7 +302,7 @@ module.exports = {
   /** Estimate TC-02 — full line item (section, unit, qty, rate) then send */
   'estimate-tc02': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/design/estimate/Estimate_TestCases.feature',
@@ -281,7 +312,7 @@ module.exports = {
   /** Invoice — all create TCs */
   invoice: {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -290,7 +321,7 @@ module.exports = {
   /** Invoice TC-01 — Start from Scratch + manual line item */
   'invoice-tc01': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -300,7 +331,7 @@ module.exports = {
   /** Credit Note TC-02 — Create Credit Note + line item */
   'invoice-tc02': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -310,7 +341,7 @@ module.exports = {
   /** Payment TC-03 — Register Payment against outstanding invoice */
   'invoice-tc03': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -320,7 +351,7 @@ module.exports = {
   /** Payment TC-04 — Void invoice from Invoice-tab kebab after register payment */
   'invoice-tc04': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -330,7 +361,7 @@ module.exports = {
   /** Invoice TC-05 — Delete invoice from kebab after register payment */
   'invoice-tc05': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -340,7 +371,7 @@ module.exports = {
   /** Invoice TC-06 — Preview invoice from kebab after register payment */
   'invoice-tc06': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -350,7 +381,7 @@ module.exports = {
   /** Invoice TC-07 — Edit invoice from kebab, increase qty, Update */
   'invoice-tc07': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -360,7 +391,7 @@ module.exports = {
   /** Invoice TC-08 — Send invoice email from kebab composer */
   'invoice-tc08': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -370,7 +401,7 @@ module.exports = {
   /** Invoice TC-09 — Send invoice email from kebab after create (no payment) */
   'invoice-tc09': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -380,7 +411,7 @@ module.exports = {
   /** Invoice TC-10 — Refund credit note from kebab after create */
   'invoice-tc10': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -390,7 +421,7 @@ module.exports = {
   /** Invoice TC-11 — Preview created refund from kebab */
   'invoice-tc11': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -400,7 +431,7 @@ module.exports = {
   /** Invoice TC-12 — Refund payment from kebab after register payment */
   'invoice-tc12': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -410,7 +441,7 @@ module.exports = {
   /** Invoice TC-13 — Create invoice with Pay Now button to client enabled */
   'invoice-tc13': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -420,7 +451,7 @@ module.exports = {
   /** Invoice TC-14 — Pay Now from preview with new card after TC-13 create */
   'invoice-tc14': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -430,7 +461,7 @@ module.exports = {
   /** Invoice TC-15 — TC-14 plus extra payment terms while creating */
   'invoice-tc15': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     paths: [
       'features/admin/projects/financial/create-invoice/Invoice_TestCases.feature',
@@ -439,49 +470,49 @@ module.exports = {
   },
   'vendor-all': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     tags: '@vendor-all',
   },
   'vendor-tc01-tc11': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     tags: '@vendor-tc01-tc11',
   },
   'customer-portal': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     tags: '@customer-portal',
   },
   'customer-tc01-tc06': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     tags: '@customer-tc01-tc06',
   },
   'customer-tc01': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     tags: '@customer-portal and @TC01',
   },
   'customer-tc01-tc02': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     tags: '@customer-tc01-tc02',
   },
   'customer-tc01-tc03': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     tags: '@customer-tc01-tc03',
   },
   'customer-tc03': {
     require: ['support/**/*.js', 'step-definitions/**/*.js'],
-    format: ['progress', 'html:reports/cucumber-report.html'],
+    format: REPORT_FORMAT,
     publishQuiet: true,
     tags: '@customer-portal and @TC03',
   },
