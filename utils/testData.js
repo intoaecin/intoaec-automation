@@ -98,6 +98,14 @@ const testData = {
       clientId: process.env.ADMIN_MVB_CLIENT_ID || '810fe142-aae5-4596-91af-8710a241c5e3',
     },
   },
+  /**
+   * Optional preferred project for Location Management.
+   * When empty, tests create one disposable Active Clients client/project.
+   * Override: LOCATION_MGMT_PROJECT=<project name> (optional hint only — still verified Add-enabled).
+   */
+  locationManagement: {
+    project: fromEnv('LOCATION_MGMT_PROJECT', ''),
+  },
 };
 
 module.exports = testData;

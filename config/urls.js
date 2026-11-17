@@ -35,6 +35,13 @@ const urls = {
   clientProfile: joinUrl(adminBase, '/client/profile'),
   leadManagerMaster: joinUrl(adminBase, '/leadmanager/master?isActive=true&isSnoozed=false'),
   factoryManagement: joinUrl(adminBase, '/factory-management'),
+  customerSupport: joinUrl(adminBase, '/customer-support'),
+  locationManagementPreferences: joinUrl(adminBase, '/preferences/location-management'),
+  locationManagementPreferencesStages: joinUrl(
+    adminBase,
+    '/preferences/location-management?tab=stages'
+  ),
+  preferencesHub: joinUrl(adminBase, '/preferences'),
   joinUrl,
   stripSlash,
   pathnameOf,
@@ -54,6 +61,9 @@ const urls = {
   isFactoryManagement(url) {
     const path = pathnameOf(url);
     return path === '/factory-management' || path.startsWith('/factory-management/');
+  },
+  isLocationManagementPreferences(url) {
+    return pathnameOf(url) === '/preferences/location-management';
   },
   /** Client/lead profile hub opened from Clients/Projects (`/client/profile?...&projectId=`). */
   isClientProjectProfile(url) {
