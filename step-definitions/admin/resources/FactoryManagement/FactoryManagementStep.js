@@ -53,6 +53,11 @@ Before({ tags: '@factory-tc' }, async function ({ pickle }) {
   if (tc && FACTORY_TEST_CASE_LOG[tc.toUpperCase()]) {
     console.log(`\n>>> ${FACTORY_TEST_CASE_LOG[tc.toUpperCase()]}\n`);
   }
+  // Freshchat often mounts after login and blocks Create/Filter clicks.
+  if (this.page && !this.page.isClosed()) {
+    const FactoryUi = require('../../../../pages/admin/resources/FactoryManagement/factoryUi');
+    await new FactoryUi(this.page, 'FactoryManagement').installFreshchatClickGuard();
+  }
 });
 
 function getFactoryManagementPage(world) {
@@ -97,7 +102,9 @@ async function ensureStartedJob(world) {
 }
 
 When('I select Factory Management', { timeout: 120000 }, async function () {
-  await getFactoryManagementPage(this).openModule();
+  const page = getFactoryManagementPage(this);
+  await page.ui.installFreshchatClickGuard();
+  await page.openModule();
 });
 
 Then('the factory Jobs page should show status tabs and a workshop location', { timeout: 120000 }, async function () {

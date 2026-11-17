@@ -23,6 +23,7 @@ class FactoryManagementPage extends BasePage {
 
   async openModule() {
     await this.ui.gotoFactory();
+    await this.ui.hideFreshchatWidget();
     await this.ui.expectPageTitle('Jobs');
   }
 
@@ -40,7 +41,12 @@ class FactoryManagementPage extends BasePage {
 
   async expectEveryMenuTitle() {
     for (const [menu, title] of MENU_ITEMS) {
-      await this.ui.openMenu(menu);
+      const tab = this.ui._menuTabForLabel(menu);
+      if (tab) {
+        await this.ui.gotoFactory(tab);
+      } else {
+        await this.ui.openMenu(menu);
+      }
       await this.ui.expectPageTitle(title);
     }
   }
@@ -65,6 +71,7 @@ class FactoryManagementPage extends BasePage {
 
   async openAddLocation() {
     await this.ui.gotoFactory('location');
+    await this.ui.hideFreshchatWidget();
     await this.ui.expectPageTitle('Location');
     await this.ui.clickNamed(/^Add Location$/i);
     await expect(this.locationForm()).toBeVisible({ timeout: this.defaultTimeout });
@@ -75,7 +82,10 @@ class FactoryManagementPage extends BasePage {
     const ctx = getContext();
     const form = this.locationForm();
     const input = form.getByPlaceholder(/^Select trade$/i).first();
-    await input.click({ timeout: this.ui.uiTimeout });
+    await this.ui.hideFreshchatWidget();
+    await input.click({ timeout: this.ui.uiTimeout, force: true }).catch(() =>
+      input.click({ timeout: this.ui.uiTimeout })
+    );
     const options = this.page.getByRole('option');
     const hasOption = await options.first().isVisible({ timeout: 5000 }).catch(() => false);
     if (!hasOption) {

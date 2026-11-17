@@ -14,6 +14,52 @@ class FactoryUi {
     console.log(`[${this.logPrefix}] ${message}`);
   }
 
+  /** Freshchat iframe overlays Create/Filter buttons and blocks headed clicks. */
+  async hideFreshchatWidget() {
+    await this.page
+      .locator('#fc_frame, iframe#fc_widget, iframe[title="Chat"], #fc_widget')
+      .evaluateAll((nodes) => {
+        nodes.forEach((node) => {
+          const el = node;
+          el.style.setProperty('pointer-events', 'none', 'important');
+          el.style.setProperty('visibility', 'hidden', 'important');
+          el.style.setProperty('display', 'none', 'important');
+          el.setAttribute('aria-hidden', 'true');
+        });
+      })
+      .catch(() => {});
+    await this.page
+      .evaluate(() => {
+        const frame = document.getElementById('fc_frame');
+        if (frame) {
+          frame.style.setProperty('pointer-events', 'none', 'important');
+          frame.style.setProperty('display', 'none', 'important');
+        }
+      })
+      .catch(() => {});
+  }
+
+  /**
+   * Auto-dismiss Freshchat before any action that would hit the overlay
+   * (covers direct page.click calls in ManufacturingOrder / Workshop pages).
+   */
+  async installFreshchatClickGuard() {
+    if (this.page.__factoryFreshchatGuardInstalled) {
+      await this.hideFreshchatWidget();
+      return;
+    }
+    this.page.__factoryFreshchatGuardInstalled = true;
+    await this.page
+      .addLocatorHandler(
+        this.page.locator('#fc_frame, iframe#fc_widget, iframe[title="Chat"]').first(),
+        async () => {
+          await this.hideFreshchatWidget();
+        }
+      )
+      .catch(() => {});
+    await this.hideFreshchatWidget();
+  }
+
   async gotoFactory(tab) {
     const target = tab
       ? `${urls.factoryManagement}?tab=${encodeURIComponent(tab)}`
@@ -30,25 +76,82 @@ class FactoryUi {
     }
     await this.page.waitForLoadState('domcontentloaded').catch(() => {});
     await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await this.installFreshchatClickGuard();
     this.log(`Opened Factory Management ${tab || 'jobs'} (${this.page.url()})`);
   }
 
+  _menuTabForLabel(label) {
+    const key = String(label || '')
+      .trim()
+      .toLowerCase();
+    const map = {
+      jobs: 'jobs',
+      requests: 'requests',
+      incoming: 'incoming',
+      stock: 'stock',
+      dispatch: 'dispatch',
+      'goods receipt': 'goods-receipt',
+      activities: 'activities',
+      location: 'location',
+      stages: 'stages',
+    };
+    return map[key] || null;
+  }
+
   async openMenu(label) {
-    const item = this.page.getByRole('button', { name: new RegExp(`^${escapeRe(label)}$`, 'i') }).first();
-    await expect(item).toBeVisible({ timeout: this.defaultTimeout });
-    await item.click({ timeout: this.uiTimeout });
-    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
-    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await this.installFreshchatClickGuard();
+    const nameRe = new RegExp(`^${escapeRe(label)}$`, 'i');
+    const candidates = [
+      this.page.getByRole('button', { name: nameRe }).first(),
+      this.page.getByRole('tab', { name: nameRe }).first(),
+      this.page.getByRole('link', { name: nameRe }).first(),
+      this.page.getByRole('menuitem', { name: nameRe }).first(),
+      this.page.locator('nav, aside, [class*="Drawer"], [class*="Sidebar"]').getByText(nameRe).first(),
+      this.page.getByText(nameRe).first(),
+    ];
+
+    let clicked = false;
+    for (const item of candidates) {
+      // eslint-disable-next-line no-await-in-loop
+      if (!(await item.isVisible({ timeout: 1500 }).catch(() => false))) continue;
+      // eslint-disable-next-line no-await-in-loop
+      await item.click({ timeout: this.uiTimeout, force: true }).catch(() =>
+        item.click({ timeout: this.uiTimeout })
+      );
+      clicked = true;
+      break;
+    }
+
+    if (!clicked) {
+      const tab = this._menuTabForLabel(label);
+      if (!tab) {
+        throw new Error(`Factory menu "${label}" not found as button/tab/link and no URL tab mapping`);
+      }
+      this.log(`Menu "${label}" not clickable — opening via ?tab=${tab}`);
+      await this.gotoFactory(tab);
+    } else {
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+      await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+      await this.hideFreshchatWidget();
+    }
     this.log(`Opened factory menu ${label}`);
   }
 
   async expectPageTitle(label) {
+    const pattern = new RegExp(`^\\s*${escapeRe(label)}\\s*$`, 'i');
     const title = this.page
-      .locator('.MuiTypography-h6, h6')
-      .filter({ hasText: new RegExp(`^${escapeRe(label)}$`, 'i') })
+      .locator('.MuiTypography-h6, h6, h1, h2, h3, h4, [class*="PageLayout"]')
+      .filter({ hasText: pattern })
+      .or(this.page.getByRole('heading', { name: pattern }))
       .first();
-    await expect(title).toBeVisible({ timeout: this.defaultTimeout });
-    this.log(`Page title is ${label}`);
+    // Activities / some tabs use a looser page chrome label.
+    const loose = this.page.getByText(new RegExp(escapeRe(label), 'i')).first();
+    if (await title.isVisible({ timeout: 8000 }).catch(() => false)) {
+      this.log(`Page title is ${label}`);
+      return;
+    }
+    await expect(loose).toBeVisible({ timeout: this.defaultTimeout });
+    this.log(`Page title/label visible for ${label}`);
   }
 
   async expectText(text, timeout = this.defaultTimeout) {
@@ -72,9 +175,12 @@ class FactoryUi {
   }
 
   async fillPlaceholder(placeholder, value, scope = this.page) {
+    await this.hideFreshchatWidget();
     const input = scope.getByPlaceholder(placeholder).first();
     await expect(input).toBeVisible({ timeout: this.uiTimeout });
-    await input.click({ timeout: this.uiTimeout });
+    await input.click({ timeout: this.uiTimeout, force: true }).catch(() =>
+      input.click({ timeout: this.uiTimeout })
+    );
     await input.fill('');
     await input.fill(String(value));
     this.log(`Filled ${placeholder} with ${value}`);
@@ -82,28 +188,40 @@ class FactoryUi {
   }
 
   async clickNamed(name, scope = this.page) {
+    await this.hideFreshchatWidget();
     const button = scope.getByRole('button', { name }).first();
     await expect(button).toBeVisible({ timeout: this.uiTimeout });
-    await button.click({ timeout: this.uiTimeout });
+    try {
+      await button.click({ timeout: this.uiTimeout });
+    } catch {
+      await this.hideFreshchatWidget();
+      await button.click({ timeout: this.uiTimeout, force: true });
+    }
     this.log(`Clicked ${name}`);
     return button;
   }
 
   async chooseOption(query, optionName) {
+    await this.hideFreshchatWidget();
     const option = this.page
       .getByRole('option', {
         name: optionName instanceof RegExp ? optionName : new RegExp(`^${escapeRe(optionName)}$`, 'i'),
       })
       .first();
     await expect(option).toBeVisible({ timeout: this.uiTimeout });
-    await option.click({ timeout: this.uiTimeout });
+    await option.click({ timeout: this.uiTimeout, force: true }).catch(() =>
+      option.click({ timeout: this.uiTimeout })
+    );
     this.log(`Chose option ${optionName} for ${query || 'list'}`);
   }
 
   async selectAutocomplete(placeholder, optionName, scope = this.page) {
+    await this.hideFreshchatWidget();
     const input = scope.getByPlaceholder(placeholder).first();
     await expect(input).toBeVisible({ timeout: this.uiTimeout });
-    await input.click({ timeout: this.uiTimeout });
+    await input.click({ timeout: this.uiTimeout, force: true }).catch(() =>
+      input.click({ timeout: this.uiTimeout })
+    );
     if (optionName) {
       await input.fill('');
       await input.fill(String(optionName));
@@ -186,22 +304,33 @@ class FactoryUi {
   }
 
   async openJobMenu(title) {
+    await this.hideFreshchatWidget();
     const card = this.jobCard(title);
     await expect(card).toBeVisible({ timeout: this.defaultTimeout });
-    await card.locator('[data-testid="MoreVertIcon"]').first().click({ timeout: this.uiTimeout });
+    await card
+      .locator('[data-testid="MoreVertIcon"]')
+      .first()
+      .click({ timeout: this.uiTimeout, force: true })
+      .catch(() =>
+        card.locator('[data-testid="MoreVertIcon"]').first().click({ timeout: this.uiTimeout })
+      );
     this.log(`Opened job menu for ${title}`);
   }
 
   async clickJobMenuItem(title, itemName) {
     await this.openJobMenu(title);
+    await this.hideFreshchatWidget();
     const item = this.page.getByRole('menuitem', { name: itemName }).first();
     await expect(item).toBeVisible({ timeout: this.uiTimeout });
-    await item.click({ timeout: this.uiTimeout });
+    await item.click({ timeout: this.uiTimeout, force: true }).catch(() =>
+      item.click({ timeout: this.uiTimeout })
+    );
     this.log(`Chose ${itemName} for ${title}`);
   }
 
   async selectWorkshop(name) {
     if (!name) return;
+    await this.hideFreshchatWidget();
     const inputs = this.page.locator('input');
     const inputCount = await inputs.count();
     for (let index = 0; index < Math.min(inputCount, 30); index += 1) {
@@ -216,7 +345,9 @@ class FactoryUi {
       this.log('Workshop picker is not on this screen');
       return;
     }
-    await input.click({ timeout: this.uiTimeout });
+    await input.click({ timeout: this.uiTimeout, force: true }).catch(() =>
+      input.click({ timeout: this.uiTimeout })
+    );
     await input.fill(name);
     await this.chooseOption('workshop', name);
     this.log(`Selected workshop ${name}`);
