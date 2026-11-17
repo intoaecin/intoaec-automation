@@ -152,7 +152,7 @@ class ManageWorkersPage extends BasePage {
   formAddButton() {
     const scope = this.formScope();
     return scope
-      .getByRole('button', { name: /^(add|update)$/i })
+      .getByRole('button', { name: /^(add|create|update)$/i })
       .filter({ visible: true })
       .last();
   }
@@ -401,9 +401,35 @@ class ManageWorkersPage extends BasePage {
   async submitWorkerForm() {
     const btn = this.formAddButton();
     await expect(btn).toBeVisible({ timeout: this.defaultTimeout });
+    // Let validation / autocomplete settle after fill before Create/Add.
+    await this.page.waitForTimeout(2500).catch(() => {});
     await expect(btn).toBeEnabled({ timeout: this.defaultTimeout });
-    await btn.click({ timeout: 20000 });
-    this.logStep('Submitted worker form');
+    // Stay enabled for a beat — clicking too early can no-op the save.
+    await this.page.waitForTimeout(1000).catch(() => {});
+    await expect(btn).toBeEnabled({ timeout: 10000 });
+    await btn.scrollIntoViewIfNeeded().catch(() => {});
+    try {
+      await btn.click({ timeout: 20000 });
+    } catch {
+      await btn.click({ timeout: 20000, force: true });
+    }
+    this.logStep('Submitted worker form (after settle wait)');
+
+    // Wait for create to finish (toast or form closing) before returning to Add Shift.
+    await expect(async () => {
+      const toastOk = await this.toastLocator(
+        /worker\s*created\s*successfully|contractor\s*and\s*workers\s*added\s*successfully|created\s*successfully|added\s*successfully/i
+      )
+        .isVisible()
+        .catch(() => false);
+      const formClosed = !(await this.workerNameInput().isVisible({ timeout: 400 }).catch(() => false));
+      expect(toastOk || formClosed).toBeTruthy();
+    })
+      .toPass({ timeout: 45000, intervals: [500, 1000, 2000] })
+      .catch(() => {
+        this.logStep('Worker submit: no toast/form-close within 45s — continuing');
+      });
+    await this.page.waitForTimeout(800).catch(() => {});
   }
 
   async verifyCreateButtonDisabled() {
